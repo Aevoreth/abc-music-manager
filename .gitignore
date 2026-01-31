@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.pkl
+*.log
+.venv/
+venv/
+.env
+
+# Build / packaging
+dist/
+build/
+*.egg-info/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# SQLite DBs (if you want to keep local-only)
+*.sqlite
+*.sqlite3
+
+# Flet (if it generates local artifacts)
+.flet/
