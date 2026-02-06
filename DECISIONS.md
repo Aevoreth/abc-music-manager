@@ -136,34 +136,68 @@
 - Decision: Default values for part assignments (in both setlist and regular song layouts) are **null** (player has no part). In song layout edit mode, a dropdown lists all available parts plus a “None” option to indicate that a player doesn’t have a part in that song (e.g. when the song has fewer parts than band members).
 - Decision: When SetlistItem.song_layout_id is NULL, a selection is required—the UI should indicate that the user must choose a song layout (no automatic default).
 
+## 015 — Set Playback client sync protocol
+
+- **Phase 1 (v1):** LAN-only. Leader runs a WebSocket server; clients connect directly to leader's IP:port (or discover via mDNS). Message format is transport-agnostic (e.g. JSON: set state, highlights) so the same protocol can be used over other transports later.
+- **Phase 2 (planned):** Internet-wide Set Playback via a relay. Leader and clients connect to a central relay; same message format. Auth and hosting TBD when Phase 2 is implemented. No relay code in v1.
+
+## 016 — Compatibility support matrix
+
+- Use a **tiered** matrix: **Supported** (tested, we fix bugs), **Best effort** (works in practice, not guaranteed), **Out of scope** (explicitly not supported).
+- **Supported:** LOTRO ABC workflow; Maestro-exported tags; Windows, macOS, Linux (current Flet/SQLite stack); local-first, no cloud required.
+- **Best effort:** Older or non-Maestro ABC; other games' paths; portable vs installer per platform.
+- **Out of scope:** Cloud hosting requirement; other games as primary target. Document tiers in README or a short Compatibility subsection in docs.
+
+## 017 — PlayerInstrument proficiency (per-instrument, binary)
+
+- **Decision:** Proficiency is **per-instrument** (per instrument class) and **binary**: the player either knows how to play that instrument class or they do not.
+- If a player has proficiency in an instrument class (e.g. fiddle), they can play **all variants** of that instrument (e.g. lonely mountain fiddle, bardic fiddle, basic fiddle). If they lack proficiency in that class, they cannot play it.
+- Stored as **has_proficiency** (BOOLEAN) on PlayerInstrument: true = knows how to play this instrument class (all variants); false = does not. No numeric scale.
+
+## 018 — Status.color
+
+- **Format:** Optional **hex** (e.g. #RRGGBB). Store as TEXT NULL; when NULL, **default to theme** (see 025; UI uses theme default for badges). Not required per status.
+- DATA_MODEL: color (TEXT NULL); NULL = default to theme; otherwise hex string.
+
+## 019 — SongFile change detection
+
+- **Decision:** Use **mtime** as the primary change signal. Compute and store **file_hash** (e.g. SHA-256 of content) when feasible; use hash to confirm change when mtime is ambiguous. Do not require hash—mtime-only is allowed; document that hash improves robustness.
+- SongFile.file_hash remains optional; scanner should populate it when practical.
+
+## 020 — Set/export folder indexing
+
+- When set/export folders are "included": **index** their files but **suppress** them from the main library view (do not show as duplicates in the library list). Optional setting (e.g. "Show set copies in library") can expose them. Behavior is configurable via FolderRule so per-folder inclusion/suppression is possible.
+- Primary library = normal indexing and display; set/export = indexed, suppressed from main view by default.
+
+## 021 — Export metadata to ABC comments
+
+- **Decision:** Deferred to **post–v1**. Not in scope for initial release. When implemented: opt-in only, clearly labeled, with preview and backup (per DECISIONS 006).
+
+## 022 — \*.abcp import/export spec
+
+- Compatibility target remains "ABC Player \*.abcp (Aifel/Elemond)". Spec details will be captured or referenced in docs (e.g. docs/FILE_FORMATS.md or docs/ABCP_SPEC.md) when import/export is implemented. No formal spec in repo until then; REQUIREMENTS/README keep "spec details captured separately" / "exact spec TBD" with a note that the format will be documented when implemented.
+
+## 023 — Setlist.band_layout_id NULL and FolderRule
+
+- **Setlist.band_layout_id NULL:** When NULL, treat the set as **draft**. UI must require the user to choose a band layout before starting Set Playback (or playing the set). No automatic default.
+- **FolderRule:** At least one library_root is required for a non-empty library; the app may run with zero roots (empty library—show empty state). FolderRule is recommended for normal use.
+
+## 024 — License and Maestro tag exact patterns
+
+- **License:** Left as **TBD**; to be chosen by the project owner. README continues to list "License: TBD" until a license is selected.
+- **Maestro tag exact patterns:** Tags are `%%tag-name` (two percent signs, tag name with hyphen, optional space, then value). Tag names are **case-sensitive** (e.g. %%song-title). Leading/trailing whitespace on the value is trimmed. Exact patterns are specified in docs/FILE_FORMATS.md.
+
+## 025 — Theme definition
+
+- **Theme** is the application’s default visual style: a **dark color scheme** inspired by *The Lord of the Rings* / *Lord of the Rings Online* interfaces.
+- Used when Status.color (or other UI elements) is NULL: the UI falls back to theme defaults (e.g. badge colors, backgrounds, text). Implementation defines the exact palette; the overall look should evoke LOTR/LOTRO-style dark UI.
+- This project is not affiliated with or endorsed by the owners of those properties; “inspired by” is a visual reference only.
+
 ---
 
-## Open decisions
-- Client sync protocol for Set Playback mode (connection model: LAN only? localhost? websockets? built-in Flet multi-user?)
-- Formal compatibility support matrix (platforms, file format variants, optional game-specific paths)
+## Resolved open decisions
+Previously open items have been resolved in ADRs 015–025 above. The only remaining TBD is **License** (024), to be chosen by the project owner.
 
 ---
 
-## Decisions that need to be made
 
-The following are not yet decided; they affect implementation, schema, or product scope.
-
-1. **PlayerInstrument.proficiency** — DATA_MODEL marks this as “scale/enum TBD”. Decide the scale (e.g. 1–5, or labels like beginner / intermediate / advanced) and whether it is optional.
-
-2. **Status.color** — Documented as “implementation-defined” UI token. Decide format (e.g. hex codes, named theme tokens) and whether it is required per status.
-
-3. **SongFile change detection** — `file_hash` is “optional but recommended”. Decide: require content hash for robust change detection, or allow mtime-only and document limitations.
-
-4. **Set/export folder indexing** — When set/export folders are “included”, decide: index files but suppress from main library view only, or index and show as duplicates, or make behavior configurable per folder.
-
-5. **Export metadata to ABC comments** — DECISIONS 006 says the app “may support” an explicit write-back. Decide: in scope for v1 or deferred.
-
-6. **\*.abcp import/export spec** — REQUIREMENTS and README reference ABC Player \*.abcp compatibility with “spec details captured separately” / “exact spec TBD”. Capture or reference the spec so import/export can be implemented.
-
-7. **Setlist.band_layout_id NULL** — Setlist allows band_layout_id NULL. Decide behavior when NULL (e.g. UI must require selection before play, or set is “draft” until layout chosen).
-
-8. **FolderRule** — DATA_MODEL labels FolderRule as “(recommended)”. Decide: is at least one library root required for scanning, or can the app run with no roots (empty library)?
-
-9. **License** — README lists “License: TBD”. Choose license for the project.
-
-10. **Maestro tag exact patterns** — DECISIONS 005 references “exact tag patterns to be specified in docs/FILE_FORMATS.md”. FILE_FORMATS lists tag names; decide whether to specify whitespace/case rules for parsing (e.g. `%%song-title` vs `%% song-title`).

@@ -64,7 +64,7 @@ Fields:
 - song_id (INTEGER FK → Song.id, NULL) — NULL until matched/created
 - file_path (TEXT UNIQUE)
 - file_mtime (INTEGER or DATETIME)
-- file_hash (TEXT NULL) — optional but recommended for robust change detection
+- file_hash (TEXT NULL) — optional; mtime is primary change signal; hash (e.g. SHA-256) improves robustness when populated by scanner (DECISIONS 019)
 - export_timestamp (TEXT NULL) — parsed from `%%export-timestamp` when present
 - is_primary_library (BOOLEAN NOT NULL DEFAULT 1)
 - is_set_copy (BOOLEAN NOT NULL DEFAULT 0)
@@ -73,7 +73,7 @@ Fields:
 - updated_at (DATETIME)
 
 Notes:
-- "Primary library" vs "set copy" is determined by folder rules in Settings.
+- "Primary library" vs "set copy" is determined by folder rules in Settings. When set/export folders are included, files are indexed but suppressed from the main library view by default (DECISIONS 020).
 - Multiple SongFile rows can link to the same Song.
 
 ---
@@ -84,7 +84,7 @@ Configurable song status labels.
 Fields:
 - id (INTEGER PK)
 - name (TEXT UNIQUE) — e.g. New, Testing, Ready
-- color (TEXT NULL) — UI badge color token (implementation-defined)
+- color (TEXT NULL) — optional hex (e.g. #RRGGBB); NULL = default to theme (dark LOTR/LOTRO-inspired scheme — DECISIONS 018, 025)
 - is_active (BOOLEAN NOT NULL DEFAULT 1)
 - sort_order (INTEGER NULL)
 - created_at (DATETIME)
@@ -154,7 +154,7 @@ A setlist is played using a **single band layout** for the entire set. Song layo
 Fields:
 - id (INTEGER PK)
 - name (TEXT)
-- band_layout_id (INTEGER FK → BandLayout.id, NULL) — band layout used for the entire set; song layouts in the set are based on this
+- band_layout_id (INTEGER FK → BandLayout.id, NULL) — band layout for the entire set; when NULL, set is draft—UI requires selection before play (DECISIONS 023)
 - locked (BOOLEAN NOT NULL DEFAULT 0)
 - default_change_duration_seconds (INTEGER NULL)
 - export_naming_rules (TEXT NULL) — JSON/text blob
@@ -199,20 +199,20 @@ Fields:
 ---
 
 ### PlayerInstrument
-Links a player to an instrument (from the Instrument catalog) and optional proficiency/notes.
+Links a player to an instrument (instrument class) from the Instrument catalog. Proficiency is per-instrument and binary: the player either knows how to play that instrument class or they do not (DECISIONS 017).
 
 Fields:
 - id (INTEGER PK)
 - player_id (INTEGER FK → Player.id)
 - instrument_id (INTEGER FK → Instrument.id)
 - has_instrument (BOOLEAN NOT NULL DEFAULT 1)
-- proficiency (INTEGER NULL) — scale/enum TBD
+- has_proficiency (BOOLEAN NOT NULL DEFAULT 0) — true = player knows how to play this instrument class (all variants, e.g. all fiddles); false = cannot play it
 - notes (TEXT NULL)
 - created_at (DATETIME)
 - updated_at (DATETIME)
 
 Notes:
-- Uses instrument_id (FK to Instrument). Instrument names and alternative names live in the Instrument table.
+- Uses instrument_id (FK to Instrument). If has_proficiency is true, the player can play all variants of that instrument (e.g. fiddle → lonely mountain fiddle, bardic fiddle, basic fiddle). Instrument names and alternative names live in the Instrument table.
 
 ---
 
@@ -284,8 +284,8 @@ Fields:
 
 ---
 
-### FolderRule (recommended)
-Defines library roots, set/export folders, and exclusions.
+### FolderRule
+Defines library roots, set/export folders, and exclusions. At least one library_root is needed for a non-empty library; app may run with zero roots (empty state) (DECISIONS 023).
 
 Fields:
 - id (INTEGER PK)

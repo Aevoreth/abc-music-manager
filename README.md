@@ -3,16 +3,17 @@
 ABC Music Manager is a local-first desktop application designed specifically for player musicians in *The Lord of the Rings Online* who manage and perform ABC music libraries. It helps you organize a large ABC library, build and run event setlists, model band layouts, preview multi-part playback, and generate `SongbookData.plugindata` for selected accounts.
 
 > **Status:** Early design / in active development  
-> **License:** TBD
+> **License:** TBD (to be chosen by project owner — DECISIONS 024)
 > **Disclaimer:** Not affiliated with or endorsed by the creators/publishers of *The Lord of the Rings Online*.
 
 ---
 
 ## What it does
 
-### Compatibility
-- **Supported:** *The Lord of the Rings Online* ABC player music workflow
-- **Not supported:** Other games / general ABC ecosystems (out of scope)
+### Compatibility (DECISIONS 016)
+- **Supported:** LOTRO ABC workflow; Maestro-exported tags; Windows, macOS, Linux; local-first, no cloud required.
+- **Best effort:** Older or non-Maestro ABC; other games' paths; portable vs installer per platform.
+- **Out of scope:** Cloud hosting requirement; other games as primary target.
 
 ### Library Management
 - Indexes ABC files from user-selected folders
@@ -30,7 +31,7 @@ ABC Music Manager is a local-first desktop application designed specifically for
 - Mute/solo one or more parts during playback
 
 ### Band Management
-- Band roster with player instrument capabilities (possession + proficiency)
+- Band roster with player instrument capabilities (possession + per-instrument proficiency: can play instrument class and all variants, e.g. all fiddles, or cannot)
 - Drag/drop band layout editor on a snapped grid
 - Player cards are **7 grid units wide × 5 grid units tall**
 - Band layouts can be reused across songs and setlists; songs can have multiple song layouts (band layout + player→part mapping). A set uses one band layout for the entire set; default part assignments are null (dropdown includes “None”).
@@ -44,11 +45,12 @@ ABC Music Manager is a local-first desktop application designed specifically for
   - Default per set
   - Per-song overrides
 - Import/export:
-  - Open/save `*.abcp` (compatibility target; exact spec TBD)
+  - Open/save `*.abcp` (ABC Player compatibility; spec to be documented when import/export is implemented — DECISIONS 022)
   - Export to folder or zip with configurable naming rules
 
-### Set Playback Mode (Live)
-- “Band leader” runs the show; clients can connect to view live set status
+### Set Playback Mode (Live) (DECISIONS 015)
+- **v1:** LAN-only; leader runs WebSocket server; clients connect to leader. **Planned:** internet-wide via relay (same message format).
+- Band leader runs the show; clients can connect to view live set status
 - Highlights:
   - Last played song (green)
   - Next selected song (blue)
@@ -63,18 +65,34 @@ ABC Music Manager is a local-first desktop application designed specifically for
 
 ---
 
+## Running the app
+
+1. **Create a virtual environment** (recommended):
+   ```bash
+   python -m venv .venv
+   .venv\Scripts\activate   # Windows
+   # source .venv/bin/activate  # macOS/Linux
+   ```
+2. **Install dependencies:** `pip install -r requirements.txt`
+3. **Run:** `python main.py`
+
+The database is created automatically on first run at `~/.abc_music_manager/abc_music_manager.sqlite` (or `%ABC_MUSIC_MANAGER_DATA%\abc_music_manager.sqlite` if set). To initialize or reset the DB without starting the UI: `python -m src.abc_music_manager.cli_init_db`.
+
+---
+
 ## Design Docs (Source of Truth)
 
 - `PROJECT_BRIEF.md` — product goals, scope, modules
 - `REQUIREMENTS.md` — user stories + acceptance criteria
 - `DATA_MODEL.md` — draft entities/relationships
-- `DECISIONS.md` — major architectural decisions and open questions
+- `DECISIONS.md` — major architectural decisions (ADRs 001–025; previously open items resolved)
 
 ---
 
 ## Tech Stack (Planned)
 - Python + Flet (UI)
 - SQLite (database)
+- **Theme:** Dark color scheme inspired by *The Lord of the Rings* / *Lord of the Rings Online* interfaces (DECISIONS 025)
 - Cross-platform: Windows / macOS / Linux
 - Portable or installable distribution
 

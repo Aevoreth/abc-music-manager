@@ -115,8 +115,7 @@ As a local-first user, I want the app to scan my ABC library folders and keep th
 - `%%export-timestamp` is stored to help differentiate variants of the same logical identity.
 
 ### Default behavior
-- Files inside user-configured set/export folders are excluded from the main library by default.
-- These files may still be indexed as file-copies for export/import workflows if desired.
+- Files inside user-configured set/export folders are excluded from the main library view by default. When "included," they are indexed but suppressed from the main library list; optional setting can expose them (DECISIONS 020).
 
 ### When duplicates occur in primary library roots
 If two primary-library files collide on logical identity:
@@ -136,7 +135,7 @@ As a band leader, I want to model my band roster and layout so I can assign part
 - Band Management supports:
   - Creating a band
   - Adding players
-  - Recording each player’s instruments (possession and proficiency)
+  - Recording each player’s instruments (possession and per-instrument proficiency: can play instrument class and all variants, e.g. all fiddles, or cannot)
 - Band Layout Editor:
   - Drag/drop player cards onto a snapped grid
   - Player card size: 7 grid units wide × 5 grid units tall
@@ -163,10 +162,10 @@ As a band leader, I want to build and edit setlists so I can run live events smo
   - Configurable song-change duration for the set
   - Per-song overrides
 - Import/export:
-  - Open and save `*.abcp` files compatible with ABC Player by Aifel and Elemond (spec details captured separately)
+  - Open and save `*.abcp` files compatible with ABC Player by Aifel and Elemond (spec to be documented in docs when import/export is implemented — DECISIONS 022)
   - Export to folder or zip with configurable naming rules
 - Per-set configuration:
-  - A set uses a single band layout for the entire set. Song layouts in the set are based on that band layout.
+  - A set uses a single band layout for the entire set. When a set has no band layout selected (draft), the UI requires selection before play (DECISIONS 023). Song layouts in the set are based on that band layout.
   - Each song can have zero or more song layouts (band layout + mapping of player→part). Setlist items must have a song layout selected; when none is selected, the UI indicates that a selection is required.
   - Default part assignments are null (player has no part). In song layout edit mode, a dropdown lists all available parts plus a “None” option for players who don’t have a part in that song (e.g. fewer parts than band members).
 

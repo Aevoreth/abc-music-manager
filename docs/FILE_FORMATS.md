@@ -1,7 +1,8 @@
 # File Formats — ABC Music Manager
 
 ## Maestro Song Tags (Authoritative)
-Parsed from the top-level of the ABC file:
+
+Parsed from the top-level of the ABC file. **Exact pattern:** `%%tag-name` (two percent signs, tag name with hyphen, optional space after tag name, then value). Tag names are **case-sensitive** (e.g. `%%song-title`). Leading/trailing whitespace on the value is trimmed (DECISIONS 024).
 
 - `%%song-title       <title>`
 - `%%song-composer    <composer1>, <composer2>, ...`
