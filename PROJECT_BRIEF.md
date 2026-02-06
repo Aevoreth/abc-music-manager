@@ -38,7 +38,7 @@ The app is local-first, indexes ABC files from user-selected folders, and provid
 - Filesystem Watcher (quiet background rescan)
 
 ## Tech Stack (proposed)
-- Python + Flet UI
+- **Python + PySide6 (Qt for Python)** — desktop UI with native theming and styling
 - SQLite database
 - Cross-platform (Windows/Mac/Linux)
 - Portable or installable distribution

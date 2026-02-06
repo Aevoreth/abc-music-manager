@@ -206,6 +206,7 @@ As a LOTRO player, I want the app to generate `SongbookData.plugindata` so I can
 ---
 
 ## 9. Non-Functional Requirements
+- **UI stack:** Desktop UI is built with **PySide6** (Qt for Python) for native theming, styling control, and cross-platform behavior.
 - Performance: library filtering/search should feel instant for large libraries.
 - Stability: avoid silent overwrites on file changes.
 - Safety: raw ABC editing should be guarded (backup/confirmations recommended).

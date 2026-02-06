@@ -2,7 +2,7 @@
 
 ABC Music Manager is a local-first desktop application designed specifically for player musicians in *The Lord of the Rings Online* who manage and perform ABC music libraries. It helps you organize a large ABC library, build and run event setlists, model band layouts, preview multi-part playback, and generate `SongbookData.plugindata` for selected accounts.
 
-> **Status:** Early design / in active development  
+> **Status:** Early design / in active development. The UI is being rebuilt with **PySide6 (Qt)**; previous Flet code is in `/old/` (see DECISIONS 026).  
 > **License:** TBD (to be chosen by project owner — DECISIONS 024)
 > **Disclaimer:** Not affiliated with or endorsed by the creators/publishers of *The Lord of the Rings Online*.
 
@@ -73,10 +73,10 @@ ABC Music Manager is a local-first desktop application designed specifically for
    .venv\Scripts\activate   # Windows
    # source .venv/bin/activate  # macOS/Linux
    ```
-2. **Install dependencies:** `pip install -r requirements.txt`
-3. **Run:** `python main.py`
+2. **Install dependencies:** `pip install -r requirements.txt` (PySide6 and other deps)
+3. **Run:** `python main.py` (entry point to be added with Qt UI)
 
-The database is created automatically on first run at `~/.abc_music_manager/abc_music_manager.sqlite` (or `%ABC_MUSIC_MANAGER_DATA%\abc_music_manager.sqlite` if set). To initialize or reset the DB without starting the UI: `python -m src.abc_music_manager.cli_init_db`.
+The database will be created automatically on first run (path TBD with Qt app). The previous Flet app’s CLI init lived at `python -m src.abc_music_manager.cli_init_db` (see `/old/`).
 
 ---
 
@@ -90,7 +90,7 @@ The database is created automatically on first run at `~/.abc_music_manager/abc_
 ---
 
 ## Tech Stack (Planned)
-- Python + Flet (UI)
+- **Python + PySide6 (Qt for Python)** — desktop UI with full theming and native look-and-feel
 - SQLite (database)
 - **Theme:** Dark color scheme inspired by *The Lord of the Rings* / *Lord of the Rings Online* interfaces (DECISIONS 025)
 - Cross-platform: Windows / macOS / Linux

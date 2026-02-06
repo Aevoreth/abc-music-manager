@@ -4,9 +4,9 @@
 - Decision: The app runs locally as a desktop application.
 - Rationale: Users manage local ABC files and typically need low-latency access without a server requirement.
 
-## 002 — Tech stack: Python + Flet + SQLite
-- Decision: Use Python with Flet for UI and SQLite for storage.
-- Rationale: Cross-platform, fast iteration, and straightforward distribution.
+## 002 — Tech stack: Python + PySide6 (Qt) + SQLite
+- Decision: Use Python with **PySide6 (Qt for Python)** for the desktop UI and SQLite for storage.
+- Rationale: Cross-platform, native theming and styling control, mature Qt ecosystem, and straightforward distribution. PySide6 was chosen over Flet to better support the desired dark LOTR/LOTRO-inspired theme and UI customization.
 
 ## 003 — Compatibility-first naming
 - Decision: Use a product name that does not include specific game branding.
@@ -144,7 +144,7 @@
 ## 016 — Compatibility support matrix
 
 - Use a **tiered** matrix: **Supported** (tested, we fix bugs), **Best effort** (works in practice, not guaranteed), **Out of scope** (explicitly not supported).
-- **Supported:** LOTRO ABC workflow; Maestro-exported tags; Windows, macOS, Linux (current Flet/SQLite stack); local-first, no cloud required.
+- **Supported:** LOTRO ABC workflow; Maestro-exported tags; Windows, macOS, Linux (PySide6/Qt + SQLite stack); local-first, no cloud required.
 - **Best effort:** Older or non-Maestro ABC; other games' paths; portable vs installer per platform.
 - **Out of scope:** Cloud hosting requirement; other games as primary target. Document tiers in README or a short Compatibility subsection in docs.
 
@@ -193,10 +193,14 @@
 - Used when Status.color (or other UI elements) is NULL: the UI falls back to theme defaults (e.g. badge colors, backgrounds, text). Implementation defines the exact palette; the overall look should evoke LOTR/LOTRO-style dark UI.
 - This project is not affiliated with or endorsed by the owners of those properties; “inspired by” is a visual reference only.
 
+## 026 — UI framework: PySide6 (Qt) instead of Flet
+- **Decision:** Use **PySide6 (Qt for Python)** for the desktop UI instead of Flet.
+- **Rationale:** Flet did not provide the level of theming and visual customization desired (e.g. dark LOTR/LOTRO-inspired scheme). PySide6 offers full Qt theming (QSS, style sheets, palette), native look-and-feel, and broad platform support. The app will be redesigned and rebuilt with Qt; previous Flet-based code is preserved under `/old/` for reference.
+
 ---
 
 ## Resolved open decisions
-Previously open items have been resolved in ADRs 015–025 above. The only remaining TBD is **License** (024), to be chosen by the project owner.
+Previously open items have been resolved in ADRs 015–026 above. The only remaining TBD is **License** (024), to be chosen by the project owner.
 
 ---
 
