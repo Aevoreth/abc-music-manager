@@ -28,8 +28,8 @@
   - Rating (0–5)
   - Status label (New/Testing/Ready, etc.)
   - Notes and lyrics (unless explicitly embedded into the ABC by user action)
-  - Play history (last played, total plays, play log)
-  - Per-song band layout assignments and per-set overrides
+  - Playback log (PlayLog); last_played_at and total_plays on Song are derived from PlayLog. Play history for a song is derived by table lookup.
+  - Song layouts (band layout + player→part mapping) and per-set overrides
 - File tracking fields used to detect changes:
   - file_path (unique)
   - mtime and/or content hash
@@ -90,20 +90,17 @@
   2) first `Z:` (fallback)
   3) Unknown
 
-## 008 — Composer normalization and many-to-many relationship
-- Decision: Composers are normalized into a `Composer` table. Songs reference composers via a join table (many-to-many).
-- Parsing: `%%song-composer` may contain multiple composers separated by commas.
-  - Split on commas only (do not split on the word "and").
-  - Trim whitespace around each name.
-  - De-duplicate composer entries by normalized name.
+## 008 — Composers stored as single text string on Song
+- Decision: Composers are stored as a single text field on the Song table (`composers`), not in a normalized Composer table. No comma split between multiple composers—store the value as a single string as parsed from `%%song-composer` / `C:`.
+- This is adequate for duplicate detection (normalized title + composers string + part count).
 
-## 009 — Part parsing is block-based and derived from X-sections
-- Decision: A “part” is defined by each occurrence of `X:` in the file.
-- Part count = total number of `X:` fields in the file.
+## 009 — Part parsing is block-based; parts stored as JSON on Song
+- Decision: A part is defined by each occurrence of `X:` in the file. Part count = total number of `X:` fields.
 - For each part block:
   - `X:` value is the **part number**
-  - `%%part-name` is the **part name**
-  - `%%made-for` is the **intended instrument**
+  - `%%part-name` is the **part name** (as written in ABC)
+  - `%%made-for` is matched to an **Instrument** in the instruments table; the part stores **instrument_id** (FK to Instrument.id).
+- Storage: Parts are stored in `Song.parts` as a JSON text field: array of `{ part_number, part_name, instrument_id }`. No separate SongPart table.
 
 ## 010 — ABC note data is never stored in the database
 - Decision: The application does not store musical note bodies from ABC in the DB.
@@ -120,11 +117,53 @@
 
 ### Duplicate resolution
 - A song’s *logical identity* is defined primarily by:
-  - normalized title + normalized composer set + part count
+  - normalized title + composers string (single text; no comma split) + part count
 - `%%export-timestamp` is stored as an additional identifier and can help differentiate variants.
 - If two primary-library files collide on logical identity:
   - Flag for user resolution: (a) treat as same song variant, (b) keep both as separate songs, (c) ignore one.
 
+## 012 — Playback log; history by table lookup
+- Decision: Playback is recorded in a **PlayLog** table (one row per play). There is no play-history JSON on Song.
+- Song.last_played_at and Song.total_plays are derived from PlayLog (MAX(played_at) and COUNT respectively). Play history for a song is derived by table lookup (query PlayLog for that song_id, optionally filtered by date range).
+
+## 013 — Song layouts and Instrument catalog
+- Decision: A song may have **more than one song layout**. Each song layout references a band layout and contains the part assignments for each player. A song can be used with multiple band configurations via multiple unique song layout entries. No uniqueness constraint on (song_id, band_layout_id).
+- Decision: Use **instrument IDs** everywhere. The **Instrument** table contains instrument_id, instrument name, and **alternative instrument names** in a comma-separated list. Song parts reference instrument_id; `%%made-for` in ABC is matched against name or alternative names (or create new instrument). No raw instrument text storage.
+- PlayerInstrument links players to instruments (instrument_id) for capability tracking.
+
+## 014 — Set uses single band layout; default part assignments null
+- Decision: A setlist is played using a **single band layout** for the entire set. The set has one band_layout_id; song layouts used in the set are based on that band layout. SetlistItem does not have its own band_layout_id.
+- Decision: Default values for part assignments (in both setlist and regular song layouts) are **null** (player has no part). In song layout edit mode, a dropdown lists all available parts plus a “None” option to indicate that a player doesn’t have a part in that song (e.g. when the song has fewer parts than band members).
+- Decision: When SetlistItem.song_layout_id is NULL, a selection is required—the UI should indicate that the user must choose a song layout (no automatic default).
+
+---
+
 ## Open decisions
-- Client sync protocol for Set Playback mode
+- Client sync protocol for Set Playback mode (connection model: LAN only? localhost? websockets? built-in Flet multi-user?)
 - Formal compatibility support matrix (platforms, file format variants, optional game-specific paths)
+
+---
+
+## Decisions that need to be made
+
+The following are not yet decided; they affect implementation, schema, or product scope.
+
+1. **PlayerInstrument.proficiency** — DATA_MODEL marks this as “scale/enum TBD”. Decide the scale (e.g. 1–5, or labels like beginner / intermediate / advanced) and whether it is optional.
+
+2. **Status.color** — Documented as “implementation-defined” UI token. Decide format (e.g. hex codes, named theme tokens) and whether it is required per status.
+
+3. **SongFile change detection** — `file_hash` is “optional but recommended”. Decide: require content hash for robust change detection, or allow mtime-only and document limitations.
+
+4. **Set/export folder indexing** — When set/export folders are “included”, decide: index files but suppress from main library view only, or index and show as duplicates, or make behavior configurable per folder.
+
+5. **Export metadata to ABC comments** — DECISIONS 006 says the app “may support” an explicit write-back. Decide: in scope for v1 or deferred.
+
+6. **\*.abcp import/export spec** — REQUIREMENTS and README reference ABC Player \*.abcp compatibility with “spec details captured separately” / “exact spec TBD”. Capture or reference the spec so import/export can be implemented.
+
+7. **Setlist.band_layout_id NULL** — Setlist allows band_layout_id NULL. Decide behavior when NULL (e.g. UI must require selection before play, or set is “draft” until layout chosen).
+
+8. **FolderRule** — DATA_MODEL labels FolderRule as “(recommended)”. Decide: is at least one library root required for scanning, or can the app run with no roots (empty library)?
+
+9. **License** — README lists “License: TBD”. Choose license for the project.
+
+10. **Maestro tag exact patterns** — DECISIONS 005 references “exact tag patterns to be specified in docs/FILE_FORMATS.md”. FILE_FORMATS lists tag names; decide whether to specify whitespace/case rules for parsing (e.g. `%%song-title` vs `%% song-title`).

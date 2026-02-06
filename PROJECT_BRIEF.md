@@ -44,6 +44,7 @@ The app is local-first, indexes ABC files from user-selected folders, and provid
 - Portable or installable distribution
 
 ## Open Questions / Decisions Needed
+See DECISIONS.md for "Open decisions" and "Decisions that need to be made". Key open items include (many design choices are already in DECISIONS.md):
 - Client connection model for Set Playback mode (LAN only? localhost? websockets? built-in Flet multi-user?)
 - ABC parsing expectations (what metadata is read from files vs. derived vs. user-entered)
 - Source of truth rules when ABC file changes on disk (merge strategy vs. overwrite)

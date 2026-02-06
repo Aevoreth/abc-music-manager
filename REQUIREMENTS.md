@@ -12,12 +12,13 @@ As a LOTRO player musician, I want a fast, filterable table of my ABC songs so I
 ### Acceptance Criteria
 - The main Library View displays a table of songs with (at minimum) these fields:
   - Title
-  - Composer(s) (comma-separated display, normalized internally)
+  - Composer(s) (stored as single text string on song; display as stored)
   - Transcriber
   - Duration (mm:ss)
   - Part Count
   - Last Played (relative time, e.g., "3 days ago")
   - Total Plays
+  - Play history (derived from playback log; available on song detail via table lookup)
   - Rating (0–5 stars)
   - Status (configurable label with a color-coded badge, e.g., New/Testing/Ready)
   - In Upcoming Set (indicator)
@@ -40,10 +41,10 @@ As a LOTRO player musician, I want a fast, filterable table of my ABC songs so I
 ### Song Detail/Edit Acceptance Criteria
 - Shows parsed and stored metadata:
   - Title, composers, transcriber, duration, export timestamp (if available), part count
-- Shows part list (one row per part) with:
+- Shows part list (from song’s stored parts: one row per part) with:
   - Part number
-  - Part name
-  - Made-for instrument
+  - Part name (as in ABC)
+  - Made-for instrument (resolved from instrument_id; instruments catalog has name and alternative names for matching)
 - Allows editing of:
   - App-only fields: rating, status, notes, lyrics
 - Provides an advanced mode to edit raw ABC text (in-file editing):
@@ -57,7 +58,7 @@ As a LOTRO player musician, I want a fast, filterable table of my ABC songs so I
 ### Authoritative Song Tags (Maestro comment metadata)
 The app parses these song-level fields from Maestro comment tags:
 - `%%song-title`
-- `%%song-composer` (may contain multiple comma-separated composers)
+- `%%song-composer` (stored as single text string on song; no comma split)
 - `%%song-duration` (mm:ss)
 - `%%song-transcriber`
 - `%%export-timestamp`
@@ -68,18 +69,16 @@ The app parses these song-level fields from Maestro comment tags:
 - Transcriber fallback: first `Z:` field, otherwise blank/unknown
 - Duration: if missing or unparseable, store as unknown (do not infer from note bodies in v1)
 
-### Composer normalization
-- `%%song-composer` can contain multiple composers separated by commas.
-- A composer name is normalized by trimming whitespace and collapsing repeated spaces.
-- Each distinct composer is stored once in the `Composer` table.
-- A song references composers via a join table (many-to-many).
+### Composer storage
+- Composers are stored as a single text string on the song. No comma split between multiple composers—store the value as a single string. This is adequate for duplicate detection.
 
 ### Part parsing
 - Part count is the total number of `X:` fields in the file.
 - The number after `X:` is the part number.
 - Each part block also includes:
   - `%%part-name` (part name)
-  - `%%made-for` (intended instrument)
+  - `%%made-for` (intended instrument; matched to instruments catalog by name or alternative names, stored as instrument_id)
+- Parts are stored on the song as a JSON list (part number, part name, instrument_id). Instruments table has instrument_id, name, and alternative names (comma-separated).
 
 ### Storage rule
 - Musical note content is never stored in the DB.
@@ -111,7 +110,7 @@ As a local-first user, I want the app to scan my ABC library folders and keep th
 
 ### Definitions
 - A song’s *logical identity* is primarily:
-  - normalized title + normalized composer set + part count
+  - normalized title + song’s composers (single text string; no comma split) + part count
 
 - `%%export-timestamp` is stored to help differentiate variants of the same logical identity.
 
@@ -167,8 +166,9 @@ As a band leader, I want to build and edit setlists so I can run live events smo
   - Open and save `*.abcp` files compatible with ABC Player by Aifel and Elemond (spec details captured separately)
   - Export to folder or zip with configurable naming rules
 - Per-set configuration:
-  - Set selects a band layout default
-  - Each song in the set can override part/instrument assignments independent of the library defaults
+  - A set uses a single band layout for the entire set. Song layouts in the set are based on that band layout.
+  - Each song can have zero or more song layouts (band layout + mapping of player→part). Setlist items must have a song layout selected; when none is selected, the UI indicates that a selection is required.
+  - Default part assignments are null (player has no part). In song layout edit mode, a dropdown lists all available parts plus a “None” option for players who don’t have a part in that song (e.g. fewer parts than band members).
 
 ---
 
@@ -187,7 +187,7 @@ As a band leader, I want a live playback coordination screen so I can manage the
   - Each connected client can highlight one or more players in the layout view
 - Band layout view for the next song shows, per player card:
   - Player name (top)
-  - Part number (large, bold, centered)
+  - Part number (large, bold, centered), or “None” when the player has no part assignment for that song
   - Instrument name (bottom)
 - Instrument change indicator:
   - Part number and instrument name are gold if the instrument differs from the previous song for that player

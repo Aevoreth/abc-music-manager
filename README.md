@@ -18,7 +18,7 @@ ABC Music Manager is a local-first desktop application designed specifically for
 - Indexes ABC files from user-selected folders
 - Fast, filterable library view with columns like:
   - Title, composer(s), duration, part count
-  - Last played, play count, rating, status badges
+  - Last played, play count, play history (from playback log), rating, status badges
   - Notes and lyrics
 - Song detail/edit screen:
   - Edit metadata
@@ -33,7 +33,7 @@ ABC Music Manager is a local-first desktop application designed specifically for
 - Band roster with player instrument capabilities (possession + proficiency)
 - Drag/drop band layout editor on a snapped grid
 - Player cards are **7 grid units wide × 5 grid units tall**
-- Band layouts can be reused across songs and setlists
+- Band layouts can be reused across songs and setlists; songs can have multiple song layouts (band layout + player→part mapping). A set uses one band layout for the entire set; default part assignments are null (dropdown includes “None”).
 
 ### Setlist / Playlist Manager
 - Build and edit setlists for events
