@@ -103,6 +103,15 @@ class SetlistsView(QWidget):
         layout.addWidget(self.detail_group)
         self.detail_group.setEnabled(False)
 
+    def select_setlist_by_id(self, setlist_id: int) -> None:
+        """Switch to this view and select the setlist by id (e.g. from Library 'Go to setlist')."""
+        self._refresh_setlists()
+        rows = list_setlists(self.app_state.conn)
+        for i, s in enumerate(rows):
+            if s.id == setlist_id:
+                self.setlist_table.setCurrentCell(i, 0)
+                return
+
     def _refresh_setlists(self) -> None:
         rows = list_setlists(self.app_state.conn)
         self.setlist_table.setRowCount(len(rows))

@@ -3,8 +3,14 @@ Dark theme (DECISIONS 025). In-code palette and QSS for PySide6.
 Used when Status.color or other UI elements are NULL (DECISIONS 018).
 """
 
-from PySide6.QtGui import QPalette, QColor
+from pathlib import Path
+
+from PySide6.QtGui import QPalette, QColor, QFont
 from PySide6.QtWidgets import QApplication
+
+_theme_dir = Path(__file__).resolve().parent
+# Plain absolute path for QSS url() — file:// causes Qt to concatenate with cwd
+_checkmark_url = str((_theme_dir / "checkmark.svg").resolve()).replace("\\", "/")
 
 
 # --- Dark palette ---
@@ -81,11 +87,62 @@ def dark_stylesheet() -> str:
         QPushButton:pressed {{
             background-color: {COLOR_OUTLINE_VARIANT};
         }}
-        QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QComboBox {{
+        QLineEdit, QPlainTextEdit, QTextEdit {{
             background-color: {COLOR_SURFACE};
             color: {COLOR_ON_SURFACE};
             border: 1px solid {COLOR_OUTLINE};
             border-radius: 4px;
+        }}
+        QSpinBox, QComboBox {{
+            background-color: {COLOR_SURFACE};
+            color: {COLOR_ON_SURFACE};
+            border: 1px solid {COLOR_OUTLINE};
+            border-radius: 4px;
+            padding: 2px;
+            min-height: 1.2em;
+        }}
+        QSpinBox::up-button, QSpinBox::down-button {{
+            subcontrol-origin: border;
+            background-color: {COLOR_OUTLINE_VARIANT};
+            border: none;
+            width: 18px;
+        }}
+        QSpinBox::up-button {{
+            subcontrol-position: top right;
+            border-top-right-radius: 3px;
+        }}
+        QSpinBox::down-button {{
+            subcontrol-position: bottom right;
+            border-bottom-right-radius: 3px;
+        }}
+        QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+            background-color: {COLOR_OUTLINE};
+        }}
+        QSpinBox:disabled {{
+            background-color: {COLOR_SURFACE_VARIANT};
+            color: {COLOR_TEXT_DISABLED};
+            border-color: {COLOR_OUTLINE};
+        }}
+        QSpinBox:disabled::up-button, QSpinBox:disabled::down-button {{
+            background-color: {COLOR_OUTLINE};
+            color: {COLOR_TEXT_DISABLED};
+        }}
+        QComboBox::drop-down {{
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 20px;
+            border-left: 1px solid {COLOR_OUTLINE};
+            border-top-right-radius: 3px;
+            border-bottom-right-radius: 3px;
+            background-color: {COLOR_OUTLINE_VARIANT};
+        }}
+        QComboBox::drop-down:hover {{
+            background-color: {COLOR_OUTLINE};
+        }}
+        QComboBox QAbstractItemView {{
+            background-color: {COLOR_SURFACE};
+            color: {COLOR_ON_SURFACE};
+            selection-background-color: {COLOR_OUTLINE_VARIANT};
         }}
         QTableView {{
             background-color: {COLOR_SURFACE};
@@ -137,6 +194,24 @@ def dark_stylesheet() -> str:
         QLabel {{
             color: {COLOR_ON_SURFACE};
         }}
+        QCheckBox {{
+            color: {COLOR_ON_SURFACE};
+        }}
+        QCheckBox::indicator {{
+            width: 16px;
+            height: 16px;
+            border: 2px solid {COLOR_OUTLINE};
+            background-color: {COLOR_SURFACE};
+            border-radius: 3px;
+        }}
+        QCheckBox::indicator:checked {{
+            background-color: {COLOR_SURFACE};
+            border: 2px solid {COLOR_PRIMARY};
+            image: url("{_checkmark_url}");
+        }}
+        QCheckBox::indicator:hover {{
+            border-color: {COLOR_PRIMARY};
+        }}
         QListWidget {{
             background-color: {COLOR_SURFACE};
             color: {COLOR_ON_SURFACE};
@@ -160,6 +235,15 @@ def dark_stylesheet() -> str:
 
 
 def apply_theme(app: QApplication) -> None:
-    """Apply dark theme to the application."""
+    """Apply dark theme and base font size to the application."""
+    from PySide6.QtGui import QFontDatabase
+    from ..services.preferences import get_base_font_size
     app.setPalette(dark_palette())
     app.setStyleSheet(dark_stylesheet())
+    size = get_base_font_size()
+    if size > 0:
+        font = QFont(app.font())
+        font.setPointSize(size)
+        app.setFont(font)
+    else:
+        app.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont))

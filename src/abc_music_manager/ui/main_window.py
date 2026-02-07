@@ -55,15 +55,19 @@ class MainWindow(QMainWindow):
         from .bands_view import BandsView
         from .set_playback_view import SetPlaybackView
         from .settings_view import SettingsView
-        self.stacked.addWidget(LibraryView(app_state))
-        self.stacked.addWidget(SetlistsView(app_state))
+        self.library_view = LibraryView(app_state)
+        self.setlists_view = SetlistsView(app_state)
+        self.stacked.addWidget(self.library_view)
+        self.stacked.addWidget(self.setlists_view)
         self.stacked.addWidget(BandsView(app_state))
         self.stacked.addWidget(SetPlaybackView(app_state))
         self.stacked.addWidget(SettingsView(app_state))
         main_layout.addWidget(self.stacked, 1)
+        self.library_view.navigateToSetlist.connect(self._on_navigate_to_setlist)
 
         self.nav_list = QListWidget()
         self.nav_list.setMaximumWidth(160)
+        self.nav_list.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         for name in self.PAGES:
             self.nav_list.addItem(QListWidgetItem(name))
         self.nav_list.currentRowChanged.connect(self.stacked.setCurrentIndex)
@@ -89,6 +93,10 @@ class MainWindow(QMainWindow):
     def _go_to_page(self, index: int) -> None:
         self.nav_list.setCurrentRow(index)
         self.stacked.setCurrentIndex(index)
+
+    def _on_navigate_to_setlist(self, setlist_id: int) -> None:
+        self._go_to_page(self.PAGES.index("Setlists"))
+        self.setlists_view.select_setlist_by_id(setlist_id)
 
     def _on_scan_library(self) -> None:
         from ..scanning.scanner import run_scan
@@ -117,9 +125,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Scan failed.")
             QMessageBox.critical(self, "Scan failed", str(e))
         else:
-            lib_widget = self.stacked.widget(0)
-            if hasattr(lib_widget, "refresh"):
-                lib_widget.refresh()
+            self.library_view.refresh()
 
     def _on_settings(self) -> None:
         self._go_to_page(self.PAGES.index("Settings"))

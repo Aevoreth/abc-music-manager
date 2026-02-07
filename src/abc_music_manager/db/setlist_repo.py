@@ -48,6 +48,17 @@ def list_setlists(conn: sqlite3.Connection) -> list[SetlistRow]:
     ]
 
 
+def get_setlists_containing_song(conn: sqlite3.Connection, song_id: int) -> list[tuple[int, str]]:
+    """Return (setlist_id, setlist_name) for every setlist that contains this song."""
+    cur = conn.execute(
+        """SELECT sl.id, sl.name FROM Setlist sl
+           JOIN SetlistItem si ON si.setlist_id = sl.id
+           WHERE si.song_id = ? ORDER BY sl.name""",
+        (song_id,),
+    )
+    return [(r[0], r[1]) for r in cur.fetchall()]
+
+
 def add_setlist(conn: sqlite3.Connection, name: str) -> int:
     now = _now()
     cur = conn.execute(

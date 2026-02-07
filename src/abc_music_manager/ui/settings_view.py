@@ -5,6 +5,7 @@ Settings: folder rules, statuses, account targets (PluginData).
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
+    QApplication,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -26,6 +27,12 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from ..services.app_state import AppState
+from ..services.preferences import (
+    get_default_status_id,
+    set_default_status_id,
+    get_base_font_size,
+    set_base_font_size,
+)
 from ..db import list_folder_rules, add_folder_rule, update_folder_rule, delete_folder_rule, FolderRuleRow, RuleType
 from ..db.status_repo import list_statuses, add_status, update_status, delete_status, StatusRow
 from ..db.account_target import list_account_targets, add_account_target, update_account_target, delete_account_target, AccountTargetRow
@@ -163,10 +170,85 @@ class SettingsView(QWidget):
         self.app_state = app_state
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
+        self.tabs.addTab(self._build_appearance_tab(), "Appearance")
         self.tabs.addTab(self._build_folder_rules_tab(), "Folder rules")
         self.tabs.addTab(self._build_statuses_tab(), "Statuses")
         self.tabs.addTab(self._build_account_targets_tab(), "Account targets")
         layout.addWidget(self.tabs)
+
+    def _build_appearance_tab(self) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        font_row = QHBoxLayout()
+        self.base_font_default_check = QCheckBox("Use system default font size")
+        self.base_font_default_check.stateChanged.connect(self._on_base_font_default_changed)
+        font_row.addWidget(self.base_font_default_check)
+        font_row.addStretch()
+        v.addLayout(font_row)
+        pt_row = QHBoxLayout()
+        pt_row.addWidget(QLabel("Base font size (pt):"))
+        self.base_font_size_spin = QSpinBox()
+        self.base_font_size_spin.setRange(8, 16)
+        self.base_font_size_spin.setSuffix(" pt")
+        self.base_font_size_spin.setMinimumWidth(100)
+        pt_row.addWidget(self.base_font_size_spin)
+        pt_row.addWidget(QLabel("(8–16 pt; applies immediately)"))
+        pt_row.addStretch()
+        v.addLayout(pt_row)
+        from PySide6.QtCore import QSignalBlocker
+        saved = get_base_font_size()
+        with QSignalBlocker(self.base_font_size_spin), QSignalBlocker(self.base_font_default_check):
+            if saved == 0:
+                self.base_font_default_check.setChecked(True)
+                self.base_font_size_spin.setEnabled(False)
+                self.base_font_size_spin.setValue(10)
+            else:
+                self.base_font_default_check.setChecked(False)
+                self.base_font_size_spin.setValue(max(8, min(16, saved)))
+        self.base_font_size_spin.valueChanged.connect(self._on_base_font_size_changed)
+        v.addStretch()
+        return w
+
+    def _on_base_font_default_changed(self, _state: int = 0) -> None:
+        use_default = self.base_font_default_check.isChecked()
+        self.base_font_size_spin.setEnabled(not use_default)
+        if use_default:
+            set_base_font_size(0)
+            app = QApplication.instance()
+            if app:
+                from PySide6.QtGui import QFontDatabase
+                system_font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+                app.setFont(system_font)
+                self._apply_font_to_widgets(app, app.font())
+        else:
+            self._on_base_font_size_changed(self.base_font_size_spin.value())
+
+    def _on_base_font_size_changed(self, value: int) -> None:
+        set_base_font_size(value)
+        app = QApplication.instance()
+        if app and value >= 8:
+            from PySide6.QtGui import QFont
+            font = QFont(app.font())
+            font.setPointSize(value)
+            app.setFont(font)
+            self._apply_font_to_widgets(app, app.font())
+        elif app:
+            from PySide6.QtGui import QFontDatabase
+            app.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont))
+            self._apply_font_to_widgets(app, app.font())
+
+    def _apply_font_to_widgets(self, app: QApplication, font) -> None:
+        """Propagate application font to all existing top-level widgets so changes apply without restart."""
+        from PySide6.QtWidgets import QWidget
+
+        def set_font_recursive(w: QWidget) -> None:
+            w.setFont(font)
+            for child in w.findChildren(QWidget):
+                child.setFont(font)
+
+        for w in app.topLevelWidgets():
+            if w.isWidgetType():
+                set_font_recursive(w)
 
     def _build_folder_rules_tab(self) -> QWidget:
         w = QWidget()
@@ -234,6 +316,13 @@ class SettingsView(QWidget):
     def _build_statuses_tab(self) -> QWidget:
         w = QWidget()
         v = QVBoxLayout(w)
+        default_row = QHBoxLayout()
+        default_row.addWidget(QLabel("Default status (Library):"))
+        self.default_status_combo = QComboBox()
+        self.default_status_combo.setMinimumWidth(140)
+        default_row.addWidget(self.default_status_combo)
+        default_row.addStretch()
+        v.addLayout(default_row)
         self.status_table = QTableWidget()
         self.status_table.setColumnCount(5)
         self.status_table.setHorizontalHeaderLabels(["Name", "Color", "Active", "Sort", "Actions"])
@@ -242,7 +331,27 @@ class SettingsView(QWidget):
         add_btn.clicked.connect(self._add_status)
         v.addWidget(add_btn)
         self._refresh_statuses()
+        self._load_default_status_combo()
+        self.default_status_combo.currentIndexChanged.connect(self._on_default_status_changed)
         return w
+
+    def _load_default_status_combo(self) -> None:
+        from PySide6.QtCore import QSignalBlocker
+        with QSignalBlocker(self.default_status_combo):
+            self.default_status_combo.clear()
+            self.default_status_combo.addItem("(none)", None)
+            for r in list_statuses(self.app_state.conn):
+                self.default_status_combo.addItem(r.name, r.id)
+            current = get_default_status_id()
+            idx = self.default_status_combo.findData(current)
+            if idx >= 0:
+                self.default_status_combo.setCurrentIndex(idx)
+            else:
+                self.default_status_combo.setCurrentIndex(0)
+
+    def _on_default_status_changed(self) -> None:
+        data = self.default_status_combo.currentData()
+        set_default_status_id(data)
 
     def _refresh_statuses(self) -> None:
         rows = list_statuses(self.app_state.conn)
@@ -262,6 +371,7 @@ class SettingsView(QWidget):
             cell_layout.addWidget(del_btn)
             self.status_table.setCellWidget(i, 4, cell)
         self.status_table.setRowCount(len(rows))
+        self._load_default_status_combo()
 
     def _add_status(self) -> None:
         dlg = StatusEditor(self)

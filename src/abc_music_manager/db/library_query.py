@@ -20,6 +20,7 @@ class LibrarySongRow:
     transcriber: Optional[str]
     duration_seconds: Optional[int]
     part_count: int
+    parts_json: Optional[str]  # JSON array for tooltip (part names)
     last_played_at: Optional[str]
     total_plays: int
     rating: Optional[int]
@@ -102,6 +103,7 @@ def list_library_songs(
     sql = f"""
         SELECT s.id, s.title, s.composers, s.transcriber, s.duration_seconds,
                json_array_length(COALESCE(s.parts, '[]')) AS part_count,
+               s.parts,
                s.last_played_at, s.total_plays, s.rating, s.status_id,
                st.name AS status_name, st.color AS status_color,
                s.notes, s.lyrics,
@@ -121,15 +123,16 @@ def list_library_songs(
             transcriber=r[3],
             duration_seconds=r[4],
             part_count=r[5] or 0,
-            last_played_at=r[6],
-            total_plays=r[7] or 0,
-            rating=r[8],
-            status_id=r[9],
-            status_name=r[10],
-            status_color=r[11],
-            notes=r[12],
-            lyrics=r[13],
-            in_upcoming_set=bool(r[14]),
+            parts_json=r[6],
+            last_played_at=r[7],
+            total_plays=r[8] or 0,
+            rating=r[9],
+            status_id=r[10],
+            status_name=r[11],
+            status_color=r[12],
+            notes=r[13],
+            lyrics=r[14],
+            in_upcoming_set=bool(r[15]),
         )
         for r in cur.fetchall()
     ]
