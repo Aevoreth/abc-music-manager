@@ -74,9 +74,9 @@ ABC Music Manager is a local-first desktop application designed specifically for
    # source .venv/bin/activate  # macOS/Linux
    ```
 2. **Install dependencies:** `pip install -r requirements.txt` (PySide6 and other deps)
-3. **Run:** `python main.py` (entry point to be added with Qt UI)
+3. **Run from repo root:** `python main.py`
 
-The database will be created automatically on first run (path TBD with Qt app). The previous Flet app’s CLI init lived at `python -m src.abc_music_manager.cli_init_db` (see `/old/`).
+The database will be created automatically on first run (path TBD with Qt app). The previous Flet app’s CLI init lived at `python -m src.abc_music_manager.cli_init_db` (see `/old/`). Run unit tests with `pytest tests/ -v`.
 
 ---
 
