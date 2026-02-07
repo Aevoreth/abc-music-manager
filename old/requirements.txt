@@ -1,4 +1,0 @@
-# ABC Music Manager — runtime dependencies
-# Python 3.10+ recommended
-
-flet>=0.24.0

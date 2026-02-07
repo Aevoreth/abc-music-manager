@@ -26,3 +26,6 @@ Thumbs.db
 
 # Flet (if it generates local artifacts)
 .flet/
+
+# Unused skin/cache artifacts
+skin_cache/

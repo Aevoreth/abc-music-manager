@@ -1,15 +1,13 @@
 """
-Fantasy-style dark theme (DECISIONS 025).
-Deep purples, warm parchment surfaces, amber/gold accents.
+Dark theme (DECISIONS 025). In-code palette and QSS for PySide6.
 Used when Status.color or other UI elements are NULL (DECISIONS 018).
-QSS and QPalette for PySide6.
 """
 
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWidgets import QApplication
 
 
-# --- Fantasy dark palette (purple-black, amber, parchment) ---
+# --- Dark palette ---
 COLOR_BACKGROUND = "#0d0b14"
 COLOR_SURFACE = "#12101a"
 COLOR_OUTLINE = "#3d3654"
@@ -23,6 +21,9 @@ COLOR_TEXT_SECONDARY = "#b4a8a8"
 COLOR_TEXT_DISABLED = "#5c5460"
 COLOR_ERROR = "#7a3030"
 COLOR_SURFACE_VARIANT = "#1e1a2e"
+# Softer highlight for selection/focus (avoids bright yellow on tables)
+COLOR_HIGHLIGHT = "#3d3654"
+COLOR_HIGHLIGHT_TEXT = "#e8e4dc"
 
 # Status badge defaults when Status.color is NULL
 STATUS_BADGE_NEW = "#4a4260"
@@ -31,7 +32,7 @@ STATUS_BADGE_READY = "#2d4a2d"
 
 
 def dark_palette() -> QPalette:
-    """Build QPalette for fantasy-style dark theme."""
+    """Build QPalette for dark theme."""
     p = QPalette()
     p.setColor(QPalette.ColorRole.Window, QColor(COLOR_BACKGROUND))
     p.setColor(QPalette.ColorRole.WindowText, QColor(COLOR_ON_SURFACE))
@@ -41,8 +42,8 @@ def dark_palette() -> QPalette:
     p.setColor(QPalette.ColorRole.Button, QColor(COLOR_SURFACE))
     p.setColor(QPalette.ColorRole.ButtonText, QColor(COLOR_ON_SURFACE))
     p.setColor(QPalette.ColorRole.BrightText, QColor(COLOR_TEXT_HEADER))
-    p.setColor(QPalette.ColorRole.Highlight, QColor(COLOR_PRIMARY))
-    p.setColor(QPalette.ColorRole.HighlightedText, QColor(COLOR_ON_PRIMARY))
+    p.setColor(QPalette.ColorRole.Highlight, QColor(COLOR_HIGHLIGHT))
+    p.setColor(QPalette.ColorRole.HighlightedText, QColor(COLOR_HIGHLIGHT_TEXT))
     p.setColor(QPalette.ColorRole.Link, QColor(COLOR_PRIMARY))
     p.setColor(QPalette.ColorRole.PlaceholderText, QColor(COLOR_TEXT_DISABLED))
     return p
@@ -93,6 +94,28 @@ def dark_stylesheet() -> str:
         }}
         QTableView::item:selected {{
             background-color: {COLOR_OUTLINE_VARIANT};
+            color: {COLOR_ON_SURFACE};
+        }}
+        QTableView::item:selected:focus, QTableView::item:focus {{
+            background-color: {COLOR_OUTLINE_VARIANT};
+            color: {COLOR_ON_SURFACE};
+            outline: none;
+            border: 1px solid {COLOR_OUTLINE};
+        }}
+        QTableWidget {{
+            background-color: {COLOR_SURFACE};
+            color: {COLOR_ON_SURFACE};
+            gridline-color: {COLOR_OUTLINE};
+        }}
+        QTableWidget::item:selected {{
+            background-color: {COLOR_OUTLINE_VARIANT};
+            color: {COLOR_ON_SURFACE};
+        }}
+        QTableWidget::item:selected:focus, QTableWidget::item:focus {{
+            background-color: {COLOR_OUTLINE_VARIANT};
+            color: {COLOR_ON_SURFACE};
+            outline: none;
+            border: 1px solid {COLOR_OUTLINE};
         }}
         QHeaderView::section {{
             background-color: {COLOR_TITLE_BAR};
@@ -137,6 +160,6 @@ def dark_stylesheet() -> str:
 
 
 def apply_theme(app: QApplication) -> None:
-    """Apply fantasy-style dark theme to the application."""
+    """Apply dark theme to the application."""
     app.setPalette(dark_palette())
     app.setStyleSheet(dark_stylesheet())
