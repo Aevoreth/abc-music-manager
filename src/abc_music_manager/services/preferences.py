@@ -78,3 +78,16 @@ def set_base_font_size(size: int) -> None:
     n = int(size)
     prefs["base_font_size"] = 0 if n <= 0 else max(8, min(16, n))
     save_preferences(prefs)
+
+
+def get_window_geometry() -> str | None:
+    """Saved main window geometry (base64). None if not set or invalid."""
+    prefs = load_preferences()
+    return prefs.get("window_geometry")
+
+
+def set_window_geometry(geometry_b64: str) -> None:
+    """Save main window geometry (base64 from QMainWindow.saveGeometry())."""
+    prefs = load_preferences()
+    prefs["window_geometry"] = geometry_b64
+    save_preferences(prefs)

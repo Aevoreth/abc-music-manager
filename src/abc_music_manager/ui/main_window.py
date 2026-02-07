@@ -17,9 +17,29 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QByteArray
 
 from ..services.app_state import AppState
+from ..services import preferences
+
+
+def _restore_window_geometry(window: QMainWindow) -> None:
+    """Restore main window size and position from preferences if available."""
+    geom_b64 = preferences.get_window_geometry()
+    if not geom_b64:
+        return
+    data = QByteArray.fromBase64(geom_b64.encode("utf-8"))
+    if data.isEmpty():
+        return
+    window.restoreGeometry(data)
+
+
+def _save_window_geometry(window: QMainWindow) -> None:
+    """Persist main window size and position to preferences."""
+    data = window.saveGeometry()
+    if data.isEmpty():
+        return
+    preferences.set_window_geometry(data.toBase64().data().decode("utf-8"))
 
 
 class PlaceholderPage(QWidget):
@@ -43,6 +63,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("ABC Music Manager")
         self.setMinimumSize(900, 600)
         self.resize(1000, 700)
+        _restore_window_geometry(self)
 
         self._build_menu_bar()
         central = QWidget()
@@ -72,6 +93,10 @@ class MainWindow(QMainWindow):
             self.nav_list.addItem(QListWidgetItem(name))
         self.nav_list.currentRowChanged.connect(self.stacked.setCurrentIndex)
         main_layout.insertWidget(0, self.nav_list)
+
+    def closeEvent(self, event) -> None:
+        _save_window_geometry(self)
+        super().closeEvent(event)
 
     def _build_menu_bar(self) -> None:
         menubar = self.menuBar()
