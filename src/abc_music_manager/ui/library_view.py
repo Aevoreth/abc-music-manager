@@ -28,10 +28,11 @@ from PySide6.QtWidgets import (
     QStyle,
 )
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QRect, QSize, Signal
-from PySide6.QtGui import QColor, QAction, QPainter, QFont, QBrush, QPen
+from PySide6.QtGui import QColor, QAction, QPainter, QFont, QBrush, QPen, QIcon, QPixmap
 
 from ..services.app_state import AppState
 from ..db import list_library_songs, get_status_list, LibrarySongRow
+from ..db.status_repo import list_statuses
 from ..db.setlist_repo import (
     list_setlists,
     add_setlist_item,
@@ -42,6 +43,51 @@ from ..db.song_layout_repo import list_song_layouts_for_song_and_band
 from ..db.play_log import log_play, log_play_at, get_play_history
 from ..db.song_repo import update_song_app_metadata
 from .theme import STATUS_CIRCLE_DIAMETER
+
+# Role for status color in library filter combo items
+LibraryStatusColorRole = Qt.ItemDataRole.UserRole + 20
+
+
+class LibraryFilterStatusDelegate(QStyledItemDelegate):
+    """Paints filter combo items with colored circle before the status name."""
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        text = index.data(Qt.ItemDataRole.DisplayRole) or ""
+        color = index.data(LibraryStatusColorRole)
+        opt = QStyleOptionViewItem(option)
+        rect = opt.rect.adjusted(2, 0, -2, 0)
+        cy = rect.center().y()
+        r = STATUS_CIRCLE_DIAMETER // 2
+        try:
+            qcolor = QColor(color) if color else opt.palette.color(opt.palette.currentColorGroup(), opt.palette.ColorRole.Mid)
+        except Exception:
+            qcolor = opt.palette.color(opt.palette.currentColorGroup(), opt.palette.ColorRole.Mid)
+        painter.save()
+        painter.setBrush(qcolor)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(rect.x(), cy - r, STATUS_CIRCLE_DIAMETER, STATUS_CIRCLE_DIAMETER)
+        painter.setPen(QPen(opt.palette.text().color()))
+        painter.drawText(rect.adjusted(STATUS_CIRCLE_DIAMETER + 4, 0, 0, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+        painter.restore()
+
+
+def _status_icon_for_color(color: str | None, fallback: QColor) -> QIcon:
+    """Return a QIcon with a colored circle for use in menus."""
+    size = STATUS_CIRCLE_DIAMETER + 4
+    pix = QPixmap(size, size)
+    pix.fill(Qt.GlobalColor.transparent)
+    try:
+        qcolor = QColor(color) if color else fallback
+    except Exception:
+        qcolor = fallback
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    painter.setBrush(qcolor)
+    painter.setPen(Qt.PenStyle.NoPen)
+    r = STATUS_CIRCLE_DIAMETER // 2
+    painter.drawEllipse(2, 2, STATUS_CIRCLE_DIAMETER, STATUS_CIRCLE_DIAMETER)
+    painter.end()
+    return QIcon(pix)
 
 
 def _format_duration(sec: Optional[int]) -> str:
@@ -389,8 +435,8 @@ class LibraryView(QWidget):
         filter_layout.addWidget(self.composer_edit)
         filter_layout.addWidget(QLabel("Status:"))
         self.status_combo = QComboBox()
-        self.status_combo.setMaximumWidth(120)
-        self.status_combo.addItem("(all)", None)
+        self.status_combo.setItemDelegate(LibraryFilterStatusDelegate(self.status_combo))
+        self.status_combo.setMinimumWidth(140)
         filter_layout.addWidget(self.status_combo)
         filter_layout.addWidget(QLabel("Plays in last (days):"))
         self.plays_days_spin = QSpinBox()
@@ -528,10 +574,12 @@ class LibraryView(QWidget):
                 if col == 6:
                     # Status: show dropdown to set song status (songs always have a status)
                     menu = QMenu(self)
-                    for status_id, status_name in get_status_list(self.app_state.conn):
-                        act = menu.addAction(status_name)
-                        act.triggered.connect(lambda checked=False, sid=status_id: self._set_song_status(song_id, sid))
-                        if row_data.status_id == status_id:
+                    fallback = self.palette().color(self.palette().currentColorGroup(), self.palette().ColorRole.Mid)
+                    for r in list_statuses(self.app_state.conn):
+                        icon = _status_icon_for_color(r.color, fallback)
+                        act = menu.addAction(icon, r.name)
+                        act.triggered.connect(lambda checked=False, sid=r.id: self._set_song_status(song_id, sid))
+                        if row_data.status_id == r.id:
                             act.setCheckable(True)
                             act.setChecked(True)
                     menu.exec(self.table.viewport().mapToGlobal(pos))
@@ -607,8 +655,10 @@ class LibraryView(QWidget):
     def _load_status_combo(self) -> None:
         self.status_combo.clear()
         self.status_combo.addItem("(all)", None)
-        for sid, name in get_status_list(self.app_state.conn):
-            self.status_combo.addItem(name, sid)
+        for r in list_statuses(self.app_state.conn):
+            i = self.status_combo.count()
+            self.status_combo.addItem(r.name, r.id)
+            self.status_combo.setItemData(i, r.color, LibraryStatusColorRole)
 
     def _apply_filters(self) -> None:
         status_data = self.status_combo.currentData()
