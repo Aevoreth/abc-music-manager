@@ -23,8 +23,15 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QFileDialog,
     QHeaderView,
+    QAbstractItemView,
+    QStyle,
+    QStyleOptionComboBox,
+    QSizePolicy,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPainter, QPen
 
 from ..services.app_state import AppState
 from ..services.preferences import (
@@ -34,8 +41,146 @@ from ..services.preferences import (
     set_base_font_size,
 )
 from ..db import list_folder_rules, add_folder_rule, update_folder_rule, delete_folder_rule, FolderRuleRow, RuleType
-from ..db.status_repo import list_statuses, add_status, update_status, delete_status, StatusRow
+from ..db.status_repo import list_statuses, add_status, update_status, delete_status, reorder_statuses, StatusRow
 from ..db.account_target import list_account_targets, add_account_target, update_account_target, delete_account_target, AccountTargetRow
+from .theme import STATUS_CIRCLE_DIAMETER
+
+# Data role for status color in status table Name column and default status combo
+StatusColorRole = Qt.ItemDataRole.UserRole + 10
+
+
+class StatusComboBox(QComboBox):
+    """Combo box that shows the selected status with colored circle before the name (when closed and in dropdown)."""
+
+    def paintEvent(self, event) -> None:
+        opt = QStyleOptionComboBox()
+        self.initStyleOption(opt)
+        # Let the style draw frame and dropdown arrow only; we draw the content
+        style = self.style()
+        painter = QPainter(self)
+        style.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, opt, painter, self)
+        # Content rect is where the current text goes (excludes dropdown arrow)
+        edit_rect = style.subControlRect(
+            QStyle.ComplexControl.CC_ComboBox, opt, QStyle.SubControl.SC_ComboBoxEditField, self
+        )
+        if edit_rect.isValid():
+            # Fill content area so we overwrite any default text the style drew
+            painter.fillRect(edit_rect, self.palette().color(self.palette().currentColorGroup(), self.palette().ColorRole.Base))
+            idx = self.currentIndex()
+            text = self.currentText() or ""
+            color = None
+            if idx >= 0:
+                model_idx = self.model().index(idx, 0)
+                if model_idx.isValid():
+                    color = model_idx.data(StatusColorRole)
+            try:
+                qcolor = QColor(color) if color else self.palette().color(self.palette().currentColorGroup(), self.palette().ColorRole.Mid)
+            except Exception:
+                qcolor = self.palette().color(self.palette().currentColorGroup(), self.palette().ColorRole.Mid)
+            painter.save()
+            cy = edit_rect.center().y()
+            r = STATUS_CIRCLE_DIAMETER // 2
+            painter.setBrush(qcolor)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(edit_rect.x() + 2, cy - r, STATUS_CIRCLE_DIAMETER, STATUS_CIRCLE_DIAMETER)
+            painter.setPen(QPen(self.palette().text().color()))
+            text_rect = edit_rect.adjusted(STATUS_CIRCLE_DIAMETER + 6, 0, -4, 0)
+            painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+            painter.restore()
+        painter.end()
+
+
+class StatusComboDelegate(QStyledItemDelegate):
+    """Paints combo items with colored circle before the status name."""
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        text = index.data(Qt.ItemDataRole.DisplayRole) or ""
+        color = index.data(StatusColorRole)
+        opt = QStyleOptionViewItem(option)
+        rect = opt.rect.adjusted(2, 0, -2, 0)
+        cy = rect.center().y()
+        r = STATUS_CIRCLE_DIAMETER // 2
+        try:
+            qcolor = QColor(color) if color else opt.palette.color(opt.palette.currentColorGroup(), opt.palette.ColorRole.Mid)
+        except Exception:
+            qcolor = opt.palette.color(opt.palette.currentColorGroup(), opt.palette.ColorRole.Mid)
+        painter.save()
+        painter.setBrush(qcolor)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(rect.x(), cy - r, STATUS_CIRCLE_DIAMETER, STATUS_CIRCLE_DIAMETER)
+        painter.setPen(QPen(opt.palette.text().color()))
+        text_rect = rect.adjusted(STATUS_CIRCLE_DIAMETER + 4, 0, 0, 0)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+        painter.restore()
+
+
+class StatusNameDelegate(QStyledItemDelegate):
+    """Paints drag handle (column 0) and status name with colored circle (column 1) in status table."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        col = index.column()
+        opt = QStyleOptionViewItem(option)
+        opt.showDecorationSelected = False
+        rect = opt.rect.adjusted(2, 0, -2, 0)
+        if col == 0:
+            # Drag handle: two columns of three dots; use selected-cell background color
+            painter.save()
+            grip_color = opt.palette.color(opt.palette.currentColorGroup(), opt.palette.ColorRole.Highlight)
+            painter.setBrush(grip_color)
+            painter.setPen(Qt.PenStyle.NoPen)
+            cx = rect.center().x()
+            cy = rect.center().y()
+            r = 2  # dot radius (4px diameter)
+            for dx in (-4, 4):
+                for dy in (-6, 0, 6):
+                    painter.drawEllipse(int(cx + dx - r), int(cy + dy - r), 2 * r, 2 * r)
+            painter.restore()
+            return
+        if col == 1:
+            text = index.data(Qt.ItemDataRole.DisplayRole) or ""
+            color = index.data(StatusColorRole)
+            cy = rect.center().y()
+            r = STATUS_CIRCLE_DIAMETER // 2
+            try:
+                qcolor = QColor(color) if color else opt.palette.text().color()
+            except Exception:
+                qcolor = opt.palette.text().color()
+            painter.save()
+            painter.setBrush(qcolor)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(rect.x(), cy - r, STATUS_CIRCLE_DIAMETER, STATUS_CIRCLE_DIAMETER)
+            painter.setPen(QPen(opt.palette.text().color()))
+            painter.drawText(rect.adjusted(STATUS_CIRCLE_DIAMETER + 4, 0, 0, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+            painter.restore()
+            return
+        super().paint(painter, option, index)
+
+
+class StatusTableWidget(QTableWidget):
+    """Table of statuses with drag handle; reorders and persists sort_order on drop."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._on_order_changed = None  # callable(list[int]) -> None
+
+    def set_order_changed_callback(self, callback) -> None:
+        self._on_order_changed = callback
+
+    def dropEvent(self, event) -> None:
+        super().dropEvent(event)
+        if self._on_order_changed and event.isAccepted():
+            ids = []
+            for row in range(self.rowCount()):
+                item = self.item(row, 1)
+                if item:
+                    sid = item.data(Qt.ItemDataRole.UserRole)
+                    if sid is not None:
+                        ids.append(int(sid))
+            if ids:
+                self._on_order_changed(ids)
 
 
 class FolderRuleEditor(QDialog):
@@ -82,6 +227,19 @@ class FolderRuleEditor(QDialog):
         )
 
 
+def _parse_hex_color(s: str) -> QColor | None:
+    s = (s or "").strip()
+    if not s or s.startswith("#"):
+        pass
+    else:
+        s = "#" + s
+    if len(s) in (4, 7, 9) and all(c in "#0123456789AaBbCcDdEeFf" for c in s):
+        q = QColor(s)
+        if q.isValid():
+            return q
+    return None
+
+
 class StatusEditor(QDialog):
     def __init__(self, parent: QWidget | None, status: StatusRow | None = None) -> None:
         super().__init__(parent)
@@ -90,37 +248,37 @@ class StatusEditor(QDialog):
         layout = QFormLayout(self)
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("e.g. New, Ready")
+        color_row = QHBoxLayout()
         self.color_edit = QLineEdit()
         self.color_edit.setPlaceholderText("#RRGGBB or leave empty for theme default")
-        self.enabled_check = QCheckBox("Active")
-        self.enabled_check.setChecked(True)
-        self.sort_spin = QSpinBox()
-        self.sort_spin.setRange(-1000, 1000)
-        self.sort_spin.setSpecialValueText("—")
+        self.color_edit.setMinimumWidth(120)
+        self.color_picker_btn = QPushButton("Pick color...")
+        self.color_picker_btn.clicked.connect(self._pick_color)
+        color_row.addWidget(self.color_edit)
+        color_row.addWidget(self.color_picker_btn)
         layout.addRow("Name:", self.name_edit)
-        layout.addRow("Color (hex):", self.color_edit)
-        layout.addRow("", self.enabled_check)
-        layout.addRow("Sort order:", self.sort_spin)
+        layout.addRow("Color (hex):", color_row)
         if status:
             self.name_edit.setText(status.name)
             self.color_edit.setText(status.color or "")
-            self.enabled_check.setChecked(status.is_active)
-            self.sort_spin.setValue(status.sort_order if status.sort_order is not None else 0)
         ok = QPushButton("OK")
         ok.clicked.connect(self.accept)
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)
         layout.addRow(ok, cancel)
 
-    def get_values(self) -> tuple[str, str | None, bool, int | None]:
+    def _pick_color(self) -> None:
+        from PySide6.QtWidgets import QColorDialog
+        initial = _parse_hex_color(self.color_edit.text())
+        if not initial or not initial.isValid():
+            initial = QColor(200, 200, 200)
+        color = QColorDialog.getColor(initial, self, "Choose status color")
+        if color.isValid():
+            self.color_edit.setText(color.name())
+
+    def get_values(self) -> tuple[str, str | None]:
         color = self.color_edit.text().strip() or None
-        sort_order = self.sort_spin.value()
-        return (
-            self.name_edit.text().strip(),
-            color,
-            self.enabled_check.isChecked(),
-            sort_order,
-        )
+        return (self.name_edit.text().strip(), color)
 
 
 class AccountTargetEditor(QDialog):
@@ -317,80 +475,124 @@ class SettingsView(QWidget):
         w = QWidget()
         v = QVBoxLayout(w)
         default_row = QHBoxLayout()
-        default_row.addWidget(QLabel("Default status (Library):"))
-        self.default_status_combo = QComboBox()
-        self.default_status_combo.setMinimumWidth(140)
+        default_row.addWidget(QLabel("Default status:"))
+        self.default_status_combo = StatusComboBox()
+        self.default_status_combo.setItemDelegate(StatusComboDelegate(self.default_status_combo))
+        self.default_status_combo.setMinimumWidth(180)
         default_row.addWidget(self.default_status_combo)
         default_row.addStretch()
         v.addLayout(default_row)
-        self.status_table = QTableWidget()
-        self.status_table.setColumnCount(5)
-        self.status_table.setHorizontalHeaderLabels(["Name", "Color", "Active", "Sort", "Actions"])
-        v.addWidget(self.status_table)
+        add_row = QHBoxLayout()
+        add_row.addWidget(QLabel("Add new status:"))
         add_btn = QPushButton("Add status")
         add_btn.clicked.connect(self._add_status)
-        v.addWidget(add_btn)
+        add_row.addWidget(add_btn)
+        add_row.addStretch()
+        v.addLayout(add_row)
+        self.status_table = StatusTableWidget()
+        self.status_table.setObjectName("status_table")
+        self.status_table.setColumnCount(3)
+        self.status_table.setHorizontalHeaderLabels(["", "Name", "Actions"])
+        self.status_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.status_table.setColumnWidth(0, 24)
+        self.status_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
+        self.status_table.setColumnWidth(1, 180)
+        self.status_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.status_table.setItemDelegate(StatusNameDelegate(self.status_table))
+        # SingleSelection required for InternalMove drag to work; style selection invisible so rows look unselected
+        self.status_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.status_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.status_table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.status_table.verticalHeader().setDefaultSectionSize(40)
+        self.status_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        self.status_table.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.status_table.setDragDropOverwriteMode(False)
+        self.status_table.setDragEnabled(True)
+        self.status_table.setAcceptDrops(True)
+        self.status_table.setDropIndicatorShown(True)
+        self.status_table.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.status_table.setStyleSheet(
+            "QTableWidget#status_table::item:selected { background: palette(base); color: palette(text); }"
+        )
+        self.status_table.set_order_changed_callback(self._on_status_order_changed)
+        v.addWidget(self.status_table)
         self._refresh_statuses()
         self._load_default_status_combo()
         self.default_status_combo.currentIndexChanged.connect(self._on_default_status_changed)
         return w
 
+    def _on_status_order_changed(self, id_order: list[int]) -> None:
+        reorder_statuses(self.app_state.conn, id_order)
+        self._refresh_statuses()
+
     def _load_default_status_combo(self) -> None:
         from PySide6.QtCore import QSignalBlocker
         with QSignalBlocker(self.default_status_combo):
             self.default_status_combo.clear()
-            self.default_status_combo.addItem("(none)", None)
             for r in list_statuses(self.app_state.conn):
+                i = self.default_status_combo.count()
                 self.default_status_combo.addItem(r.name, r.id)
+                self.default_status_combo.setItemData(i, r.color, StatusColorRole)
             current = get_default_status_id()
             idx = self.default_status_combo.findData(current)
             if idx >= 0:
                 self.default_status_combo.setCurrentIndex(idx)
             else:
+                # Default "Default status" is New (first in list)
                 self.default_status_combo.setCurrentIndex(0)
+                if self.default_status_combo.count() > 0:
+                    set_default_status_id(self.default_status_combo.currentData())
 
     def _on_default_status_changed(self) -> None:
         data = self.default_status_combo.currentData()
-        set_default_status_id(data)
+        if data is not None:
+            set_default_status_id(data)
 
     def _refresh_statuses(self) -> None:
         rows = list_statuses(self.app_state.conn)
         self.status_table.setRowCount(len(rows))
         for i, r in enumerate(rows):
-            self.status_table.setItem(i, 0, QTableWidgetItem(r.name))
-            self.status_table.setItem(i, 1, QTableWidgetItem(r.color or "(theme)"))
-            self.status_table.setItem(i, 2, QTableWidgetItem("Yes" if r.is_active else "No"))
-            self.status_table.setItem(i, 3, QTableWidgetItem(str(r.sort_order) if r.sort_order is not None else "—"))
+            # Column 0: drag handle (delegate paints it); placeholder item, selectable so row can be dragged
+            self.status_table.setItem(i, 0, QTableWidgetItem(""))
+            self.status_table.item(i, 0).setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+            # Column 1: name (delegate paints circle + name); store id and color; selectable so row can be dragged
+            name_item = QTableWidgetItem(r.name)
+            name_item.setData(Qt.ItemDataRole.UserRole, r.id)
+            name_item.setData(StatusColorRole, r.color)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.status_table.setItem(i, 1, name_item)
+            # Column 2: actions
             edit_btn = QPushButton("Edit")
             edit_btn.clicked.connect(lambda checked=False, row=r: self._edit_status(row))
             del_btn = QPushButton("Delete")
             del_btn.clicked.connect(lambda checked=False, row=r: self._delete_status(row))
             cell = QWidget()
             cell_layout = QHBoxLayout(cell)
+            cell_layout.setContentsMargins(4, 2, 4, 2)
             cell_layout.addWidget(edit_btn)
             cell_layout.addWidget(del_btn)
-            self.status_table.setCellWidget(i, 4, cell)
+            self.status_table.setCellWidget(i, 2, cell)
         self.status_table.setRowCount(len(rows))
         self._load_default_status_combo()
 
     def _add_status(self) -> None:
         dlg = StatusEditor(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            name, color, is_active, sort_order = dlg.get_values()
+            name, color = dlg.get_values()
             if not name:
                 QMessageBox.warning(self, "Error", "Name is required.")
                 return
-            add_status(self.app_state.conn, name, color=color, is_active=is_active, sort_order=sort_order)
+            add_status(self.app_state.conn, name, color=color, sort_order=len(list_statuses(self.app_state.conn)))
             self._refresh_statuses()
 
     def _edit_status(self, status: StatusRow) -> None:
         dlg = StatusEditor(self, status)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            name, color, is_active, sort_order = dlg.get_values()
+            name, color = dlg.get_values()
             if not name:
                 QMessageBox.warning(self, "Error", "Name is required.")
                 return
-            update_status(self.app_state.conn, status.id, name=name, color=color, is_active=is_active, sort_order=sort_order)
+            update_status(self.app_state.conn, status.id, name=name, color=color)
             self._refresh_statuses()
 
     def _delete_status(self, status: StatusRow) -> None:

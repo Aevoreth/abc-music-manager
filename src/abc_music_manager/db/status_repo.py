@@ -16,7 +16,6 @@ class StatusRow:
     id: int
     name: str
     color: str | None
-    is_active: bool
     sort_order: int | None
     created_at: str
     updated_at: str
@@ -24,20 +23,29 @@ class StatusRow:
 
 def list_statuses(conn: sqlite3.Connection) -> list[StatusRow]:
     cur = conn.execute(
-        "SELECT id, name, color, is_active, sort_order, created_at, updated_at FROM Status ORDER BY sort_order, name"
+        "SELECT id, name, color, sort_order, created_at, updated_at FROM Status ORDER BY sort_order, name"
     )
     return [
         StatusRow(
             id=r[0],
             name=r[1],
             color=r[2],
-            is_active=bool(r[3]),
-            sort_order=r[4],
-            created_at=r[5],
-            updated_at=r[6],
+            sort_order=r[3],
+            created_at=r[4],
+            updated_at=r[5],
         )
         for r in cur.fetchall()
     ]
+
+
+def get_effective_default_status_id(conn: sqlite3.Connection) -> int | None:
+    """Default status id for new songs / library. Uses preference, or first status (New) if unset."""
+    from ..services.preferences import get_default_status_id
+    default_id = get_default_status_id()
+    if default_id is not None:
+        return default_id
+    statuses = list_statuses(conn)
+    return statuses[0].id if statuses else None
 
 
 def add_status(
@@ -45,14 +53,13 @@ def add_status(
     name: str,
     *,
     color: str | None = None,
-    is_active: bool = True,
     sort_order: int | None = None,
 ) -> int:
     now = _now()
     cur = conn.execute(
-        """INSERT INTO Status (name, color, is_active, sort_order, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (name.strip(), color, 1 if is_active else 0, sort_order, now, now),
+        """INSERT INTO Status (name, color, sort_order, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (name.strip(), color, sort_order, now, now),
     )
     conn.commit()
     return cur.lastrowid
@@ -64,7 +71,6 @@ def update_status(
     *,
     name: str | None = None,
     color: str | None = None,
-    is_active: bool | None = None,
     sort_order: int | None = None,
 ) -> None:
     updates = []
@@ -75,9 +81,6 @@ def update_status(
     if color is not None:
         updates.append("color = ?")
         args.append(color)
-    if is_active is not None:
-        updates.append("is_active = ?")
-        args.append(1 if is_active else 0)
     if sort_order is not None:
         updates.append("sort_order = ?")
         args.append(sort_order)
@@ -87,6 +90,14 @@ def update_status(
     args.append(_now())
     args.append(status_id)
     conn.execute(f"UPDATE Status SET {', '.join(updates)} WHERE id = ?", args)
+    conn.commit()
+
+
+def reorder_statuses(conn: sqlite3.Connection, id_order: list[int]) -> None:
+    """Set sort_order by list position (0-based). id_order lists status ids in desired order."""
+    now = _now()
+    for i, sid in enumerate(id_order):
+        conn.execute("UPDATE Status SET sort_order = ?, updated_at = ? WHERE id = ?", (i, now, sid))
     conn.commit()
 
 

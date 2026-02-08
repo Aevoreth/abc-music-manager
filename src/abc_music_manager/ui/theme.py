@@ -31,6 +31,9 @@ COLOR_SURFACE_VARIANT = "#1e1a2e"
 COLOR_HIGHLIGHT = "#3d3654"
 COLOR_HIGHLIGHT_TEXT = "#e8e4dc"
 
+# Status circle diameter in px. Used wherever a status is shown (library, settings, etc.). Change to resize globally.
+STATUS_CIRCLE_DIAMETER = 12
+
 # Status badge defaults when Status.color is NULL
 STATUS_BADGE_NEW = "#4a4260"
 STATUS_BADGE_TESTING = "#c9a227"

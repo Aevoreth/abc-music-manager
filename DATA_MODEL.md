@@ -79,14 +79,13 @@ Notes:
 ---
 
 ### Status
-Configurable song status labels.
+Configurable song status labels. Statuses are ordered by sort_order (list position in Settings).
 
 Fields:
 - id (INTEGER PK)
 - name (TEXT UNIQUE) — e.g. New, Testing, Ready
 - color (TEXT NULL) — optional hex (e.g. #RRGGBB); NULL = default to theme (dark LOTR/LOTRO-inspired scheme — DECISIONS 018, 025)
-- is_active (BOOLEAN NOT NULL DEFAULT 1)
-- sort_order (INTEGER NULL)
+- sort_order (INTEGER NULL) — display order (drag/drop in Settings)
 - created_at (DATETIME)
 - updated_at (DATETIME)
 

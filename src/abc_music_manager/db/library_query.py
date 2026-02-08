@@ -139,8 +139,8 @@ def list_library_songs(
 
 
 def get_status_list(conn: sqlite3.Connection) -> list[tuple[int, str]]:
-    """Return (id, name) for all active statuses for filter dropdown."""
-    cur = conn.execute("SELECT id, name FROM Status WHERE is_active = 1 ORDER BY sort_order, name")
+    """Return (id, name) for all statuses for filter dropdown (ordered by sort_order)."""
+    cur = conn.execute("SELECT id, name FROM Status ORDER BY sort_order, name")
     return cur.fetchall()
 
 

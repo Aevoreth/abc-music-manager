@@ -41,6 +41,7 @@ from ..db.setlist_repo import (
 from ..db.song_layout_repo import list_song_layouts_for_song_and_band
 from ..db.play_log import log_play, log_play_at, get_play_history
 from ..db.song_repo import update_song_app_metadata
+from .theme import STATUS_CIRCLE_DIAMETER
 
 
 def _format_duration(sec: Optional[int]) -> str:
@@ -156,9 +157,8 @@ class LibraryTableModel(QAbstractTableModel):
         self.refresh()
 
     def _resolve_default_status(self) -> None:
-        from ..services.preferences import get_default_status_id
-        from ..db.status_repo import list_statuses
-        default_id = get_default_status_id()
+        from ..db.status_repo import list_statuses, get_effective_default_status_id
+        default_id = get_effective_default_status_id(self._conn)
         self._default_status_name = None
         self._default_status_color = None
         if default_id:
@@ -359,9 +359,10 @@ class LibraryDelegate(QStyledItemDelegate):
         painter.setBrush(QBrush(qcolor))
         painter.setPen(Qt.PenStyle.NoPen)
         cy = rect.center().y()
-        painter.drawEllipse(rect.x(), cy - 4, 8, 8)
+        r = STATUS_CIRCLE_DIAMETER // 2
+        painter.drawEllipse(rect.x(), cy - r, STATUS_CIRCLE_DIAMETER, STATUS_CIRCLE_DIAMETER)
         painter.setPen(QPen(option.palette.text().color()))
-        painter.drawText(rect.adjusted(12, 0, 0, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name)
+        painter.drawText(rect.adjusted(STATUS_CIRCLE_DIAMETER + 4, 0, 0, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name)
 
 
 class LibraryView(QWidget):
@@ -524,10 +525,25 @@ class LibraryView(QWidget):
                             act.triggered.connect(lambda checked=False, sid=setlist_id: self._go_to_setlist(sid))
                         menu.exec(self.table.viewport().mapToGlobal(pos))
                     return True
+                if col == 6:
+                    # Status: show dropdown to set song status (songs always have a status)
+                    menu = QMenu(self)
+                    for status_id, status_name in get_status_list(self.app_state.conn):
+                        act = menu.addAction(status_name)
+                        act.triggered.connect(lambda checked=False, sid=status_id: self._set_song_status(song_id, sid))
+                        if row_data.status_id == status_id:
+                            act.setCheckable(True)
+                            act.setChecked(True)
+                    menu.exec(self.table.viewport().mapToGlobal(pos))
+                    return True
         return False
 
     def _go_to_setlist(self, setlist_id: int) -> None:
         self.navigateToSetlist.emit(setlist_id)
+
+    def _set_song_status(self, song_id: int, status_id: Optional[int]) -> None:
+        update_song_app_metadata(self.app_state.conn, song_id, status_id=status_id)
+        self.model.refresh()
 
     def _on_played_now(self, song_id: int) -> None:
         log_play(self.app_state.conn, song_id)

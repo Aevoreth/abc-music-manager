@@ -37,7 +37,6 @@ def create_schema(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY,
             name TEXT UNIQUE NOT NULL,
             color TEXT,
-            is_active INTEGER NOT NULL DEFAULT 1,
             sort_order INTEGER,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -239,30 +238,75 @@ def create_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_folderrule_rule_type ON FolderRule(rule_type)")
 
 
+# Default statuses shipped with the app (order, name, hex color). Default "Default status" is New.
+_DEFAULT_STATUSES = [
+    (0, "New", "#0044FF"),
+    (1, "Testing", "#FF8800"),
+    (2, "Ready", "#00FF00"),
+]
+
+
 def seed_defaults(conn: sqlite3.Connection) -> None:
     """
-    Insert default Status rows (New, Testing, Ready) and optionally Instrument catalog.
-    Safe to call multiple times: checks for existing rows.
+    Insert default Status rows (New, Testing, Ready) with colors only when the Status table is empty.
+    Does not update existing statuses, so user customizations (e.g. colors) are preserved.
     """
+    cur = conn.execute("SELECT COUNT(*) FROM Status")
+    if cur.fetchone()[0] > 0:
+        return
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
-
-    for name, sort_order in [("New", 0), ("Testing", 1), ("Ready", 2)]:
+    for sort_order, name, color in _DEFAULT_STATUSES:
         conn.execute(
-            "INSERT OR IGNORE INTO Status (id, name, color, is_active, sort_order, created_at, updated_at) VALUES (?, ?, NULL, 1, ?, ?, ?)",
-            (sort_order + 1, name, sort_order, now, now),
+            "INSERT INTO Status (id, name, color, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (sort_order + 1, name, color, sort_order, now, now),
         )
-
     conn.commit()
+
+
+def _migrate_status_drop_is_active(conn: sqlite3.Connection) -> None:
+    """If Status table has is_active column, recreate table without it (all statuses are active)."""
+    cur = conn.execute("PRAGMA table_info(Status)")
+    columns = [row[1] for row in cur.fetchall()]
+    if "is_active" not in columns:
+        return
+    conn.execute("""
+        CREATE TABLE Status_new (
+            id INTEGER PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            color TEXT,
+            sort_order INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute(
+        "INSERT INTO Status_new (id, name, color, sort_order, created_at, updated_at)"
+        " SELECT id, name, color, sort_order, created_at, updated_at FROM Status"
+    )
+    conn.execute("DROP TABLE Status")
+    conn.execute("ALTER TABLE Status_new RENAME TO Status")
+    conn.commit()
+
+
+def _backfill_song_status_ids(conn: sqlite3.Connection) -> None:
+    """Set status_id to the effective default for any song that has none."""
+    from .status_repo import get_effective_default_status_id
+    default_id = get_effective_default_status_id(conn)
+    if default_id:
+        conn.execute("UPDATE Song SET status_id = ? WHERE status_id IS NULL", (default_id,))
+        conn.commit()
 
 
 def init_database(db_path: Path | None = None) -> sqlite3.Connection:
     """
-    Create or open the database at db_path (default: get_db_path()), create schema, seed defaults.
+    Create or open the database at db_path (default: get_db_path()), create schema, run migrations, seed defaults.
     Returns an open connection (caller is responsible for closing or using as context manager).
     """
     path = db_path or get_db_path()
     conn = sqlite3.connect(str(path))
     create_schema(conn)
+    _migrate_status_drop_is_active(conn)
     seed_defaults(conn)
+    _backfill_song_status_ids(conn)
     return conn

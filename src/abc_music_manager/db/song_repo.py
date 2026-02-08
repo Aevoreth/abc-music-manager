@@ -12,6 +12,7 @@ from pathlib import Path
 
 from ..parsing.abc_parser import ParsedSong
 from .instrument import resolve_instrument_id
+from .status_repo import get_effective_default_status_id
 
 
 def _now() -> str:
@@ -91,11 +92,12 @@ def ensure_song_from_parsed(
         conn.commit()
         return song_id
 
+    default_status_id = get_effective_default_status_id(conn)
     cur = conn.execute(
         """INSERT INTO Song (title, composers, duration_seconds, transcriber, rating, status_id, notes, lyrics,
            last_played_at, total_plays, parts, created_at, updated_at)
-           VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, 0, ?, ?, ?)""",
-        (parsed.title, parsed.composers, parsed.duration_seconds, parsed.transcriber, parts_json, now, now),
+           VALUES (?, ?, ?, ?, NULL, ?, NULL, NULL, NULL, 0, ?, ?, ?)""",
+        (parsed.title, parsed.composers, parsed.duration_seconds, parsed.transcriber, default_status_id, parts_json, now, now),
     )
     song_id = cur.lastrowid
     conn.execute(
