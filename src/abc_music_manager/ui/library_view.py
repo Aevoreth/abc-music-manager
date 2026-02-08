@@ -422,10 +422,11 @@ class LibraryView(QWidget):
         # Column 3: Play/Set/History buttons — explicit width (model has no text so ResizeToContents would collapse it)
         hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
         hh.resizeSection(3, 140)  # Wide enough for ▶ + Set… + History
-        # Columns 4 (Parts/Rating), 5 (Set), 7 (Transcriber) size to contents
+        # Columns 4 (Parts/Rating), 5 (Set) size to contents; 7 (Transcriber) user-resizable
         hh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(7, QHeaderView.ResizeMode.Interactive)
+        hh.resizeSection(7, 120)
         hh.setSectionsClickable(True)
         hh.sectionClicked.connect(self._on_header_clicked)
         # Row height: 2 lines of text + padding
