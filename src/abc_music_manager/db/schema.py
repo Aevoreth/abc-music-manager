@@ -224,6 +224,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
             rule_type TEXT NOT NULL,
             path TEXT NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 1,
+            include_in_export INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
@@ -298,6 +299,16 @@ def _backfill_song_status_ids(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_folder_rule_include_in_export(conn: sqlite3.Connection) -> None:
+    """Add include_in_export column to FolderRule if missing (for excluded-dirs export flag)."""
+    cur = conn.execute("PRAGMA table_info(FolderRule)")
+    columns = [row[1] for row in cur.fetchall()]
+    if "include_in_export" in columns:
+        return
+    conn.execute("ALTER TABLE FolderRule ADD COLUMN include_in_export INTEGER NOT NULL DEFAULT 0")
+    conn.commit()
+
+
 def init_database(db_path: Path | None = None) -> sqlite3.Connection:
     """
     Create or open the database at db_path (default: get_db_path()), create schema, run migrations, seed defaults.
@@ -307,6 +318,7 @@ def init_database(db_path: Path | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     create_schema(conn)
     _migrate_status_drop_is_active(conn)
+    _migrate_folder_rule_include_in_export(conn)
     seed_defaults(conn)
     _backfill_song_status_ids(conn)
     return conn

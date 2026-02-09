@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QStackedWidget,
+    QSplitter,
     QHBoxLayout,
     QLabel,
     QMenu,
@@ -18,9 +19,11 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
 )
 from PySide6.QtCore import Qt, QByteArray
+from PySide6.QtGui import QColor, QFontMetrics, QPalette
 
 from ..services.app_state import AppState
 from ..services import preferences
+from ..services.preferences import get_splitter_state, set_splitter_state
 
 
 def _restore_window_geometry(window: QMainWindow) -> None:
@@ -71,6 +74,7 @@ class MainWindow(QMainWindow):
         main_layout = QHBoxLayout(central)
 
         self.stacked = QStackedWidget()
+        self.stacked.setObjectName("main_content")
         from .library_view import LibraryView
         from .setlists_view import SetlistsView
         from .bands_view import BandsView
@@ -83,19 +87,54 @@ class MainWindow(QMainWindow):
         self.stacked.addWidget(BandsView(app_state))
         self.stacked.addWidget(SetPlaybackView(app_state))
         self.stacked.addWidget(SettingsView(app_state))
-        main_layout.addWidget(self.stacked, 1)
         self.library_view.navigateToSetlist.connect(self._on_navigate_to_setlist)
 
         self.nav_list = QListWidget()
-        self.nav_list.setMaximumWidth(160)
+        self.nav_list.setObjectName("nav_list")
         self.nav_list.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        # Force selection palette to theme colors so platform default (e.g. golden) never appears
+        from .theme import COLOR_SURFACE, COLOR_TEXT_HEADER
+        pal = self.nav_list.palette()
+        pal.setColor(QPalette.ColorRole.Highlight, QColor(COLOR_SURFACE))
+        pal.setColor(QPalette.ColorRole.HighlightedText, QColor(COLOR_TEXT_HEADER))
+        self.nav_list.setPalette(pal)
         for name in self.PAGES:
             self.nav_list.addItem(QListWidgetItem(name))
+        self.nav_list.setCurrentRow(0)
         self.nav_list.currentRowChanged.connect(self.stacked.setCurrentIndex)
-        main_layout.insertWidget(0, self.nav_list)
+        # Nav list width: default to fit content (text + padding); user can resize via splitter
+        fm = QFontMetrics(self.nav_list.font())
+        text_width = max(fm.horizontalAdvance(name) for name in self.PAGES)
+        self._nav_preferred_width = text_width + 32
+        self.nav_list.setMinimumWidth(self._nav_preferred_width)
+        self.nav_list.setMaximumWidth(400)
+
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.addWidget(self.nav_list)
+        self._splitter.addWidget(self.stacked)
+        self._splitter.setStretchFactor(1, 1)
+        main_layout.addWidget(self._splitter)
+        self._splitter_initial_sizes_set = False
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not getattr(self, "_splitter_initial_sizes_set", True):
+            self._splitter_initial_sizes_set = True
+            saved = get_splitter_state()
+            if saved:
+                data = QByteArray.fromBase64(saved.encode("utf-8"))
+                if not data.isEmpty() and self._splitter.restoreState(data):
+                    return
+            total = self._splitter.width()
+            handle_w = self._splitter.handleWidth()
+            nav_w = min(self._nav_preferred_width, max(self.nav_list.minimumWidth(), total - handle_w - 100))
+            self._splitter.setSizes([nav_w, total - nav_w - handle_w])
 
     def closeEvent(self, event) -> None:
         _save_window_geometry(self)
+        data = self._splitter.saveState()
+        if not data.isEmpty():
+            set_splitter_state(data.toBase64().data().decode("utf-8"))
         super().closeEvent(event)
 
     def _build_menu_bar(self) -> None:

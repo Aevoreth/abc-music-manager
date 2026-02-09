@@ -39,11 +39,21 @@ from ..services.preferences import (
     set_default_status_id,
     get_base_font_size,
     set_base_font_size,
+    get_lotro_root,
+    set_lotro_root,
+    get_default_lotro_root,
+    get_music_root,
+    get_set_export_dir,
+    get_set_export_dir_stored,
+    set_set_export_dir,
+    ensure_default_lotro_root,
+    to_music_relative,
+    resolve_music_path,
 )
 from ..db import list_folder_rules, add_folder_rule, update_folder_rule, delete_folder_rule, FolderRuleRow, RuleType
 from ..db.status_repo import list_statuses, add_status, update_status, delete_status, reorder_statuses, StatusRow
 from ..db.account_target import list_account_targets, add_account_target, update_account_target, delete_account_target, AccountTargetRow
-from .theme import STATUS_CIRCLE_DIAMETER
+from .theme import STATUS_CIRCLE_DIAMETER, COLOR_TEXT_SECONDARY
 
 # Data role for status color in status table Name column and default status combo
 StatusColorRole = Qt.ItemDataRole.UserRole + 10
@@ -183,7 +193,58 @@ class StatusTableWidget(QTableWidget):
                 self._on_order_changed(ids)
 
 
+class ExcludedDirEditor(QDialog):
+    """Edit or add an excluded directory (relative to Music folder; not indexed; optionally in songbook export)."""
+
+    def __init__(self, parent: QWidget | None, rule: FolderRuleRow | None = None) -> None:
+        super().__init__(parent)
+        self.rule = rule
+        self.setWindowTitle("Edit excluded directory" if rule else "Add excluded directory")
+        layout = QFormLayout(self)
+        self.path_edit = QLineEdit()
+        self.path_edit.setPlaceholderText("Path relative to Music folder (e.g. OldSongs or Backup/2023)")
+        self.include_in_export_check = QCheckBox("Include in songbook export")
+        self.include_in_export_check.setToolTip("If checked, files under this path can be included when exporting SongbookData.plugindata")
+        self.enabled_check = QCheckBox("Excluded from library scan")
+        self.enabled_check.setChecked(True)
+        layout.addRow("Path:", self.path_edit)
+        layout.addRow("", self.include_in_export_check)
+        layout.addRow("", self.enabled_check)
+        if rule:
+            self.path_edit.setText(resolve_music_path(rule.path) or rule.path)
+            self.include_in_export_check.setChecked(rule.include_in_export)
+            self.enabled_check.setChecked(rule.enabled)
+        browse = QPushButton("Browse...")
+        browse.clicked.connect(self._browse)
+        layout.addRow("", browse)
+        btns = QHBoxLayout()
+        ok = QPushButton("OK")
+        ok.clicked.connect(self.accept)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        btns.addWidget(ok)
+        btns.addWidget(cancel)
+        layout.addRow(btns)
+
+    def _browse(self) -> None:
+        start_dir = get_music_root() or ""
+        path = QFileDialog.getExistingDirectory(
+            self, "Select folder to exclude (under Music)", start_dir
+        )
+        if path:
+            self.path_edit.setText(path)
+
+    def get_values(self) -> tuple[str, bool, bool]:
+        return (
+            self.path_edit.text().strip(),
+            self.include_in_export_check.isChecked(),
+            self.enabled_check.isChecked(),
+        )
+
+
 class FolderRuleEditor(QDialog):
+    """Legacy editor for any folder rule type (used only if needed elsewhere)."""
+
     def __init__(self, parent: QWidget | None, rule: FolderRuleRow | None = None) -> None:
         super().__init__(parent)
         self.rule = rule
@@ -332,6 +393,7 @@ class SettingsView(QWidget):
         self.tabs.addTab(self._build_folder_rules_tab(), "Folder rules")
         self.tabs.addTab(self._build_statuses_tab(), "Statuses")
         self.tabs.addTab(self._build_account_targets_tab(), "Account targets")
+        self.tabs.currentChanged.connect(self._on_settings_tab_changed)
         layout.addWidget(self.tabs)
 
     def _build_appearance_tab(self) -> QWidget:
@@ -411,60 +473,171 @@ class SettingsView(QWidget):
     def _build_folder_rules_tab(self) -> QWidget:
         w = QWidget()
         v = QVBoxLayout(w)
+
+        # Lord of the Rings Online root directory (contains \Music\ and \PluginData\<account>\AllServers\)
+        lotro_group = QWidget()
+        lotro_layout = QVBoxLayout(lotro_group)
+        lotro_layout.addWidget(QLabel("Lord of the Rings Online directory"))
+        lotro_desc = QLabel(
+            "This is the main LOTRO directory, usually in your Documents library (e.g. Documents\\The Lord of the Rings Online). "
+            "It contains the Music folder (library) and the PluginData folder for SongbookData.plugindata."
+        )
+        lotro_desc.setWordWrap(True)
+        lotro_desc.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        lotro_layout.addWidget(lotro_desc)
+        self.lotro_path_edit = QLineEdit()
+        self.lotro_path_edit.setReadOnly(True)
+        self.lotro_path_edit.setPlaceholderText("Not set — use default if it exists (e.g. Documents\\The Lord of the Rings Online)")
+        lotro_layout.addWidget(self.lotro_path_edit)
+        set_lotro_btn = QPushButton("Set Directory")
+        set_lotro_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        set_lotro_btn.clicked.connect(self._on_change_lotro_root)
+        lotro_layout.addWidget(set_lotro_btn)
+        v.addWidget(lotro_group)
+
+        # Set Export directory (one only; not scanned; included in SongbookData export when implemented)
+        set_export_group = QWidget()
+        set_export_layout = QVBoxLayout(set_export_group)
+        set_export_layout.addWidget(QLabel("Set Export directory"))
+        set_export_desc = QLabel("Single directory for set export. Not scanned for the library; included when exporting SongbookData.plugindata.")
+        set_export_desc.setWordWrap(True)
+        set_export_desc.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        set_export_layout.addWidget(set_export_desc)
+        self.set_export_path_edit = QLineEdit()
+        self.set_export_path_edit.setReadOnly(True)
+        self.set_export_path_edit.setPlaceholderText("Not set")
+        set_export_layout.addWidget(self.set_export_path_edit)
+        set_export_btn_row = QHBoxLayout()
+        set_export_btn = QPushButton("Set Directory")
+        set_export_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        set_export_btn.clicked.connect(self._on_set_export_dir)
+        set_export_btn_row.addWidget(set_export_btn)
+        clear_export_btn = QPushButton("Clear")
+        clear_export_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        clear_export_btn.clicked.connect(self._on_clear_set_export_dir)
+        set_export_btn_row.addWidget(clear_export_btn)
+        set_export_btn_row.addStretch()
+        set_export_layout.addLayout(set_export_btn_row)
+        v.addWidget(set_export_group)
+
+        # Excluded directories table
+        excl_label = QLabel("Excluded directories")
+        v.addWidget(excl_label)
+        excl_desc = QLabel("Paths listed here are not indexed in the library. You can choose whether to include them in songbook export.")
+        excl_desc.setWordWrap(True)
+        excl_desc.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        v.addWidget(excl_desc)
+        add_excl_btn = QPushButton("Add Excluded Directory")
+        add_excl_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        add_excl_btn.clicked.connect(self._add_excluded_dir)
+        v.addWidget(add_excl_btn)
         self.folder_table = QTableWidget()
-        self.folder_table.setColumnCount(4)
-        self.folder_table.setHorizontalHeaderLabels(["Type", "Path", "Enabled", "Actions"])
-        self.folder_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.folder_table.setColumnCount(3)
+        self.folder_table.setHorizontalHeaderLabels(["Path", "Songbook", "Actions"])
+        self.folder_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.folder_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         v.addWidget(self.folder_table)
-        add_btn = QPushButton("Add folder rule")
-        add_btn.clicked.connect(self._add_folder_rule)
-        v.addWidget(add_btn)
+
+        self._refresh_lotro_and_set_export_display()
         self._refresh_folder_rules()
         return w
 
+    def _on_settings_tab_changed(self, index: int) -> None:
+        # Folder rules tab is index 1: ensure default LOTRO path is detected/saved and refresh display
+        if index == 1:
+            ensure_default_lotro_root()
+            self._refresh_lotro_and_set_export_display()
+
+    def _refresh_lotro_and_set_export_display(self) -> None:
+        lotro = get_lotro_root()
+        if not lotro and get_default_lotro_root():
+            lotro = get_default_lotro_root()
+        self.lotro_path_edit.setText(lotro or "")
+        self.set_export_path_edit.setText(get_set_export_dir_stored() or "")
+
+    def _on_change_lotro_root(self) -> None:
+        current = get_lotro_root() or get_default_lotro_root()
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Select Lord of the Rings Online directory",
+            current or "",
+        )
+        if path:
+            set_lotro_root(path)
+            self._refresh_lotro_and_set_export_display()
+
+    def _on_set_export_dir(self) -> None:
+        current = get_set_export_dir()
+        start_dir = get_music_root() or current or ""
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Select Set Export directory (relative to Music folder)",
+            start_dir,
+        )
+        if path:
+            set_set_export_dir(path)
+            self._refresh_lotro_and_set_export_display()
+
+    def _on_clear_set_export_dir(self) -> None:
+        set_set_export_dir("")
+        self._refresh_lotro_and_set_export_display()
+
     def _refresh_folder_rules(self) -> None:
-        rules = list_folder_rules(self.app_state.conn)
+        rules = [r for r in list_folder_rules(self.app_state.conn) if r.rule_type == "exclude"]
         self.folder_table.setRowCount(len(rules))
         for i, r in enumerate(rules):
-            self.folder_table.setItem(i, 0, QTableWidgetItem(r.rule_type))
-            self.folder_table.setItem(i, 1, QTableWidgetItem(r.path))
-            self.folder_table.setItem(i, 2, QTableWidgetItem("Yes" if r.enabled else "No"))
-            btn = QPushButton("Edit")
-            btn.setProperty("rule_id", r.id)
-            btn.clicked.connect(lambda checked=False, row=r: self._edit_folder_rule(row))
+            self.folder_table.setItem(i, 0, QTableWidgetItem(r.path))
+            self.folder_table.setItem(i, 1, QTableWidgetItem("Yes" if r.include_in_export else "No"))
+            edit_btn = QPushButton("Edit")
+            edit_btn.setMinimumWidth(52)
+            edit_btn.clicked.connect(lambda checked=False, row=r: self._edit_excluded_dir(row))
             del_btn = QPushButton("Delete")
-            del_btn.setProperty("rule_id", r.id)
+            del_btn.setMinimumWidth(58)
             del_btn.clicked.connect(lambda checked=False, row=r: self._delete_folder_rule(row))
             cell = QWidget()
             cell_layout = QHBoxLayout(cell)
-            cell_layout.addWidget(btn)
+            cell_layout.setContentsMargins(4, 2, 4, 2)
+            cell_layout.addWidget(edit_btn)
             cell_layout.addWidget(del_btn)
-            self.folder_table.setCellWidget(i, 3, cell)
-        self.folder_table.setRowCount(len(rules))
+            self.folder_table.setCellWidget(i, 2, cell)
 
-    def _add_folder_rule(self) -> None:
-        dlg = FolderRuleEditor(self)
+    def _add_excluded_dir(self) -> None:
+        dlg = ExcludedDirEditor(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            rule_type, path, enabled = dlg.get_values()
+            path, include_in_export, enabled = dlg.get_values()
             if not path:
                 QMessageBox.warning(self, "Error", "Path is required.")
                 return
-            add_folder_rule(self.app_state.conn, rule_type, path, enabled)
+            path_to_save = to_music_relative(path)
+            add_folder_rule(
+                self.app_state.conn,
+                "exclude",
+                path_to_save,
+                enabled=enabled,
+                include_in_export=include_in_export,
+            )
             self._refresh_folder_rules()
 
-    def _edit_folder_rule(self, rule: FolderRuleRow) -> None:
-        dlg = FolderRuleEditor(self, rule)
+    def _edit_excluded_dir(self, rule: FolderRuleRow) -> None:
+        dlg = ExcludedDirEditor(self, rule)
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            rule_type, path, enabled = dlg.get_values()
+            path, include_in_export, enabled = dlg.get_values()
             if not path:
                 QMessageBox.warning(self, "Error", "Path is required.")
                 return
-            update_folder_rule(self.app_state.conn, rule.id, path=path, enabled=enabled)
+            path_to_save = to_music_relative(path)
+            update_folder_rule(
+                self.app_state.conn,
+                rule.id,
+                path=path_to_save,
+                enabled=enabled,
+                include_in_export=include_in_export,
+            )
             self._refresh_folder_rules()
 
     def _delete_folder_rule(self, rule: FolderRuleRow) -> None:
         if QMessageBox.question(
-            self, "Confirm", f"Delete folder rule: {rule.rule_type} — {rule.path}?",
+            self, "Confirm", f"Remove excluded directory:\n{rule.path}?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         ) == QMessageBox.StandardButton.Yes:

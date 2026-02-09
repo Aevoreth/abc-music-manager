@@ -283,14 +283,21 @@ Fields:
 
 ---
 
-### FolderRule
-Defines library roots, set/export folders, and exclusions. At least one library_root is needed for a non-empty library; app may run with zero roots (empty state) (DECISIONS 023).
+### Preferences (paths)
+- **lotro_root** — Single Lord of the Rings Online directory (contains `\Music\` and `\PluginData\<account>\AllServers\`). Default: user Documents library location if it exists.
+- **set_export_dir** — Single Set Export directory. Not scanned for library; included when exporting SongbookData.plugindata.
+
+Library root for scanning = lotro_root/Music. Set roots for scanning = set_export_dir (one). PluginData paths for writing = lotro_root/PluginData/<accountName>/AllServers (or per AccountTarget if overridden).
+
+### FolderRule (excluded directories only)
+Excluded paths: not indexed in the library; optionally included in songbook export (include_in_export).
 
 Fields:
 - id (INTEGER PK)
-- rule_type (TEXT) — "library_root" | "set_root" | "exclude"
+- rule_type (TEXT) — legacy; only "exclude" is used
 - path (TEXT)
 - enabled (BOOLEAN NOT NULL DEFAULT 1)
+- include_in_export (BOOLEAN NOT NULL DEFAULT 0) — include in SongbookData.plugindata export when implemented
 - created_at (DATETIME)
 - updated_at (DATETIME)
 

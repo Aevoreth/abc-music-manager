@@ -185,14 +185,32 @@ def dark_stylesheet() -> str:
         QTabWidget::pane {{
             border: 1px solid {COLOR_OUTLINE};
             background-color: {COLOR_SURFACE};
+            border-top: none;
+            top: -1px;
         }}
         QTabBar::tab {{
-            background-color: {COLOR_TITLE_BAR};
+            background-color: {COLOR_SURFACE_VARIANT};
             color: {COLOR_TEXT_SECONDARY};
-            padding: 8px 16px;
+            padding: 10px 20px;
+            margin-right: 2px;
+            border: 1px solid {COLOR_OUTLINE};
+            border-bottom: none;
+            border-top-left-radius: 6px;
+            border-top-right-radius: 6px;
+            min-width: 80px;
+            font-weight: bold;
+        }}
+        QTabBar::tab:hover {{
+            background-color: {COLOR_OUTLINE_VARIANT};
+            color: {COLOR_ON_SURFACE};
         }}
         QTabBar::tab:selected {{
+            background-color: {COLOR_SURFACE};
             color: {COLOR_TEXT_HEADER};
+            font-weight: bold;
+            border-color: {COLOR_OUTLINE};
+            border-bottom: 1px solid {COLOR_SURFACE};
+            margin-bottom: -1px;
         }}
         QLabel {{
             color: {COLOR_ON_SURFACE};
@@ -216,11 +234,76 @@ def dark_stylesheet() -> str:
             border-color: {COLOR_PRIMARY};
         }}
         QListWidget {{
-            background-color: {COLOR_SURFACE};
+            background-color: {COLOR_TITLE_BAR};
+            color: {COLOR_ON_SURFACE};
+            padding: 4px;
+            border: 1px solid {COLOR_OUTLINE};
+            border-radius: 6px;
+            outline: none;
+        }}
+        QListWidget::viewport {{
+            background-color: transparent;
+        }}
+        QListWidget::item {{
+            background-color: {COLOR_SURFACE_VARIANT};
+            color: {COLOR_TEXT_SECONDARY};
+            padding: 10px 16px;
+            margin: 2px 0;
+            border: 1px solid {COLOR_OUTLINE};
+            border-radius: 6px;
+            min-height: 1.2em;
+        }}
+        QListWidget::item:hover {{
+            background-color: {COLOR_OUTLINE_VARIANT};
             color: {COLOR_ON_SURFACE};
         }}
-        QListWidget::item:selected {{
+        QListWidget::item:selected, QListWidget::item:selected:focus, QListWidget::item:selected:active {{
+            background-color: {COLOR_SURFACE};
+            color: {COLOR_TEXT_HEADER};
+            font-weight: bold;
+            border-color: {COLOR_OUTLINE};
+        }}
+        /* Side tabs: rounded on left only, selected tab connects to content on the right */
+        QListWidget#nav_list {{
+            background-color: {COLOR_TITLE_BAR};
+            padding: 4px 0 4px 4px;
+            border: 1px solid {COLOR_OUTLINE};
+            border-right: none;
+            border-top-left-radius: 6px;
+            border-bottom-left-radius: 6px;
+            border-top-right-radius: 0;
+            border-bottom-right-radius: 0;
+        }}
+        QListWidget#nav_list::viewport {{
+            background-color: {COLOR_TITLE_BAR};
+        }}
+        QListWidget#nav_list::item {{
+            background-color: {COLOR_SURFACE_VARIANT};
+            color: {COLOR_TEXT_SECONDARY};
+            padding: 0px 10px;
+            margin: 4px 2px 4px 0;
+            border: 1px solid {COLOR_OUTLINE};
+            border-top-left-radius: 6px;
+            border-bottom-left-radius: 6px;
+            border-top-right-radius: 0;
+            border-bottom-right-radius: 0;
+            min-height: 0;
+            font-weight: bold;
+        }}
+        QListWidget#nav_list::item:hover {{
             background-color: {COLOR_OUTLINE_VARIANT};
+            color: {COLOR_ON_SURFACE};
+        }}
+        QListWidget#nav_list::item:selected, QListWidget#nav_list::item:selected:focus, QListWidget#nav_list::item:selected:active {{
+            background-color: {COLOR_SURFACE};
+            color: {COLOR_TEXT_HEADER};
+            font-weight: bold;
+            border-right: 1px solid {COLOR_SURFACE};
+            margin-right: -1px;
+        }}
+        QStackedWidget#main_content {{
+            background-color: {COLOR_SURFACE};
+            border-left: 1px solid {COLOR_OUTLINE};
         }}
         QScrollBar:vertical {{
             background: {COLOR_SURFACE};

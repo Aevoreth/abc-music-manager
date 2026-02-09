@@ -1,5 +1,7 @@
 {
-  "base_font_size": 10,
-  "window_geometry": "AdnQywADAAAAAAfAAAAArwAADMkAAAOJAAAHwAAAAM4AAAzJAAADiQAAAAEAAAAAB4AAAAfAAAAAzgAADMkAAAOJ",
-  "default_status_id": 1
+  "window_geometry": "AdnQywADAAAAAAglAAAAhwAADS4AAANhAAAIJQAAAKYAAA0uAAADYQAAAAEAAAAAB4AAAAglAAAApgAADS4AAANh",
+  "default_status_id": 1,
+  "splitter_state": "AAAA/wAAAAEAAAACAAAAbAAABIcB/////wEAAAABAA==",
+  "lotro_root": "C:/Users/psybo/OneDrive/Documents/The Lord of the Rings Online",
+  "set_export_dir": "Aev/Sets"
 }
