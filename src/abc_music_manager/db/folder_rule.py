@@ -111,10 +111,10 @@ def get_enabled_roots(
     conn: sqlite3.Connection,
 ) -> tuple[list[str], list[str], list[str]]:
     """
-    Return (library_roots, set_roots, exclude_paths) for scanning.
-    Library root = single LOTRO root/Music from preferences.
-    Set roots = single Set Export dir from preferences (not scanned for library, used for export).
-    Exclude paths = from FolderRule where rule_type='exclude' and enabled.
+    Return (library_roots, set_roots, exclude_paths) for library scanning.
+    Library root = single LOTRO root/Music. Scan Music in full; exclude_paths are exceptions.
+    Set Export dir and FolderRule excludes are both in exclude_paths (not scanned for library).
+    set_roots is still returned for SongbookData export (separate use).
     """
     library_roots = []
     set_roots = []
@@ -139,6 +139,12 @@ def get_enabled_roots(
     )
     music_root = Path(get_lotro_root()) / "Music" if get_lotro_root() else None
     exclude_paths = []
+    # Add Set Export dir so library scan skips it (Music root scanned in full, set dir is exception).
+    if set_export:
+        try:
+            exclude_paths.append(str(Path(set_export).resolve()))
+        except (OSError, RuntimeError):
+            pass
     for _rt, path in cur.fetchall():
         try:
             p = Path(path)
@@ -152,3 +158,36 @@ def get_enabled_roots(
         except (OSError, RuntimeError, ValueError):
             exclude_paths.append(path)
     return library_roots, set_roots, exclude_paths
+
+
+@dataclass
+class ExcludeRuleForExport:
+    """Resolved path and include_in_export for SongbookData nested-exclude logic."""
+    resolved_path: str
+    include_in_export: bool
+
+
+def get_exclude_rules_for_songbook(conn: sqlite3.Connection) -> list[ExcludeRuleForExport]:
+    """
+    Return enabled exclude rules with resolved paths and include_in_export.
+    Used when building SongbookData: include a path under an exclude only if the
+    most specific (longest) matching exclude has include_in_export True.
+    """
+    music_root = Path(get_lotro_root()) / "Music" if get_lotro_root() else None
+    cur = conn.execute(
+        "SELECT path, include_in_export FROM FolderRule WHERE enabled = 1 AND rule_type = 'exclude'"
+    )
+    rules = []
+    for path, include_in_export in cur.fetchall():
+        try:
+            p = Path(path)
+            if p.is_absolute():
+                resolved = str(p.resolve())
+            elif music_root and str(music_root):
+                resolved = str((music_root / p).resolve())
+            else:
+                resolved = path
+            rules.append(ExcludeRuleForExport(resolved_path=resolved, include_in_export=bool(include_in_export)))
+        except (OSError, RuntimeError, ValueError):
+            rules.append(ExcludeRuleForExport(resolved_path=path, include_in_export=bool(include_in_export)))
+    return rules

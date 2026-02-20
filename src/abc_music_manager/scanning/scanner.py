@@ -127,7 +127,8 @@ def run_scan(
     library_roots = [_normalize_path(p) for p in lib]
     set_roots = [_normalize_path(p) for p in set_r]
     exclude_paths = [_normalize_path(p) for p in excl]
-    all_roots = library_roots + set_roots
+    # Only scan library roots; set export folder is excluded from scanning (used for export only).
+    all_roots = library_roots
     if not all_roots:
         _remove_missing_song_files(conn, set())
         return 0, 0, 0
