@@ -12,12 +12,15 @@ from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QTableView,
     QLineEdit,
     QLabel,
     QComboBox,
     QSpinBox,
     QPushButton,
+    QSlider,
+    QCheckBox,
     QAbstractItemView,
     QHeaderView,
     QMessageBox,
@@ -26,6 +29,10 @@ from PySide6.QtWidgets import (
     QDateTimeEdit,
     QStyleOptionViewItem,
     QStyle,
+    QFrame,
+    QListWidget,
+    QListWidgetItem,
+    QScrollArea,
 )
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QRect, QSize, Signal
 from PySide6.QtGui import QColor, QAction, QPainter, QFont, QBrush, QPen, QIcon, QPixmap
@@ -46,6 +53,25 @@ from .theme import STATUS_CIRCLE_DIAMETER
 
 # Role for status color in library filter combo items
 LibraryStatusColorRole = Qt.ItemDataRole.UserRole + 20
+
+# Last-played filter scale: (label, seconds_ago). Just now → hourly 1–24h → daily 2–7d → weekly 1–8w → monthly 1–12mo → yearly 1–5y → More than 5 years
+def _last_played_scale() -> list[tuple[str, int]]:
+    scale = [("Just now", 0)]
+    for h in range(1, 25):
+        scale.append((f"{h}h", h * 3600))
+    for d in range(2, 8):
+        scale.append((f"{d}d", d * 86400))
+    for w in range(1, 9):
+        scale.append((f"{w}w", w * 604800))
+    for m in range(1, 13):
+        scale.append((f"{m}mo", m * 30 * 86400))
+    for y in range(1, 6):
+        scale.append((f"{y}y", y * 365 * 86400))
+    scale.append(("More than 5 years", 5 * 365 * 86400))
+    return scale
+
+LAST_PLAYED_SCALE = _last_played_scale()
+LAST_PLAYED_MAX_INDEX = len(LAST_PLAYED_SCALE) - 1
 
 
 class LibraryFilterStatusDelegate(QStyledItemDelegate):
@@ -173,7 +199,10 @@ class LibraryTableModel(QAbstractTableModel):
         self._filter_status_ids: Optional[list[int]] = None
         self._filter_part_count_min: Optional[int] = None
         self._filter_part_count_max: Optional[int] = None
-        self._filter_plays_days: Optional[int] = None
+        self._filter_last_played_never: bool = False
+        self._filter_last_played_min_seconds_ago: Optional[int] = None
+        self._filter_last_played_max_seconds_ago: Optional[int] = None
+        self._filter_in_set: Optional[str] = None  # "yes", "no", or None for either
         self._default_status_name: Optional[str] = None
         self._default_status_color: Optional[str] = None
 
@@ -188,7 +217,10 @@ class LibraryTableModel(QAbstractTableModel):
         status_ids: Optional[list[int]] = None,
         part_count_min: Optional[int] = None,
         part_count_max: Optional[int] = None,
-        plays_days: Optional[int] = None,
+        last_played_never: bool = False,
+        last_played_min_seconds_ago: Optional[int] = None,
+        last_played_max_seconds_ago: Optional[int] = None,
+        in_set: Optional[str] = None,
     ) -> None:
         self._filter_title_composer = (title_or_composer or "").strip()
         self._filter_transcriber = (transcriber or "").strip()
@@ -199,7 +231,10 @@ class LibraryTableModel(QAbstractTableModel):
         self._filter_status_ids = status_ids
         self._filter_part_count_min = part_count_min
         self._filter_part_count_max = part_count_max
-        self._filter_plays_days = plays_days
+        self._filter_last_played_never = last_played_never
+        self._filter_last_played_min_seconds_ago = last_played_min_seconds_ago
+        self._filter_last_played_max_seconds_ago = last_played_max_seconds_ago
+        self._filter_in_set = in_set if in_set in ("yes", "no") else None
         self.refresh()
 
     def _resolve_default_status(self) -> None:
@@ -228,7 +263,10 @@ class LibraryTableModel(QAbstractTableModel):
             status_ids=self._filter_status_ids,
             part_count_min=self._filter_part_count_min,
             part_count_max=self._filter_part_count_max,
-            plays_in_last_n_days=self._filter_plays_days,
+            last_played_never=self._filter_last_played_never,
+            last_played_min_seconds_ago=self._filter_last_played_min_seconds_ago,
+            last_played_max_seconds_ago=self._filter_last_played_max_seconds_ago,
+            in_set_filter=self._filter_in_set,
             limit=2000,
         )
         self.endResetModel()
@@ -439,33 +477,143 @@ class LibraryView(QWidget):
         self.app_state = app_state
         layout = QVBoxLayout(self)
 
-        # Filter row: single Title/Composer filter with clear button, applies immediately
-        filter_layout = QHBoxLayout()
-        filter_layout.addWidget(QLabel("Title / Composer:"))
+        # Filter panel: multiple rows, all apply immediately
+        filter_widget = QWidget()
+        filter_layout = QVBoxLayout(filter_widget)
+        filter_layout.setContentsMargins(0, 0, 0, 4)
+
+        # Row 1: Title/Composer, Transcriber, In set, Status, Refresh
+        row1 = QHBoxLayout()
+        row1.addWidget(QLabel("Title / Composer:"))
         self.title_composer_edit = QLineEdit()
         self.title_composer_edit.setPlaceholderText("Filter by title or composer")
         self.title_composer_edit.setClearButtonEnabled(True)
-        self.title_composer_edit.setMaximumWidth(240)
+        self.title_composer_edit.setMaximumWidth(220)
         self.title_composer_edit.textChanged.connect(self._apply_filters)
-        filter_layout.addWidget(self.title_composer_edit)
-        filter_layout.addWidget(QLabel("Status:"))
-        self.status_combo = QComboBox()
-        self.status_combo.setItemDelegate(LibraryFilterStatusDelegate(self.status_combo))
-        self.status_combo.setMinimumWidth(140)
-        self.status_combo.currentIndexChanged.connect(self._apply_filters)
-        filter_layout.addWidget(self.status_combo)
-        filter_layout.addWidget(QLabel("Plays in last (days):"))
-        self.plays_days_spin = QSpinBox()
-        self.plays_days_spin.setRange(0, 365)
-        self.plays_days_spin.setSpecialValueText("—")
-        self.plays_days_spin.setMaximumWidth(60)
-        self.plays_days_spin.valueChanged.connect(self._apply_filters)
-        filter_layout.addWidget(self.plays_days_spin)
+        row1.addWidget(self.title_composer_edit)
+        row1.addWidget(QLabel("Transcriber:"))
+        self.transcriber_edit = QLineEdit()
+        self.transcriber_edit.setPlaceholderText("Filter")
+        self.transcriber_edit.setClearButtonEnabled(True)
+        self.transcriber_edit.setMaximumWidth(140)
+        self.transcriber_edit.textChanged.connect(self._apply_filters)
+        row1.addWidget(self.transcriber_edit)
+        row1.addWidget(QLabel("In set:"))
+        self.in_set_combo = QComboBox()
+        self.in_set_combo.addItem("Either", None)
+        self.in_set_combo.addItem("Yes", "yes")
+        self.in_set_combo.addItem("No", "no")
+        self.in_set_combo.currentIndexChanged.connect(self._apply_filters)
+        row1.addWidget(self.in_set_combo)
+        self.status_btn = QPushButton("Status (all)")
+        self.status_btn.setCheckable(True)
+        self.status_btn.clicked.connect(self._on_status_filter_clicked)
+        row1.addWidget(self.status_btn)
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self._apply_filters)
-        filter_layout.addWidget(self.refresh_btn)
-        filter_layout.addStretch()
-        layout.addLayout(filter_layout)
+        row1.addWidget(self.refresh_btn)
+        row1.addStretch()
+        filter_layout.addLayout(row1)
+
+        # Row 2: Duration (min/max), Last played (Never + range)
+        row2 = QHBoxLayout()
+        row2.addWidget(QLabel("Duration (s):"))
+        self.duration_min_slider = QSlider(Qt.Orientation.Horizontal)
+        self.duration_min_slider.setRange(0, 7200)  # 0 = no min, up to 2h
+        self.duration_min_slider.setValue(0)
+        self.duration_min_slider.valueChanged.connect(self._update_filter_labels)
+        self.duration_min_slider.valueChanged.connect(self._apply_filters)
+        self.duration_min_slider.setMinimumWidth(100)
+        row2.addWidget(self.duration_min_slider)
+        self.duration_min_label = QLabel("—")
+        self.duration_min_label.setMinimumWidth(36)
+        row2.addWidget(self.duration_min_label)
+        row2.addWidget(QLabel("to"))
+        self.duration_max_slider = QSlider(Qt.Orientation.Horizontal)
+        self.duration_max_slider.setRange(0, 7200)  # 0 = no max
+        self.duration_max_slider.setValue(0)
+        self.duration_max_slider.valueChanged.connect(self._update_filter_labels)
+        self.duration_max_slider.valueChanged.connect(self._apply_filters)
+        self.duration_max_slider.setMinimumWidth(100)
+        row2.addWidget(self.duration_max_slider)
+        self.duration_max_label = QLabel("—")
+        self.duration_max_label.setMinimumWidth(36)
+        row2.addWidget(self.duration_max_label)
+        row2.addSpacing(16)
+        self.last_played_never_check = QCheckBox("Never")
+        self.last_played_never_check.toggled.connect(self._on_last_played_never_toggled)
+        self.last_played_never_check.toggled.connect(self._apply_filters)
+        row2.addWidget(self.last_played_never_check)
+        row2.addWidget(QLabel("Last played:"))
+        self.last_played_min_slider = QSlider(Qt.Orientation.Horizontal)
+        self.last_played_min_slider.setRange(0, LAST_PLAYED_MAX_INDEX)
+        self.last_played_min_slider.setValue(LAST_PLAYED_MAX_INDEX)
+        self.last_played_min_slider.valueChanged.connect(self._update_filter_labels)
+        self.last_played_min_slider.valueChanged.connect(self._apply_filters)
+        self.last_played_min_slider.setMinimumWidth(80)
+        row2.addWidget(self.last_played_min_slider)
+        self.last_played_min_label = QLabel("—")
+        row2.addWidget(self.last_played_min_label)
+        row2.addWidget(QLabel("to"))
+        self.last_played_max_slider = QSlider(Qt.Orientation.Horizontal)
+        self.last_played_max_slider.setRange(0, LAST_PLAYED_MAX_INDEX)
+        self.last_played_max_slider.setValue(0)
+        self.last_played_max_slider.valueChanged.connect(self._update_filter_labels)
+        self.last_played_max_slider.valueChanged.connect(self._apply_filters)
+        self.last_played_max_slider.setMinimumWidth(80)
+        row2.addWidget(self.last_played_max_slider)
+        self.last_played_max_label = QLabel("Just now")
+        row2.addWidget(self.last_played_max_label)
+        row2.addStretch()
+        filter_layout.addLayout(row2)
+
+        # Row 3: Parts (1–24), Rating (1–5)
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("Parts:"))
+        self.parts_min_slider = QSlider(Qt.Orientation.Horizontal)
+        self.parts_min_slider.setRange(1, 24)
+        self.parts_min_slider.setValue(1)
+        self.parts_min_slider.valueChanged.connect(self._update_filter_labels)
+        self.parts_min_slider.valueChanged.connect(self._apply_filters)
+        self.parts_min_slider.setMinimumWidth(80)
+        row3.addWidget(self.parts_min_slider)
+        self.parts_min_label = QLabel("1")
+        row3.addWidget(self.parts_min_label)
+        row3.addWidget(QLabel("to"))
+        self.parts_max_slider = QSlider(Qt.Orientation.Horizontal)
+        self.parts_max_slider.setRange(1, 24)
+        self.parts_max_slider.setValue(24)
+        self.parts_max_slider.valueChanged.connect(self._update_filter_labels)
+        self.parts_max_slider.valueChanged.connect(self._apply_filters)
+        self.parts_max_slider.setMinimumWidth(80)
+        row3.addWidget(self.parts_max_slider)
+        self.parts_max_label = QLabel("24")
+        row3.addWidget(self.parts_max_label)
+        row3.addSpacing(16)
+        row3.addWidget(QLabel("Rating:"))
+        self.rating_min_slider = QSlider(Qt.Orientation.Horizontal)
+        self.rating_min_slider.setRange(1, 5)
+        self.rating_min_slider.setValue(1)
+        self.rating_min_slider.valueChanged.connect(self._update_filter_labels)
+        self.rating_min_slider.valueChanged.connect(self._apply_filters)
+        self.rating_min_slider.setMinimumWidth(60)
+        row3.addWidget(self.rating_min_slider)
+        self.rating_min_label = QLabel("1")
+        row3.addWidget(self.rating_min_label)
+        row3.addWidget(QLabel("to"))
+        self.rating_max_slider = QSlider(Qt.Orientation.Horizontal)
+        self.rating_max_slider.setRange(1, 5)
+        self.rating_max_slider.setValue(5)
+        self.rating_max_slider.valueChanged.connect(self._update_filter_labels)
+        self.rating_max_slider.valueChanged.connect(self._apply_filters)
+        self.rating_max_slider.setMinimumWidth(60)
+        row3.addWidget(self.rating_max_slider)
+        self.rating_max_label = QLabel("5")
+        row3.addWidget(self.rating_max_label)
+        row3.addStretch()
+        filter_layout.addLayout(row3)
+
+        layout.addWidget(filter_widget)
 
         self.model = LibraryTableModel(app_state.conn)
         self.proxy = LibrarySortProxy(self)
@@ -512,7 +660,9 @@ class LibraryView(QWidget):
         self.table.viewport().installEventFilter(self)
         layout.addWidget(self.table)
 
-        self._load_status_combo()
+        self._selected_status_ids: list[int] = []  # empty = all
+        self._status_popup: QWidget | None = None
+        self._update_filter_labels()
         self.model.refresh()
 
     # Sortable columns: Title, Composer, Duration, Last played, Parts, Rating, Transcriber
@@ -678,24 +828,130 @@ class LibraryView(QWidget):
             log_play_at(self.app_state.conn, song_id, dt.isoformat())
             self.model.refresh()
 
-    def _load_status_combo(self) -> None:
-        self.status_combo.clear()
-        self.status_combo.addItem("(all)", None)
-        for r in list_statuses(self.app_state.conn):
-            i = self.status_combo.count()
-            self.status_combo.addItem(r.name, r.id)
-            self.status_combo.setItemData(i, r.color, LibraryStatusColorRole)
+    def _on_status_filter_clicked(self) -> None:
+        if self._status_popup is not None and self._status_popup.isVisible():
+            self._status_popup.close()
+            self.status_btn.setChecked(False)
+            return
+        popup = QFrame(self, Qt.WindowType.Popup)
+        popup.setFrameShape(QFrame.Shape.StyledPanel)
+        layout = QVBoxLayout(popup)
+        list_widget = QListWidget()
+        list_widget.setMaximumHeight(220)
+        statuses = list_statuses(self.app_state.conn)
+        all_item = QListWidgetItem("(All)")
+        all_item.setData(Qt.ItemDataRole.UserRole, None)
+        all_item.setFlags(all_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        all_item.setCheckState(Qt.CheckState.Checked if not self._selected_status_ids else Qt.CheckState.Unchecked)
+        list_widget.addItem(all_item)
+        for r in statuses:
+            item = QListWidgetItem(r.name)
+            item.setData(Qt.ItemDataRole.UserRole, r.id)
+            item.setData(LibraryStatusColorRole, r.color)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            checked = r.id in self._selected_status_ids if self._selected_status_ids else False
+            item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+            list_widget.addItem(item)
+        list_widget.setItemDelegate(LibraryFilterStatusDelegate(list_widget))
+        layout.addWidget(list_widget)
+
+        def sync_and_apply():
+            list_widget.blockSignals(True)
+            if all_item.checkState() == Qt.CheckState.Checked:
+                for i in range(1, list_widget.count()):
+                    list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+                self._selected_status_ids = []
+            else:
+                self._selected_status_ids = []
+                for i in range(1, list_widget.count()):
+                    it = list_widget.item(i)
+                    if it.checkState() == Qt.CheckState.Checked:
+                        self._selected_status_ids.append(it.data(Qt.ItemDataRole.UserRole))
+                if not self._selected_status_ids:
+                    all_item.setCheckState(Qt.CheckState.Checked)
+            list_widget.blockSignals(False)
+            self.status_btn.setText("Status (all)" if not self._selected_status_ids else f"Status ({len(self._selected_status_ids)})")
+            self._apply_filters()
+
+        list_widget.itemChanged.connect(sync_and_apply)
+        popup.move(self.status_btn.mapToGlobal(self.status_btn.rect().bottomLeft()))
+        popup.show()
+
+        def on_popup_closed():
+            self.status_btn.setChecked(False)
+            self._status_popup = None
+        popup.destroyed.connect(on_popup_closed)
+        self._status_popup = popup
+
+    def _on_last_played_never_toggled(self, checked: bool) -> None:
+        for w in (self.last_played_min_slider, self.last_played_max_slider, self.last_played_min_label, self.last_played_max_label):
+            w.setEnabled(not checked)
+
+    def _update_filter_labels(self) -> None:
+        v = self.duration_min_slider.value()
+        self.duration_min_label.setText(_format_duration(v) if v > 0 else "—")
+        v = self.duration_max_slider.value()
+        self.duration_max_label.setText(_format_duration(v) if v > 0 else "—")
+        self.parts_min_label.setText(str(self.parts_min_slider.value()))
+        self.parts_max_label.setText(str(self.parts_max_slider.value()))
+        self.rating_min_label.setText(str(self.rating_min_slider.value()))
+        self.rating_max_label.setText(str(self.rating_max_slider.value()))
+        if not self.last_played_never_check.isChecked():
+            i = self.last_played_min_slider.value()
+            self.last_played_min_label.setText(LAST_PLAYED_SCALE[i][0] if 0 <= i <= LAST_PLAYED_MAX_INDEX else "—")
+            i = self.last_played_max_slider.value()
+            self.last_played_max_label.setText(LAST_PLAYED_SCALE[i][0] if 0 <= i <= LAST_PLAYED_MAX_INDEX else "—")
 
     def _apply_filters(self) -> None:
-        status_data = self.status_combo.currentData()
-        status_ids = [status_data] if status_data is not None and status_data != -1 else None
-        plays_days = self.plays_days_spin.value()
-        if plays_days <= 0:
-            plays_days = None
+        # Clamp dual sliders: min <= max for duration/parts/rating; for last_played, "older" index >= "newer" index
+        d_min, d_max = self.duration_min_slider.value(), self.duration_max_slider.value()
+        if d_min > 0 and d_max > 0 and d_min > d_max:
+            self.duration_max_slider.setValue(d_min)
+        p_min, p_max = self.parts_min_slider.value(), self.parts_max_slider.value()
+        if p_min > p_max:
+            self.parts_max_slider.setValue(p_min)
+        r_min, r_max = self.rating_min_slider.value(), self.rating_max_slider.value()
+        if r_min > r_max:
+            self.rating_max_slider.setValue(r_min)
+        lp_min, lp_max = self.last_played_min_slider.value(), self.last_played_max_slider.value()
+        if not self.last_played_never_check.isChecked() and lp_min < lp_max:
+            self.last_played_min_slider.setValue(lp_max)
+
+        duration_min = self.duration_min_slider.value() or None
+        duration_max = self.duration_max_slider.value() or None
+        last_played_never = self.last_played_never_check.isChecked()
+        last_played_min_sec = None
+        last_played_max_sec = None
+        if not last_played_never:
+            lp_min_i = self.last_played_min_slider.value()
+            lp_max_i = self.last_played_max_slider.value()
+            # Full range (Just now to More than 5 years) = no filter
+            if not (lp_min_i >= LAST_PLAYED_MAX_INDEX and lp_max_i <= 0):
+                last_played_min_sec = LAST_PLAYED_SCALE[lp_min_i][1]
+                last_played_max_sec = LAST_PLAYED_SCALE[lp_max_i][1]
+        status_ids = self._selected_status_ids if self._selected_status_ids else None
+        in_set = self.in_set_combo.currentData()
+        r_min, r_max = self.rating_min_slider.value(), self.rating_max_slider.value()
+        rating_min = None if (r_min == 1 and r_max == 5) else r_min
+        rating_max = None if (r_min == 1 and r_max == 5) else r_max
+        p_min, p_max = self.parts_min_slider.value(), self.parts_max_slider.value()
+        part_count_min = None if (p_min == 1 and p_max == 24) else p_min
+        part_count_max = None if (p_min == 1 and p_max == 24) else p_max
+
         self.model.set_filters(
             title_or_composer=self.title_composer_edit.text(),
+            transcriber=self.transcriber_edit.text(),
+            duration_min=duration_min,
+            duration_max=duration_max,
+            rating_min=rating_min,
+            rating_max=rating_max,
             status_ids=status_ids,
-            plays_days=plays_days,
+            part_count_min=part_count_min,
+            part_count_max=part_count_max,
+            last_played_never=last_played_never,
+            last_played_min_seconds_ago=last_played_min_sec,
+            last_played_max_seconds_ago=last_played_max_sec,
+            in_set=in_set,
         )
         # Re-apply sort after model reset so header and proxy stay in sync
         self.table.horizontalHeader().setSortIndicator(self._sort_column, self._sort_order)

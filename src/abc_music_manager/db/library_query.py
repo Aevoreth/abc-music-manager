@@ -44,7 +44,10 @@ def list_library_songs(
     status_ids: Optional[list[int]] = None,
     part_count_min: Optional[int] = None,
     part_count_max: Optional[int] = None,
-    plays_in_last_n_days: Optional[int] = None,
+    last_played_never: bool = False,
+    last_played_min_seconds_ago: Optional[int] = None,
+    last_played_max_seconds_ago: Optional[int] = None,
+    in_set_filter: Optional[str] = None,
     limit: int = 2000,
 ) -> list[LibrarySongRow]:
     """
@@ -88,12 +91,26 @@ def list_library_songs(
     if part_count_max is not None:
         conditions.append("json_array_length(COALESCE(s.parts, '[]')) <= ?")
         args.append(part_count_max)
-    if plays_in_last_n_days is not None and plays_in_last_n_days > 0:
+    if last_played_never:
+        conditions.append("s.last_played_at IS NULL")
+    elif last_played_min_seconds_ago is not None or last_played_max_seconds_ago is not None:
+        # Song played within range: last_played_at between (now - max_ago) and (now - min_ago)
+        if last_played_max_seconds_ago is not None:
+            conditions.append("s.last_played_at >= datetime('now', ?)")
+            args.append(f"-{last_played_max_seconds_ago} seconds")
+        if last_played_min_seconds_ago is not None:
+            conditions.append("s.last_played_at <= datetime('now', ?)")
+            args.append(f"-{last_played_min_seconds_ago} seconds")
+    if in_set_filter == "yes":
         conditions.append("""EXISTS (
-            SELECT 1 FROM PlayLog pl WHERE pl.song_id = s.id
-            AND pl.played_at >= datetime('now', ?)
+            SELECT 1 FROM SetlistItem si JOIN Setlist sl ON sl.id = si.setlist_id
+            WHERE si.song_id = s.id AND sl.locked = 0
         )""")
-        args.append(f"-{plays_in_last_n_days} days")
+    elif in_set_filter == "no":
+        conditions.append("""NOT EXISTS (
+            SELECT 1 FROM SetlistItem si JOIN Setlist sl ON sl.id = si.setlist_id
+            WHERE si.song_id = s.id AND sl.locked = 0
+        )""")
 
     where = " AND ".join(conditions)
     args.append(limit)
