@@ -5,8 +5,9 @@ Used when Status.color or other UI elements are NULL (DECISIONS 018).
 
 from pathlib import Path
 
+from PySide6.QtCore import QObject, QEvent
 from PySide6.QtGui import QPalette, QColor, QFont
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QSpinBox
 
 _theme_dir = Path(__file__).resolve().parent
 # Plain absolute path for QSS url() — file:// causes Qt to concatenate with cwd
@@ -103,6 +104,15 @@ def dark_stylesheet() -> str:
             border-radius: 4px;
             padding: 2px;
             min-height: 1.2em;
+        }}
+        /* Match spin box edit area to text boxes (internal QLineEdit can ignore parent styles on some platforms) */
+        QSpinBox QLineEdit {{
+            background-color: {COLOR_SURFACE};
+            color: {COLOR_ON_SURFACE};
+            border: none;
+            border-radius: 3px;
+            selection-background-color: {COLOR_OUTLINE_VARIANT};
+            selection-color: {COLOR_ON_SURFACE};
         }}
         QSpinBox::up-button, QSpinBox::down-button {{
             subcontrol-origin: border;
@@ -332,12 +342,64 @@ def dark_stylesheet() -> str:
     """
 
 
+# Styles applied programmatically to spin box and its line edit so they match QLineEdit (stylesheet alone is unreliable on some platforms)
+_SPINBOX_LINEEDIT_STYLESHEET = (
+    f"background-color: {COLOR_SURFACE}; color: {COLOR_ON_SURFACE}; border: none;"
+    f" selection-background-color: {COLOR_OUTLINE_VARIANT}; selection-color: {COLOR_ON_SURFACE};"
+)
+_SPINBOX_STYLESHEET = (
+    f"QSpinBox {{"
+    f" background-color: {COLOR_SURFACE}; color: {COLOR_ON_SURFACE};"
+    f" border: 1px solid {COLOR_OUTLINE}; border-radius: 4px;"
+    f" padding: 4px; padding-right: 22px; min-height: 1.2em;"
+    f"}}"
+    f"QSpinBox:disabled {{"
+    f" background-color: {COLOR_SURFACE_VARIANT}; color: {COLOR_TEXT_DISABLED}; border-color: {COLOR_OUTLINE};"
+    f"}}"
+    f"QSpinBox::up-button, QSpinBox::down-button {{"
+    f" subcontrol-origin: border; background-color: {COLOR_OUTLINE_VARIANT}; border: none; width: 18px;"
+    f"}}"
+    f"QSpinBox::up-button {{ subcontrol-position: top right; border-top-right-radius: 3px; }}"
+    f"QSpinBox::down-button {{ subcontrol-position: bottom right; border-bottom-right-radius: 3px; }}"
+    f"QSpinBox::up-button:hover, QSpinBox::down-button:hover {{ background-color: {COLOR_OUTLINE}; }}"
+)
+
+
+def _apply_spinbox_theme(spinbox: QSpinBox) -> None:
+    """Force spin box and its line edit to match text box styling (background, font color)."""
+    if spinbox.property("_theme_styled"):
+        return
+    spinbox.setStyleSheet(_SPINBOX_STYLESHEET)
+    le = spinbox.lineEdit()
+    if le:
+        le.setStyleSheet(_SPINBOX_LINEEDIT_STYLESHEET)
+        p = le.palette()
+        p.setColor(p.ColorRole.Base, QColor(COLOR_SURFACE))
+        p.setColor(p.ColorRole.Text, QColor(COLOR_ON_SURFACE))
+        le.setPalette(p)
+    spinbox.setProperty("_theme_styled", True)
+
+
+class _SpinBoxThemeFilter(QObject):
+    """Event filter that applies theme to QSpinBox when shown (so internal line edit matches text boxes)."""
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.Show and isinstance(obj, QSpinBox):
+            _apply_spinbox_theme(obj)
+        return False
+
+
 def apply_theme(app: QApplication) -> None:
     """Apply dark theme and base font size to the application."""
     from PySide6.QtGui import QFontDatabase
     from ..services.preferences import get_base_font_size
     app.setPalette(dark_palette())
     app.setStyleSheet(dark_stylesheet())
+    app.installEventFilter(_SpinBoxThemeFilter(app))
+    # Style any spin boxes that already exist (e.g. if theme is reapplied)
+    for w in app.topLevelWidgets():
+        for spin in w.findChildren(QSpinBox):
+            _apply_spinbox_theme(spin)
     size = get_base_font_size()
     if size > 0:
         font = QFont(app.font())
