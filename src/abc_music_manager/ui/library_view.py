@@ -149,7 +149,8 @@ class LibraryTableModel(QAbstractTableModel):
     COLUMNS = [
         "Title",
         "Composer(s)",
-        "Duration / Last played",
+        "Duration",
+        "Last played",
         "",  # Play / Set / History buttons
         "Parts / Rating",
         "Set",
@@ -253,27 +254,29 @@ class LibraryTableModel(QAbstractTableModel):
             if c == 1:
                 return row.composers
             if c == 2:
-                return None  # Painted by delegate (duration + last played)
+                return _format_duration(row.duration_seconds) or "—"
             if c == 3:
-                return None  # Painted by delegate (Play / Set / History buttons)
+                return None  # Painted by delegate (last played)
             if c == 4:
-                return None  # Painted by delegate (parts / rating)
+                return None  # Painted by delegate (Play / Set / History buttons)
             if c == 5:
-                return "•" if row.in_upcoming_set else ""
+                return None  # Painted by delegate (parts / rating)
             if c == 6:
-                return row.status_name or self._default_status_name or "—"
+                return "•" if row.in_upcoming_set else ""
             if c == 7:
+                return row.status_name or self._default_status_name or "—"
+            if c == 8:
                 return row.transcriber or "—"
-        if role == StatusColorRole and c == 6:
+        if role == StatusColorRole and c == 7:
             return row.status_color or self._default_status_color
         if role == Qt.ItemDataRole.ToolTipRole:
-            if c == 3:
-                return "▶ Played Now — Set… set date/time — History: playback log"
             if c == 4:
+                return "▶ Played Now — Set… set date/time — History: playback log"
+            if c == 5:
                 parts = _part_names_from_json(row.parts_json)
                 if parts:
                     return "Parts:\n" + "\n".join(parts)
-            if c == 5:
+            if c == 6:
                 sets_list = get_setlists_containing_song(self._conn, row.song_id)
                 if sets_list:
                     return "In sets:\n" + "\n".join(name for _, name in sets_list)
@@ -305,7 +308,7 @@ class LibrarySortProxy(QSortFilterProxyModel):
 
 
 class LibraryDelegate(QStyledItemDelegate):
-    """Paints Duration/Last Played, Parts/Rating, Set, Status; simple text for others."""
+    """Paints Last played, Parts/Rating, Set, Status; simple text for others (Duration, etc.)."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -315,39 +318,31 @@ class LibraryDelegate(QStyledItemDelegate):
         option.state &= ~(QStyle.StateFlag.State_MouseOver | QStyle.StateFlag.State_HasFocus)
         col = index.column()
         row_data = index.data(RowDataRole)
-        if row_data is None and col not in (2, 3, 4, 5, 6):
+        if row_data is None and col not in (3, 4, 5, 6, 7):
             return super().paint(painter, option, index)
 
-        if col == 2 and row_data:
-            self._paint_duration_last_played(painter, option, row_data)
-            return
         if col == 3 and row_data:
-            self._paint_play_buttons(painter, option)
+            self._paint_last_played(painter, option, row_data)
             return
         if col == 4 and row_data:
+            self._paint_play_buttons(painter, option)
+            return
+        if col == 5 and row_data:
             self._paint_parts_rating(painter, option, row_data)
             return
-        if col == 5:
+        if col == 6:
             if row_data and row_data.in_upcoming_set:
                 self._paint_bullet(painter, option)
             return
-        if col == 6 and row_data:
+        if col == 7 and row_data:
             self._paint_status(painter, option, row_data, index)
             return
         super().paint(painter, option, index)
 
-    def _paint_duration_last_played(self, painter: QPainter, option: QStyleOptionViewItem, row: LibrarySongRow) -> None:
+    def _paint_last_played(self, painter: QPainter, option: QStyleOptionViewItem, row: LibrarySongRow) -> None:
         rect = option.rect.adjusted(2, 1, -2, -1)
-        font = option.font
-        bold_font = QFont(font)
-        bold_font.setBold(True)
-        painter.setFont(bold_font)
-        duration = _format_duration(row.duration_seconds)
-        painter.drawText(rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, duration)
-        line_h = option.fontMetrics.lineSpacing()
-        painter.setFont(font)
         last_played = _format_last_played(row.last_played_at)
-        painter.drawText(rect.x(), rect.y() + line_h, rect.width(), line_h, Qt.AlignmentFlag.AlignLeft, f"Last: {last_played}")
+        painter.drawText(rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, last_played)
 
     def _paint_play_buttons(self, painter: QPainter, option: QStyleOptionViewItem) -> None:
         rect = option.rect.adjusted(2, 1, -2, -1)
@@ -461,14 +456,14 @@ class LibraryView(QWidget):
         hh.setMinimumSectionSize(20)
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         hh.resizeSection(0, 280)
-        # Column 3: Play/Set/History buttons — explicit width (model has no text so ResizeToContents would collapse it)
-        hh.setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)
-        hh.resizeSection(3, 140)  # Wide enough for ▶ + Set… + History
-        # Columns 4 (Parts/Rating), 5 (Set) size to contents; 7 (Transcriber) user-resizable
-        hh.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        # Column 4: Play/Set/History buttons — explicit width (model has no text so ResizeToContents would collapse it)
+        hh.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
+        hh.resizeSection(4, 140)  # Wide enough for ▶ + Set… + History
+        # Columns 5 (Parts/Rating), 6 (Set) size to contents; 8 (Transcriber) user-resizable
         hh.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(7, QHeaderView.ResizeMode.Interactive)
-        hh.resizeSection(7, 120)
+        hh.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(8, QHeaderView.ResizeMode.Interactive)
+        hh.resizeSection(8, 120)
         hh.setSectionsClickable(True)
         hh.sectionClicked.connect(self._on_header_clicked)
         # Row height: 2 lines of text + padding
@@ -531,7 +526,7 @@ class LibraryView(QWidget):
                 rect = self.table.visualRect(index)
                 x = pos.x() - rect.x()
                 y = pos.y() - rect.y()
-                if col == 3:
+                if col == 4:
                     # Buttons from right: History w=52, gap 4, Set w=40, gap 4, Play w=28, margin 4
                     rx = rect.width() - x
                     if 4 <= rx <= 56:
@@ -543,7 +538,7 @@ class LibraryView(QWidget):
                     if 104 <= rx <= 132:
                         self._on_played_now(song_id)
                         return True
-                if col == 4:
+                if col == 5:
                     # Star hit test: 5 stars, each 14px wide
                     line_h = self.table.fontMetrics().lineSpacing()
                     if y > line_h:
@@ -557,7 +552,7 @@ class LibraryView(QWidget):
                             update_song_app_metadata(self.app_state.conn, song_id, rating=new_rating)
                             self.model.refresh()
                         return True
-                if col == 5 and row_data.in_upcoming_set:
+                if col == 6 and row_data.in_upcoming_set:
                     sets_list = get_setlists_containing_song(self.app_state.conn, song_id)
                     if sets_list:
                         menu = QMenu(self)
@@ -566,7 +561,7 @@ class LibraryView(QWidget):
                             act.triggered.connect(lambda checked=False, sid=setlist_id: self._go_to_setlist(sid))
                         menu.exec(self.table.viewport().mapToGlobal(pos))
                     return True
-                if col == 6:
+                if col == 7:
                     # Status: show dropdown to set song status (songs always have a status)
                     menu = QMenu(self)
                     fallback = self.palette().color(self.palette().currentColorGroup(), self.palette().ColorRole.Mid)
