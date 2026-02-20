@@ -35,8 +35,7 @@ class LibrarySongRow:
 def list_library_songs(
     conn: sqlite3.Connection,
     *,
-    title_substring: Optional[str] = None,
-    composer_substring: Optional[str] = None,
+    title_or_composer_substring: Optional[str] = None,
     transcriber_substring: Optional[str] = None,
     duration_min_sec: Optional[int] = None,
     duration_max_sec: Optional[int] = None,
@@ -59,12 +58,11 @@ def list_library_songs(
     conditions = ["s.id IN (" + main_library + ")"]
     args = []
 
-    if title_substring:
-        conditions.append("LOWER(s.title) LIKE ?")
-        args.append("%" + title_substring.lower() + "%")
-    if composer_substring:
-        conditions.append("LOWER(s.composers) LIKE ?")
-        args.append("%" + composer_substring.lower() + "%")
+    if title_or_composer_substring:
+        sub = "%" + title_or_composer_substring.lower() + "%"
+        conditions.append("(LOWER(s.title) LIKE ? OR LOWER(s.composers) LIKE ?)")
+        args.append(sub)
+        args.append(sub)
     if transcriber_substring:
         conditions.append("(s.transcriber IS NOT NULL AND LOWER(s.transcriber) LIKE ?)")
         args.append("%" + transcriber_substring.lower() + "%")

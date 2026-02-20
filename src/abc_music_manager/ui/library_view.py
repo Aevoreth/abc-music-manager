@@ -161,8 +161,7 @@ class LibraryTableModel(QAbstractTableModel):
         super().__init__(parent)
         self._conn = conn
         self._rows: list[LibrarySongRow] = []
-        self._filter_title: str = ""
-        self._filter_composer: str = ""
+        self._filter_title_composer: str = ""
         self._filter_transcriber: str = ""
         self._filter_duration_min: Optional[int] = None
         self._filter_duration_max: Optional[int] = None
@@ -177,8 +176,7 @@ class LibraryTableModel(QAbstractTableModel):
 
     def set_filters(
         self,
-        title: str = "",
-        composer: str = "",
+        title_or_composer: str = "",
         transcriber: str = "",
         duration_min: Optional[int] = None,
         duration_max: Optional[int] = None,
@@ -189,8 +187,7 @@ class LibraryTableModel(QAbstractTableModel):
         part_count_max: Optional[int] = None,
         plays_days: Optional[int] = None,
     ) -> None:
-        self._filter_title = (title or "").strip()
-        self._filter_composer = (composer or "").strip()
+        self._filter_title_composer = (title_or_composer or "").strip()
         self._filter_transcriber = (transcriber or "").strip()
         self._filter_duration_min = duration_min
         self._filter_duration_max = duration_max
@@ -219,8 +216,7 @@ class LibraryTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._rows = list_library_songs(
             self._conn,
-            title_substring=self._filter_title or None,
-            composer_substring=self._filter_composer or None,
+            title_or_composer_substring=self._filter_title_composer or None,
             transcriber_substring=self._filter_transcriber or None,
             duration_min_sec=self._filter_duration_min,
             duration_max_sec=self._filter_duration_max,
@@ -421,28 +417,27 @@ class LibraryView(QWidget):
         self.app_state = app_state
         layout = QVBoxLayout(self)
 
-        # Filter row
+        # Filter row: single Title/Composer filter with clear button, applies immediately
         filter_layout = QHBoxLayout()
-        filter_layout.addWidget(QLabel("Title:"))
-        self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("Filter by title")
-        self.title_edit.setMaximumWidth(160)
-        filter_layout.addWidget(self.title_edit)
-        filter_layout.addWidget(QLabel("Composer:"))
-        self.composer_edit = QLineEdit()
-        self.composer_edit.setPlaceholderText("Filter")
-        self.composer_edit.setMaximumWidth(140)
-        filter_layout.addWidget(self.composer_edit)
+        filter_layout.addWidget(QLabel("Title / Composer:"))
+        self.title_composer_edit = QLineEdit()
+        self.title_composer_edit.setPlaceholderText("Filter by title or composer")
+        self.title_composer_edit.setClearButtonEnabled(True)
+        self.title_composer_edit.setMaximumWidth(240)
+        self.title_composer_edit.textChanged.connect(self._apply_filters)
+        filter_layout.addWidget(self.title_composer_edit)
         filter_layout.addWidget(QLabel("Status:"))
         self.status_combo = QComboBox()
         self.status_combo.setItemDelegate(LibraryFilterStatusDelegate(self.status_combo))
         self.status_combo.setMinimumWidth(140)
+        self.status_combo.currentIndexChanged.connect(self._apply_filters)
         filter_layout.addWidget(self.status_combo)
         filter_layout.addWidget(QLabel("Plays in last (days):"))
         self.plays_days_spin = QSpinBox()
         self.plays_days_spin.setRange(0, 365)
         self.plays_days_spin.setSpecialValueText("—")
         self.plays_days_spin.setMaximumWidth(60)
+        self.plays_days_spin.valueChanged.connect(self._apply_filters)
         filter_layout.addWidget(self.plays_days_spin)
         self.refresh_btn = QPushButton("Refresh")
         self.refresh_btn.clicked.connect(self._apply_filters)
@@ -667,8 +662,7 @@ class LibraryView(QWidget):
         if plays_days <= 0:
             plays_days = None
         self.model.set_filters(
-            title=self.title_edit.text(),
-            composer=self.composer_edit.text(),
+            title_or_composer=self.title_composer_edit.text(),
             status_ids=status_ids,
             plays_days=plays_days,
         )
