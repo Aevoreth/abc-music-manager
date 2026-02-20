@@ -138,9 +138,10 @@ def _part_names_from_json(parts_json: Optional[str]) -> list[str]:
         return []
 
 
-# Custom data roles for delegate
+# Custom data roles for delegate and sorting
 RowDataRole = Qt.ItemDataRole.UserRole + 1
 StatusColorRole = Qt.ItemDataRole.UserRole + 2
+SortRole = Qt.ItemDataRole.UserRole + 3
 
 
 class LibraryTableModel(QAbstractTableModel):
@@ -152,7 +153,8 @@ class LibraryTableModel(QAbstractTableModel):
         "Duration",
         "Last played",
         "",  # Play / Set / History buttons
-        "Parts / Rating",
+        "Parts",
+        "Rating",
         "Set",
         "Status",
         "Transcriber",
@@ -260,14 +262,25 @@ class LibraryTableModel(QAbstractTableModel):
             if c == 4:
                 return None  # Painted by delegate (Play / Set / History buttons)
             if c == 5:
-                return None  # Painted by delegate (parts / rating)
+                return str(row.part_count)
             if c == 6:
-                return "•" if row.in_upcoming_set else ""
+                return None  # Painted by delegate (rating stars)
             if c == 7:
-                return row.status_name or self._default_status_name or "—"
+                return "•" if row.in_upcoming_set else ""
             if c == 8:
+                return row.status_name or self._default_status_name or "—"
+            if c == 9:
                 return row.transcriber or "—"
-        if role == StatusColorRole and c == 7:
+        if role == SortRole:
+            if c == 2:
+                return row.duration_seconds if row.duration_seconds is not None else -1
+            if c == 3:
+                return row.last_played_at or ""  # ISO string, empty = never played
+            if c == 5:
+                return row.part_count
+            if c == 6:
+                return row.rating if row.rating is not None else -1
+        if role == StatusColorRole and c == 8:
             return row.status_color or self._default_status_color
         if role == Qt.ItemDataRole.ToolTipRole:
             if c == 4:
@@ -276,7 +289,7 @@ class LibraryTableModel(QAbstractTableModel):
                 parts = _part_names_from_json(row.parts_json)
                 if parts:
                     return "Parts:\n" + "\n".join(parts)
-            if c == 6:
+            if c == 7:
                 sets_list = get_setlists_containing_song(self._conn, row.song_id)
                 if sets_list:
                     return "In sets:\n" + "\n".join(name for _, name in sets_list)
@@ -299,16 +312,23 @@ class LibraryTableModel(QAbstractTableModel):
 
 
 class LibrarySortProxy(QSortFilterProxyModel):
-    """Sort by Title or Composer; default Title A->Z."""
+    """Sort by any sortable column using SortRole when set, else DisplayRole."""
 
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:
+        left_sort = left.data(SortRole)
+        right_sort = right.data(SortRole)
+        if left_sort is not None and right_sort is not None:
+            if isinstance(left_sort, int) and isinstance(right_sort, int):
+                return left_sort < right_sort
+            if isinstance(left_sort, str) and isinstance(right_sort, str):
+                return left_sort.lower() < right_sort.lower()
         lv = left.data(Qt.ItemDataRole.DisplayRole) or ""
         rv = right.data(Qt.ItemDataRole.DisplayRole) or ""
-        return (lv or "").lower() < (rv or "").lower()
+        return (str(lv) or "").lower() < (str(rv) or "").lower()
 
 
 class LibraryDelegate(QStyledItemDelegate):
-    """Paints Last played, Parts/Rating, Set, Status; simple text for others (Duration, etc.)."""
+    """Paints Last played, Parts, Rating, Set, Status; simple text for others (Duration, etc.)."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -318,7 +338,7 @@ class LibraryDelegate(QStyledItemDelegate):
         option.state &= ~(QStyle.StateFlag.State_MouseOver | QStyle.StateFlag.State_HasFocus)
         col = index.column()
         row_data = index.data(RowDataRole)
-        if row_data is None and col not in (3, 4, 5, 6, 7):
+        if row_data is None and col not in (3, 4, 5, 6, 7, 8):
             return super().paint(painter, option, index)
 
         if col == 3 and row_data:
@@ -328,13 +348,16 @@ class LibraryDelegate(QStyledItemDelegate):
             self._paint_play_buttons(painter, option)
             return
         if col == 5 and row_data:
-            self._paint_parts_rating(painter, option, row_data)
+            self._paint_parts(painter, option, row_data)
             return
-        if col == 6:
+        if col == 6 and row_data:
+            self._paint_rating(painter, option, row_data)
+            return
+        if col == 7:
             if row_data and row_data.in_upcoming_set:
                 self._paint_bullet(painter, option)
             return
-        if col == 7 and row_data:
+        if col == 8 and row_data:
             self._paint_status(painter, option, row_data, index)
             return
         super().paint(painter, option, index)
@@ -362,12 +385,16 @@ class LibraryDelegate(QStyledItemDelegate):
             painter.setPen(QPen(option.palette.color(option.palette.currentColorGroup(), option.palette.ColorRole.ButtonText)))
             painter.drawText(r, Qt.AlignmentFlag.AlignCenter, label)
 
-    def _paint_parts_rating(self, painter: QPainter, option: QStyleOptionViewItem, row: LibrarySongRow) -> None:
+    def _paint_parts(self, painter: QPainter, option: QStyleOptionViewItem, row: LibrarySongRow) -> None:
         rect = option.rect.adjusted(2, 1, -2, -1)
-        painter.drawText(rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop, str(row.part_count))
-        line_h = option.fontMetrics.lineSpacing()
-        star_y = rect.y() + line_h + 1
+        painter.drawText(rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, str(row.part_count))
+
+    def _paint_rating(self, painter: QPainter, option: QStyleOptionViewItem, row: LibrarySongRow) -> None:
+        rect = option.rect.adjusted(2, 1, -2, -1)
         star_x = rect.x()
+        cy = rect.center().y()
+        line_h = option.fontMetrics.lineSpacing()
+        star_y = cy - line_h // 2
         rating = row.rating if row.rating is not None else 0
         filled = "\u2605"  # ★
         empty = "\u2606"   # ☆
@@ -444,7 +471,9 @@ class LibraryView(QWidget):
         self.proxy = LibrarySortProxy(self)
         self.proxy.setSourceModel(self.model)
         self.proxy.setSortCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        self.proxy.sort(0, Qt.SortOrder.AscendingOrder)
+        self._sort_column = 0
+        self._sort_order = Qt.SortOrder.AscendingOrder
+        self.proxy.sort(self._sort_column, self._sort_order)
 
         self.table = QTableView()
         self.table.setModel(self.proxy)
@@ -461,12 +490,14 @@ class LibraryView(QWidget):
         # Column 4: Play/Set/History buttons — explicit width (model has no text so ResizeToContents would collapse it)
         hh.setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)
         hh.resizeSection(4, 140)  # Wide enough for ▶ + Set… + History
-        # Columns 5 (Parts/Rating), 6 (Set) size to contents; 8 (Transcriber) user-resizable
+        # Columns 5 (Parts), 6 (Rating), 7 (Set) size to contents; 9 (Transcriber) user-resizable
         hh.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(8, QHeaderView.ResizeMode.Interactive)
-        hh.resizeSection(8, 120)
+        hh.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(9, QHeaderView.ResizeMode.Interactive)
+        hh.resizeSection(9, 120)
         hh.setSectionsClickable(True)
+        hh.setSortIndicatorShown(True)
         hh.sectionClicked.connect(self._on_header_clicked)
         # Row height: 2 lines of text + padding
         fm = self.table.fontMetrics()
@@ -484,18 +515,23 @@ class LibraryView(QWidget):
         self._load_status_combo()
         self.model.refresh()
 
+    # Sortable columns: Title, Composer, Duration, Last played, Parts, Rating, Transcriber
+    _SORTABLE_COLUMNS = (0, 1, 2, 3, 5, 6, 9)
+
     def _on_header_clicked(self, logical_index: int) -> None:
-        if logical_index not in (0, 1):
+        if logical_index not in self._SORTABLE_COLUMNS:
             return
-        header = self.table.horizontalHeader()
-        current_section = header.sortIndicatorSection()
-        current_order = header.sortIndicatorOrder()
-        if logical_index == current_section:
-            new_order = Qt.SortOrder.DescendingOrder if current_order == Qt.SortOrder.AscendingOrder else Qt.SortOrder.AscendingOrder
+        if logical_index == self._sort_column:
+            self._sort_order = (
+                Qt.SortOrder.DescendingOrder
+                if self._sort_order == Qt.SortOrder.AscendingOrder
+                else Qt.SortOrder.AscendingOrder
+            )
         else:
-            new_order = Qt.SortOrder.AscendingOrder  # First click on this column: A -> Z
-        header.setSortIndicator(logical_index, new_order)
-        self.proxy.sort(logical_index, new_order)
+            self._sort_column = logical_index
+            self._sort_order = Qt.SortOrder.AscendingOrder
+        self.table.horizontalHeader().setSortIndicator(self._sort_column, self._sort_order)
+        self.proxy.sort(self._sort_column, self._sort_order)
 
     def _source_row(self, proxy_index: QModelIndex) -> int:
         return self.proxy.mapToSource(proxy_index).row()
@@ -540,21 +576,19 @@ class LibraryView(QWidget):
                     if 104 <= rx <= 132:
                         self._on_played_now(song_id)
                         return True
-                if col == 5:
-                    # Star hit test: 5 stars, each 14px wide
-                    line_h = self.table.fontMetrics().lineSpacing()
-                    if y > line_h:
-                        star_idx = min(5, max(1, int(x / 14) + 1))
-                        if 1 <= star_idx <= 5:
-                            current = row_data.rating if row_data.rating is not None else 0
-                            if current == star_idx:
-                                new_rating = 0
-                            else:
-                                new_rating = star_idx
-                            update_song_app_metadata(self.app_state.conn, song_id, rating=new_rating)
-                            self.model.refresh()
-                        return True
-                if col == 6 and row_data.in_upcoming_set:
+                if col == 6:
+                    # Rating: star hit test, 5 stars each 14px wide
+                    star_idx = min(5, max(1, int(x / 14) + 1))
+                    if 1 <= star_idx <= 5:
+                        current = row_data.rating if row_data.rating is not None else 0
+                        if current == star_idx:
+                            new_rating = 0
+                        else:
+                            new_rating = star_idx
+                        update_song_app_metadata(self.app_state.conn, song_id, rating=new_rating)
+                        self.model.refresh()
+                    return True
+                if col == 7 and row_data.in_upcoming_set:
                     sets_list = get_setlists_containing_song(self.app_state.conn, song_id)
                     if sets_list:
                         menu = QMenu(self)
@@ -563,7 +597,7 @@ class LibraryView(QWidget):
                             act.triggered.connect(lambda checked=False, sid=setlist_id: self._go_to_setlist(sid))
                         menu.exec(self.table.viewport().mapToGlobal(pos))
                     return True
-                if col == 7:
+                if col == 8:
                     # Status: show dropdown to set song status (songs always have a status)
                     menu = QMenu(self)
                     fallback = self.palette().color(self.palette().currentColorGroup(), self.palette().ColorRole.Mid)
@@ -663,6 +697,9 @@ class LibraryView(QWidget):
             status_ids=status_ids,
             plays_days=plays_days,
         )
+        # Re-apply sort after model reset so header and proxy stay in sync
+        self.table.horizontalHeader().setSortIndicator(self._sort_column, self._sort_order)
+        self.proxy.sort(self._sort_column, self._sort_order)
 
     def _on_double_click(self, index: QModelIndex) -> None:
         source_index = self.proxy.mapToSource(index)
