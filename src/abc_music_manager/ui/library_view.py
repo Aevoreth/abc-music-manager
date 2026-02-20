@@ -452,6 +452,8 @@ class LibraryView(QWidget):
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         hh = self.table.horizontalHeader()
         hh.setMinimumSectionSize(20)
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)

@@ -317,6 +317,18 @@ def dark_stylesheet() -> str:
         QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
             height: 0;
         }}
+        QScrollBar:horizontal {{
+            background: {COLOR_SURFACE};
+            height: 10px;
+            border-radius: 2px;
+        }}
+        QScrollBar::handle:horizontal {{
+            background: {COLOR_OUTLINE_VARIANT};
+            border-radius: 2px;
+        }}
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+            width: 0;
+        }}
     """
 
 
