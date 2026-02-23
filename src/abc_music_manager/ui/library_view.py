@@ -508,7 +508,7 @@ class LibraryDelegate(QStyledItemDelegate):
 
     def _paint_play_buttons(self, painter: QPainter, option: QStyleOptionViewItem) -> None:
         rect = option.rect.adjusted(2, 1, -2, -1)
-        btn_h = 22
+        btn_h = 26
         line_h = option.fontMetrics.lineSpacing()
         btn_y = rect.y() + (2 * line_h - btn_h) // 2
         play_w, set_w, history_w = 28, 40, 52

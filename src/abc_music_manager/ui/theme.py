@@ -86,6 +86,8 @@ def dark_stylesheet() -> str:
             color: {COLOR_ON_SURFACE};
             border: 1px solid {COLOR_OUTLINE};
             border-radius: 4px;
+            min-height: 26px;
+            padding: 5px 12px;
         }}
         QPushButton:hover {{
             border-color: {COLOR_PRIMARY};
@@ -278,7 +280,8 @@ def dark_stylesheet() -> str:
         /* Status filter: dropdown-style trigger button */
         QPushButton#status_filter_btn {{
             min-width: 100px;
-            padding: 6px 12px;
+            min-height: 22px;
+            padding: 4px 12px;
             border-radius: 6px;
             text-align: left;
         }}
