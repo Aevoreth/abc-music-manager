@@ -9,9 +9,11 @@ from PySide6.QtCore import QObject, QEvent
 from PySide6.QtGui import QPalette, QColor, QFont
 from PySide6.QtWidgets import QApplication, QSpinBox
 
+# Register Qt resources (checkmark.svg) so url(":/checkmark.svg") works in QSS
+from abc_music_manager.ui import resources_rc  # noqa: F401
+
 _theme_dir = Path(__file__).resolve().parent
-# Plain absolute path for QSS url() — file:// causes Qt to concatenate with cwd
-_checkmark_url = str((_theme_dir / "checkmark.svg").resolve()).replace("\\", "/")
+_CHECKMARK_RESOURCE_URL = ":/checkmark.png"
 
 
 # --- Dark palette ---
@@ -238,7 +240,7 @@ def dark_stylesheet() -> str:
         QCheckBox::indicator:checked {{
             background-color: {COLOR_SURFACE};
             border: 2px solid {COLOR_PRIMARY};
-            image: url("{_checkmark_url}");
+            image: url("{_CHECKMARK_RESOURCE_URL}");
         }}
         QCheckBox::indicator:hover {{
             border-color: {COLOR_PRIMARY};
@@ -272,6 +274,47 @@ def dark_stylesheet() -> str:
             color: {COLOR_TEXT_HEADER};
             font-weight: bold;
             border-color: {COLOR_OUTLINE};
+        }}
+        /* Status filter: dropdown-style trigger button */
+        QPushButton#status_filter_btn {{
+            min-width: 100px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            text-align: left;
+        }}
+        QPushButton#status_filter_btn:hover {{
+            border-color: {COLOR_PRIMARY};
+        }}
+        /* Status filter popup: chip list */
+        QFrame#status_filter_popup {{
+            background-color: {COLOR_SURFACE};
+            border: 1px solid {COLOR_OUTLINE};
+            border-radius: 10px;
+            padding: 0;
+        }}
+        QWidget#status_filter_header {{
+            background-color: {COLOR_SURFACE};
+            border-bottom: 1px solid {COLOR_OUTLINE};
+        }}
+        QLabel#status_filter_title {{
+            color: {COLOR_TEXT_HEADER};
+            font-weight: bold;
+            font-size: 13px;
+        }}
+        QPushButton#status_filter_header_btn {{
+            background: transparent;
+            border: none;
+            color: {COLOR_PRIMARY};
+            padding: 2px 8px;
+            min-width: 0;
+        }}
+        QPushButton#status_filter_header_btn:hover {{
+            color: {COLOR_ON_SURFACE};
+            text-decoration: underline;
+        }}
+        QScrollArea#status_filter_list {{
+            background-color: transparent;
+            border: none;
         }}
         /* Side tabs: rounded on left only, selected tab connects to content on the right */
         QListWidget#nav_list {{

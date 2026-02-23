@@ -26,14 +26,17 @@ from PySide6.QtWidgets import (
     QMenu,
     QStyledItemDelegate,
     QDateTimeEdit,
+    QTimeEdit,
+    QStyleOptionComboBox,
     QStyleOptionViewItem,
     QStyle,
     QFrame,
     QListWidget,
     QListWidgetItem,
     QScrollArea,
+    QApplication,
 )
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QRect, QSize, Signal
+from PySide6.QtCore import Qt, QTime, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QRect, QSize, Signal, QTimer
 from PySide6.QtGui import QColor, QAction, QPainter, QFont, QBrush, QPen, QIcon, QPixmap
 
 from ..services.app_state import AppState
@@ -48,10 +51,33 @@ from ..db.setlist_repo import (
 from ..db.song_layout_repo import list_song_layouts_for_song_and_band
 from ..db.play_log import log_play, log_play_at, get_play_history
 from ..db.song_repo import update_song_app_metadata
-from .theme import STATUS_CIRCLE_DIAMETER
+from .theme import (
+    STATUS_CIRCLE_DIAMETER,
+    COLOR_SURFACE,
+    COLOR_SURFACE_VARIANT,
+    COLOR_OUTLINE,
+    COLOR_OUTLINE_VARIANT,
+    COLOR_PRIMARY,
+    COLOR_TEXT_HEADER,
+    COLOR_TEXT_SECONDARY,
+    COLOR_ON_SURFACE,
+)
 
-# Role for status color in library filter combo items
+# Role for status color in library filter combo items (menus, etc.)
 LibraryStatusColorRole = Qt.ItemDataRole.UserRole + 20
+
+# Status filter popup: chip button styles (no list widget = no delegate/model crash)
+def _status_chip_style(left_color: str, selected: bool) -> str:
+    bg = f"rgba(201, 162, 39, 0.15)" if selected else COLOR_SURFACE_VARIANT
+    border = f"2px solid {COLOR_PRIMARY}" if selected else f"1px solid {COLOR_OUTLINE}"
+    text = COLOR_TEXT_HEADER if selected else COLOR_TEXT_SECONDARY
+    return (
+        f"QPushButton {{ "
+        f"text-align: left; padding: 6px 10px 6px 14px; "
+        f"min-height: 24px; border: {border}; border-left: 4px solid {left_color}; "
+        f"border-radius: 8px; background: {bg}; color: {text}; "
+        f"}} QPushButton:hover {{ background: {COLOR_OUTLINE_VARIANT}; color: {COLOR_ON_SURFACE}; }}"
+    )
 
 # Last-played time-range options: (label, seconds_ago). "Never" = no upper bound (songs never played).
 def _last_played_time_options() -> list[tuple[str, Optional[int]]]:
@@ -90,78 +116,74 @@ def _rating_label(stars: int) -> str:
     return RATING_STAR_FILLED * stars + RATING_STAR_EMPTY * (5 - stars)
 
 
+def _paint_rating_stars(painter: QPainter, rect: QRect, rating: int, font_metrics, palette=None) -> None:
+    """Draw rating as stars (gold filled, gray empty) left to right. rating 0 = five gray empty stars."""
+    line_h = font_metrics.lineSpacing()
+    star_y = rect.center().y() - line_h // 2
+    star_x = rect.x()
+    for i in range(1, 6):
+        filled = rating > 0 and i <= rating
+        char = RATING_STAR_FILLED if filled else RATING_STAR_EMPTY
+        color = RATING_STAR_GOLD if filled else RATING_STAR_EMPTY_COLOR
+        painter.setPen(QPen(color))
+        painter.drawText(star_x + (i - 1) * 14, star_y, 14, line_h, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, char)
+
+
+# Width for 5 stars at 14px each + padding + dropdown arrow (avoid clipping last star)
+RATING_COMBO_MIN_WIDTH = 108
+
+
+class RatingComboBox(QComboBox):
+    """Combo that shows the selected rating as gold/gray stars when closed and in the dropdown."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMinimumWidth(RATING_COMBO_MIN_WIDTH)
+
+    def paintEvent(self, event) -> None:
+        opt = QStyleOptionComboBox()
+        self.initStyleOption(opt)
+        style = self.style()
+        painter = QPainter(self)
+        style.drawComplexControl(QStyle.ComplexControl.CC_ComboBox, opt, painter, self)
+        edit_rect = style.subControlRect(
+            QStyle.ComplexControl.CC_ComboBox, opt, QStyle.SubControl.SC_ComboBoxEditField, self
+        )
+        if edit_rect.isValid():
+            painter.fillRect(edit_rect, self.palette().color(self.palette().currentColorGroup(), self.palette().ColorRole.Base))
+            rating = self.currentData()
+            rating = int(rating) if rating is not None else 0
+            _paint_rating_stars(painter, edit_rect.adjusted(2, 0, -2, 0), rating, self.fontMetrics(), self.palette())
+        painter.end()
+
+
 class RatingComboDelegate(QStyledItemDelegate):
-    """Paints rating combo items as stars (filled left to right, gold filled / gray empty)."""
+    """Paints rating combo dropdown items as stars (filled left to right, gold filled / gray empty)."""
 
     def paint(self, painter: QPainter, option, index) -> None:
         text = index.data(Qt.ItemDataRole.DisplayRole) or ""
         opt = QStyleOptionViewItem(option)
         rect = opt.rect.adjusted(2, 0, -2, 0)
-        cy = rect.center().y()
-        line_h = opt.fontMetrics.lineSpacing()
-        star_y = cy - line_h // 2
         rating = index.data(Qt.ItemDataRole.UserRole)
         if rating is None:
             painter.drawText(rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
             return
         rating = int(rating) if rating is not None else 0
-        painter.save()
-        star_x = rect.x()
-        for i in range(1, 6):
-            filled = i <= rating
-            char = RATING_STAR_FILLED if filled else RATING_STAR_EMPTY
-            color = RATING_STAR_GOLD if filled else RATING_STAR_EMPTY_COLOR
-            painter.setPen(QPen(color))
-            painter.drawText(star_x + (i - 1) * 14, star_y, 14, line_h, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, char)
-        painter.restore()
+        _paint_rating_stars(painter, rect, rating, opt.fontMetrics, opt.palette)
 
 
-def _parse_mm_ss(text: str) -> Optional[int]:
-    """Parse 'm:ss' or 'mm:ss' to total seconds, or None if invalid."""
-    text = (text or "").strip()
-    if not text:
-        return None
-    parts = text.split(":")
-    if len(parts) != 2:
-        return None
-    try:
-        m, s = int(parts[0].strip()), int(parts[1].strip())
-        if m < 0 or s < 0 or s >= 60:
-            return None
-        return m * 60 + s
-    except ValueError:
-        return None
+def _time_edit_to_seconds(edit: QTimeEdit) -> int:
+    """Return total seconds from a QTimeEdit used for duration (0:00:00 = 0 sec)."""
+    t = edit.time()
+    return t.hour() * 3600 + t.minute() * 60 + t.second()
 
 
-def _format_mm_ss(seconds: int) -> str:
-    """Format seconds as m:ss or mm:ss."""
-    if seconds <= 0:
-        return "0:00"
-    m, s = divmod(seconds, 60)
-    return f"{m}:{s:02d}"
-
-
-class LibraryFilterStatusDelegate(QStyledItemDelegate):
-    """Paints filter combo items with colored circle before the status name."""
-
-    def paint(self, painter: QPainter, option, index) -> None:
-        text = index.data(Qt.ItemDataRole.DisplayRole) or ""
-        color = index.data(LibraryStatusColorRole)
-        opt = QStyleOptionViewItem(option)
-        rect = opt.rect.adjusted(2, 0, -2, 0)
-        cy = rect.center().y()
-        r = STATUS_CIRCLE_DIAMETER // 2
-        try:
-            qcolor = QColor(color) if color else opt.palette.color(opt.palette.currentColorGroup(), opt.palette.ColorRole.Mid)
-        except Exception:
-            qcolor = opt.palette.color(opt.palette.currentColorGroup(), opt.palette.ColorRole.Mid)
-        painter.save()
-        painter.setBrush(qcolor)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(rect.x(), cy - r, STATUS_CIRCLE_DIAMETER, STATUS_CIRCLE_DIAMETER)
-        painter.setPen(QPen(opt.palette.text().color()))
-        painter.drawText(rect.adjusted(STATUS_CIRCLE_DIAMETER + 4, 0, 0, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
-        painter.restore()
+def _seconds_to_time_edit(seconds: int, edit: QTimeEdit) -> None:
+    """Set QTimeEdit from total seconds (duration). Clamps to 0–23:59:59."""
+    sec = max(0, min(seconds, 23 * 3600 + 59 * 60 + 59))
+    edit.blockSignals(True)
+    edit.setTime(QTime(0, 0, 0).addSecs(sec))
+    edit.blockSignals(False)
 
 
 def _status_icon_for_color(color: str | None, fallback: QColor) -> QIcon:
@@ -570,8 +592,10 @@ class LibraryView(QWidget):
         self.title_composer_edit.textChanged.connect(self._apply_filters)
         main_row.addWidget(self.title_composer_edit)
         main_row.addWidget(QLabel("Status:"))
-        self.status_btn = QPushButton("All")
+        self.status_btn = QPushButton("All statuses")
+        self.status_btn.setObjectName("status_filter_btn")
         self.status_btn.setCheckable(True)
+        self.status_btn.setToolTip("Filter by status")
         self.status_btn.clicked.connect(self._on_status_filter_clicked)
         main_row.addWidget(self.status_btn)
         main_row.addWidget(QLabel("In set:"))
@@ -582,14 +606,14 @@ class LibraryView(QWidget):
         self.in_set_combo.currentIndexChanged.connect(self._apply_filters)
         main_row.addWidget(self.in_set_combo)
         main_row.addWidget(QLabel("Rating:"))
-        self.rating_from_combo = QComboBox()
+        self.rating_from_combo = RatingComboBox()
         self.rating_from_combo.setItemDelegate(RatingComboDelegate(self.rating_from_combo))
         for i in range(6):
             self.rating_from_combo.addItem(_rating_label(i), i)
         self.rating_from_combo.currentIndexChanged.connect(self._on_rating_from_changed)
         main_row.addWidget(self.rating_from_combo)
         main_row.addWidget(QLabel("to"))
-        self.rating_to_combo = QComboBox()
+        self.rating_to_combo = RatingComboBox()
         self.rating_to_combo.setItemDelegate(RatingComboDelegate(self.rating_to_combo))
         for i in range(6):
             self.rating_to_combo.addItem(_rating_label(i), i)
@@ -609,27 +633,35 @@ class LibraryView(QWidget):
         more_layout.setContentsMargins(0, 8, 0, 4)
         more_row1 = QHBoxLayout()
         more_row1.addWidget(QLabel("Duration:"))
-        self.duration_min_edit = QLineEdit()
-        self.duration_min_edit.setPlaceholderText("m:ss")
-        self.duration_min_edit.setMaximumWidth(56)
-        self.duration_min_edit.textChanged.connect(self._on_duration_min_changed)
         self.duration_min_none = QCheckBox("None")
         self.duration_min_none.setChecked(True)
         self.duration_min_none.toggled.connect(self._on_duration_none_toggled)
+        more_row1.addWidget(self.duration_min_none)
+        self.duration_min_edit = QTimeEdit()
+        self.duration_min_edit.setDisplayFormat("m:ss")
+        self.duration_min_edit.setMinimumTime(QTime(0, 0, 0))
+        self.duration_min_edit.setMaximumTime(QTime(23, 59, 59))
+        self.duration_min_edit.setTime(QTime(0, 0, 0))
+        self.duration_min_edit.setMinimumWidth(88)
+        self.duration_min_edit.setMaximumWidth(96)
+        self.duration_min_edit.timeChanged.connect(self._on_duration_min_changed)
         self.duration_min_edit.setEnabled(False)
         more_row1.addWidget(self.duration_min_edit)
-        more_row1.addWidget(self.duration_min_none)
         more_row1.addWidget(QLabel("to"))
-        self.duration_max_edit = QLineEdit()
-        self.duration_max_edit.setPlaceholderText("m:ss")
-        self.duration_max_edit.setMaximumWidth(56)
-        self.duration_max_edit.textChanged.connect(self._on_duration_max_changed)
         self.duration_max_none = QCheckBox("None")
         self.duration_max_none.setChecked(True)
         self.duration_max_none.toggled.connect(self._on_duration_none_toggled)
+        more_row1.addWidget(self.duration_max_none)
+        self.duration_max_edit = QTimeEdit()
+        self.duration_max_edit.setDisplayFormat("m:ss")
+        self.duration_max_edit.setMinimumTime(QTime(0, 0, 0))
+        self.duration_max_edit.setMaximumTime(QTime(23, 59, 59))
+        self.duration_max_edit.setTime(QTime(0, 20, 0))  # default upper bound 20:00
+        self.duration_max_edit.setMinimumWidth(88)
+        self.duration_max_edit.setMaximumWidth(96)
+        self.duration_max_edit.timeChanged.connect(self._on_duration_max_changed)
         self.duration_max_edit.setEnabled(False)
         more_row1.addWidget(self.duration_max_edit)
-        more_row1.addWidget(self.duration_max_none)
         more_row1.addSpacing(16)
         more_row1.addWidget(QLabel("Last played:"))
         self.last_played_mode_combo = QComboBox()
@@ -909,55 +941,127 @@ class LibraryView(QWidget):
             self._status_popup.close()
             self.status_btn.setChecked(False)
             return
-        popup = QFrame(self, Qt.WindowType.Popup)
-        popup.setFrameShape(QFrame.Shape.StyledPanel)
-        layout = QVBoxLayout(popup)
-        list_widget = QListWidget()
-        list_widget.setMaximumHeight(220)
-        statuses = list_statuses(self.app_state.conn)
-        all_item = QListWidgetItem("[All]")
-        all_item.setData(Qt.ItemDataRole.UserRole, None)
-        all_item.setFlags(all_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-        all_item.setCheckState(Qt.CheckState.Checked if not self._selected_status_ids else Qt.CheckState.Unchecked)
-        list_widget.addItem(all_item)
-        for r in statuses:
-            item = QListWidgetItem(r.name)
-            item.setData(Qt.ItemDataRole.UserRole, r.id)
-            item.setData(LibraryStatusColorRole, r.color)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            checked = r.id in self._selected_status_ids if self._selected_status_ids else False
-            item.setCheckState(Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
-            list_widget.addItem(item)
-        list_widget.setItemDelegate(LibraryFilterStatusDelegate(list_widget))
-        layout.addWidget(list_widget)
 
-        def sync_and_apply():
-            list_widget.blockSignals(True)
-            if all_item.checkState() == Qt.CheckState.Checked:
-                for i in range(1, list_widget.count()):
-                    list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+        popup = QFrame(self, Qt.WindowType.Popup)
+        popup.setObjectName("status_filter_popup")
+        popup.setFrameShape(QFrame.Shape.StyledPanel)
+        popup.setMaximumWidth(260)
+        layout = QVBoxLayout(popup)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        header = QWidget()
+        header.setObjectName("status_filter_header")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(12, 10, 12, 8)
+        header_layout.setSpacing(12)
+        title_label = QLabel("Filter by status")
+        title_label.setObjectName("status_filter_title")
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+        all_btn = QPushButton("All")
+        all_btn.setObjectName("status_filter_header_btn")
+        clear_btn = QPushButton("Clear")
+        clear_btn.setObjectName("status_filter_header_btn")
+        header_layout.addWidget(all_btn)
+        header_layout.addWidget(clear_btn)
+        layout.addWidget(header)
+
+        # Chip buttons instead of QListWidget to avoid model/view crash on toggle
+        scroll = QScrollArea()
+        scroll.setObjectName("status_filter_list")
+        scroll.setMaximumHeight(280)
+        scroll.setMaximumWidth(240)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(12, 8, 12, 12)
+        content_layout.setSpacing(4)
+
+        statuses = list_statuses(self.app_state.conn)
+        chips: list[tuple[QPushButton, int | None]] = []
+
+        def update_chip_styles() -> None:
+            for btn, sid in chips:
+                selected = (sid is None and not self._selected_status_ids) or (
+                    sid is not None and sid in self._selected_status_ids
+                )
+                if sid is None:
+                    left = COLOR_OUTLINE_VARIANT
+                else:
+                    left = COLOR_OUTLINE_VARIANT
+                    for r in statuses:
+                        if r.id == sid:
+                            left = r.color if r.color else COLOR_OUTLINE_VARIANT
+                            try:
+                                QColor(left)
+                            except Exception:
+                                left = COLOR_OUTLINE_VARIANT
+                            break
+                btn.setStyleSheet(_status_chip_style(left, selected))
+
+        def update_button_text() -> None:
+            n = len(self._selected_status_ids)
+            self.status_btn.setText(
+                "All statuses" if n == 0 else ("1 status" if n == 1 else f"{n} statuses")
+            )
+
+        def on_chip_clicked(status_id: int | None) -> None:
+            if status_id is None:
                 self._selected_status_ids = []
             else:
-                self._selected_status_ids = []
-                for i in range(1, list_widget.count()):
-                    it = list_widget.item(i)
-                    if it.checkState() == Qt.CheckState.Checked:
-                        self._selected_status_ids.append(it.data(Qt.ItemDataRole.UserRole))
-                if not self._selected_status_ids:
-                    all_item.setCheckState(Qt.CheckState.Checked)
-            list_widget.blockSignals(False)
-            self.status_btn.setText("All" if not self._selected_status_ids else f"Status ({len(self._selected_status_ids)})")
-            self._apply_filters()
+                if status_id in self._selected_status_ids:
+                    self._selected_status_ids = [x for x in self._selected_status_ids if x != status_id]
+                else:
+                    self._selected_status_ids = self._selected_status_ids + [status_id]
+            update_chip_styles()
+            update_button_text()
+            QTimer.singleShot(0, self._apply_filters)
 
-        list_widget.itemChanged.connect(sync_and_apply)
+        # "All statuses" chip
+        all_chip = QPushButton("All statuses")
+        all_chip.setObjectName("status_filter_chip")
+        all_chip.setCursor(Qt.CursorShape.PointingHandCursor)
+        chips.append((all_chip, None))
+        content_layout.addWidget(all_chip)
+        all_chip.clicked.connect(lambda: on_chip_clicked(None))
+
+        for r in statuses:
+            chip = QPushButton(r.name)
+            chip.setObjectName("status_filter_chip")
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chips.append((chip, r.id))
+            content_layout.addWidget(chip)
+            chip.clicked.connect(lambda checked=False, sid=r.id: on_chip_clicked(sid))
+
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+        update_chip_styles()
+
+        def reset_to_all() -> None:
+            self._selected_status_ids = []
+            update_chip_styles()
+            update_button_text()
+            QTimer.singleShot(0, self._apply_filters)
+
+        all_btn.clicked.connect(reset_to_all)
+        clear_btn.clicked.connect(reset_to_all)
+
         popup.move(self.status_btn.mapToGlobal(self.status_btn.rect().bottomLeft()))
         popup.show()
-
-        def on_popup_closed():
-            self.status_btn.setChecked(False)
-            self._status_popup = None
-        popup.destroyed.connect(on_popup_closed)
         self._status_popup = popup
+
+        def on_popup_destroyed() -> None:
+            self._status_popup = None
+            try:
+                self.status_btn.setChecked(False)
+            except RuntimeError:
+                pass
+
+        popup.destroyed.connect(on_popup_destroyed)
 
     def _on_more_filters_toggled(self, checked: bool) -> None:
         self.more_filters_panel.setVisible(checked)
@@ -966,31 +1070,37 @@ class LibraryView(QWidget):
         self.duration_min_edit.setEnabled(not self.duration_min_none.isChecked())
         self.duration_max_edit.setEnabled(not self.duration_max_none.isChecked())
         if self.duration_min_none.isChecked():
-            self.duration_min_edit.clear()
+            self.duration_min_edit.setTime(QTime(0, 0, 0))
         if self.duration_max_none.isChecked():
-            self.duration_max_edit.clear()
+            self.duration_max_edit.setTime(QTime(0, 0, 0))
+        else:
+            self.duration_max_edit.setTime(QTime(0, 20, 0))  # default upper bound when None unchecked
         self._apply_filters()
 
     def _on_duration_min_changed(self) -> None:
         if self.duration_min_none.isChecked():
             return
-        low = _parse_mm_ss(self.duration_min_edit.text())
-        high = _parse_mm_ss(self.duration_max_edit.text()) if not self.duration_max_none.isChecked() else None
-        if low is not None and high is not None and low > high:
-            self.duration_max_edit.blockSignals(True)
-            self.duration_max_edit.setText(_format_mm_ss(low))
-            self.duration_max_edit.blockSignals(False)
+        low = _time_edit_to_seconds(self.duration_min_edit)
+        high = (
+            _time_edit_to_seconds(self.duration_max_edit)
+            if not self.duration_max_none.isChecked()
+            else None
+        )
+        if high is not None and low > high:
+            _seconds_to_time_edit(low, self.duration_max_edit)
         self._apply_filters()
 
     def _on_duration_max_changed(self) -> None:
         if self.duration_max_none.isChecked():
             return
-        high = _parse_mm_ss(self.duration_max_edit.text())
-        low = _parse_mm_ss(self.duration_min_edit.text()) if not self.duration_min_none.isChecked() else None
-        if high is not None and low is not None and high < low:
-            self.duration_min_edit.blockSignals(True)
-            self.duration_min_edit.setText(_format_mm_ss(high))
-            self.duration_min_edit.blockSignals(False)
+        high = _time_edit_to_seconds(self.duration_max_edit)
+        low = (
+            _time_edit_to_seconds(self.duration_min_edit)
+            if not self.duration_min_none.isChecked()
+            else None
+        )
+        if low is not None and high < low:
+            _seconds_to_time_edit(high, self.duration_min_edit)
         self._apply_filters()
 
     def _on_rating_from_changed(self) -> None:
@@ -1083,44 +1193,46 @@ class LibraryView(QWidget):
         layout = QVBoxLayout(popup)
         list_widget = QListWidget()
         list_widget.setMaximumHeight(220)
+        list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         transcribers = list_unique_transcribers(self.app_state.conn)
         all_item = QListWidgetItem("[All]")
         all_item.setData(Qt.ItemDataRole.UserRole, None)
-        all_item.setFlags(all_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-        all_item.setCheckState(Qt.CheckState.Checked if not self._selected_transcribers else Qt.CheckState.Unchecked)
         list_widget.addItem(all_item)
         for t in transcribers:
             item = QListWidgetItem(t)
             item.setData(Qt.ItemDataRole.UserRole, t)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(Qt.CheckState.Checked if t in self._selected_transcribers else Qt.CheckState.Unchecked)
             list_widget.addItem(item)
 
-        def sync_transcriber():
-            list_widget.blockSignals(True)
-            if all_item.checkState() == Qt.CheckState.Checked:
-                for i in range(1, list_widget.count()):
-                    list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
-                self._selected_transcribers = []
-            else:
-                self._selected_transcribers = []
-                for i in range(1, list_widget.count()):
-                    it = list_widget.item(i)
-                    if it.checkState() == Qt.CheckState.Checked:
-                        self._selected_transcribers.append(it.data(Qt.ItemDataRole.UserRole))
-                if not self._selected_transcribers:
-                    all_item.setCheckState(Qt.CheckState.Checked)
-            list_widget.blockSignals(False)
+        if not self._selected_transcribers:
+            list_widget.item(0).setSelected(True)
+        else:
+            for i in range(1, list_widget.count()):
+                if list_widget.item(i).data(Qt.ItemDataRole.UserRole) in self._selected_transcribers:
+                    list_widget.item(i).setSelected(True)
+
+        def on_selection_changed() -> None:
+            selected = list_widget.selectedItems()
+            has_all = any(it.data(Qt.ItemDataRole.UserRole) is None for it in selected)
+            values = [] if has_all else [it.data(Qt.ItemDataRole.UserRole) for it in selected if it.data(Qt.ItemDataRole.UserRole) is not None]
+            if not selected and list_widget.count():
+                list_widget.blockSignals(True)
+                list_widget.item(0).setSelected(True)
+                list_widget.blockSignals(False)
+                values = []
+            self._selected_transcribers = values
             self.transcriber_btn.setText("All" if not self._selected_transcribers else f"Transcriber ({len(self._selected_transcribers)})")
             self._apply_filters()
 
-        list_widget.itemChanged.connect(sync_transcriber)
+        list_widget.itemSelectionChanged.connect(on_selection_changed)
         popup.move(self.transcriber_btn.mapToGlobal(self.transcriber_btn.rect().bottomLeft()))
         popup.show()
 
         def on_popup_closed():
-            self.transcriber_btn.setChecked(False)
             self._transcriber_popup = None
+            try:
+                self.transcriber_btn.setChecked(False)
+            except RuntimeError:
+                pass
         popup.destroyed.connect(on_popup_closed)
         self._transcriber_popup = popup
 
@@ -1137,9 +1249,9 @@ class LibraryView(QWidget):
         duration_min = None
         duration_max = None
         if not self.duration_min_none.isChecked():
-            duration_min = _parse_mm_ss(self.duration_min_edit.text())
+            duration_min = _time_edit_to_seconds(self.duration_min_edit)
         if not self.duration_max_none.isChecked():
-            duration_max = _parse_mm_ss(self.duration_max_edit.text())
+            duration_max = _time_edit_to_seconds(self.duration_max_edit)
 
         last_played_never = False
         last_played_min_sec = None
