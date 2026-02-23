@@ -339,6 +339,27 @@ def dark_stylesheet() -> str:
         QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
             width: 0;
         }}
+        /* QSlider / QRangeSlider: groove and handles so both range-slider handles are visible on dark theme */
+        QSlider::groove:horizontal {{
+            border: 0;
+            background: {COLOR_OUTLINE};
+            height: 8px;
+            border-radius: 4px;
+        }}
+        QSlider::handle:horizontal {{
+            background: {COLOR_PRIMARY};
+            border: 1px solid {COLOR_OUTLINE};
+            width: 16px;
+            height: 16px;
+            margin: -4px 0;
+            border-radius: 8px;
+        }}
+        QSlider::handle:horizontal:hover {{
+            background: {COLOR_TEXT_HEADER};
+        }}
+        QRangeSlider {{
+            qproperty-barColor: {COLOR_OUTLINE_VARIANT};
+        }}
     """
 
 

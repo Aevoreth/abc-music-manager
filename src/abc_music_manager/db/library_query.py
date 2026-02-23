@@ -12,6 +12,21 @@ from typing import Optional
 from .instrument import get_instrument_name
 
 
+def list_unique_transcribers(conn: sqlite3.Connection) -> list[str]:
+    """Return distinct non-null transcriber values from library songs, sorted."""
+    main_library = """
+        SELECT DISTINCT song_id FROM SongFile
+        WHERE is_primary_library = 1 AND scan_excluded = 0
+    """
+    cur = conn.execute(
+        """SELECT DISTINCT s.transcriber FROM Song s
+           WHERE s.id IN (""" + main_library + """)
+             AND s.transcriber IS NOT NULL AND s.transcriber != ''
+           ORDER BY s.transcriber""",
+    )
+    return [r[0] for r in cur.fetchall()]
+
+
 @dataclass
 class LibrarySongRow:
     song_id: int
@@ -37,6 +52,7 @@ def list_library_songs(
     *,
     title_or_composer_substring: Optional[str] = None,
     transcriber_substring: Optional[str] = None,
+    transcriber_in: Optional[list[str]] = None,
     duration_min_sec: Optional[int] = None,
     duration_max_sec: Optional[int] = None,
     rating_min: Optional[int] = None,
@@ -47,6 +63,8 @@ def list_library_songs(
     last_played_never: bool = False,
     last_played_min_seconds_ago: Optional[int] = None,
     last_played_max_seconds_ago: Optional[int] = None,
+    last_played_after_iso: Optional[str] = None,
+    last_played_before_iso: Optional[str] = None,
     in_set_filter: Optional[str] = None,
     limit: int = 2000,
 ) -> list[LibrarySongRow]:
@@ -69,6 +87,10 @@ def list_library_songs(
     if transcriber_substring:
         conditions.append("(s.transcriber IS NOT NULL AND LOWER(s.transcriber) LIKE ?)")
         args.append("%" + transcriber_substring.lower() + "%")
+    if transcriber_in:
+        placeholders = ",".join("?" * len(transcriber_in))
+        conditions.append(f"(s.transcriber IN ({placeholders}))")
+        args.extend(transcriber_in)
     if duration_min_sec is not None:
         conditions.append("s.duration_seconds >= ?")
         args.append(duration_min_sec)
@@ -93,6 +115,13 @@ def list_library_songs(
         args.append(part_count_max)
     if last_played_never:
         conditions.append("s.last_played_at IS NULL")
+    elif last_played_after_iso is not None or last_played_before_iso is not None:
+        if last_played_after_iso is not None:
+            conditions.append("s.last_played_at >= ?")
+            args.append(last_played_after_iso)
+        if last_played_before_iso is not None:
+            conditions.append("s.last_played_at <= ?")
+            args.append(last_played_before_iso)
     elif last_played_min_seconds_ago is not None or last_played_max_seconds_ago is not None:
         # Song played within range: last_played_at between (now - max_ago) and (now - min_ago)
         if last_played_max_seconds_ago is not None:

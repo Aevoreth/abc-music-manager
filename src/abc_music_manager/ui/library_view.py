@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QSpinBox,
     QPushButton,
-    QSlider,
     QCheckBox,
     QAbstractItemView,
     QHeaderView,
@@ -38,7 +37,7 @@ from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, QSortFilterProx
 from PySide6.QtGui import QColor, QAction, QPainter, QFont, QBrush, QPen, QIcon, QPixmap
 
 from ..services.app_state import AppState
-from ..db import list_library_songs, get_status_list, LibrarySongRow
+from ..db import list_library_songs, list_unique_transcribers, get_status_list, LibrarySongRow
 from ..db.status_repo import list_statuses
 from ..db.setlist_repo import (
     list_setlists,
@@ -54,24 +53,92 @@ from .theme import STATUS_CIRCLE_DIAMETER
 # Role for status color in library filter combo items
 LibraryStatusColorRole = Qt.ItemDataRole.UserRole + 20
 
-# Last-played filter scale: (label, seconds_ago). Just now → hourly 1–24h → daily 2–7d → weekly 1–8w → monthly 1–12mo → yearly 1–5y → More than 5 years
-def _last_played_scale() -> list[tuple[str, int]]:
-    scale = [("Just now", 0)]
-    for h in range(1, 25):
-        scale.append((f"{h}h", h * 3600))
-    for d in range(2, 8):
-        scale.append((f"{d}d", d * 86400))
-    for w in range(1, 9):
-        scale.append((f"{w}w", w * 604800))
-    for m in range(1, 13):
-        scale.append((f"{m}mo", m * 30 * 86400))
-    for y in range(1, 6):
-        scale.append((f"{y}y", y * 365 * 86400))
-    scale.append(("More than 5 years", 5 * 365 * 86400))
-    return scale
+# Last-played time-range options: (label, seconds_ago). "Never" = no upper bound (songs never played).
+def _last_played_time_options() -> list[tuple[str, Optional[int]]]:
+    opts: list[tuple[str, Optional[int]]] = []
+    opts.append(("Just now", 0))
+    for h in range(1, 24):
+        opts.append((f"{h} hour(s)", h * 3600))
+    for d in range(1, 14):
+        opts.append((f"{d} day(s)", d * 86400))
+    for w in range(2, 8):
+        opts.append((f"{w} week(s)", w * 604800))
+    for m in range(2, 24):
+        opts.append((f"{m} month(s)", m * 30 * 86400))
+    for y in range(1, 11):
+        opts.append((f"{y} year(s)", y * 365 * 86400))
+    opts.append(("Never", None))  # filter: never played
+    return opts
 
-LAST_PLAYED_SCALE = _last_played_scale()
-LAST_PLAYED_MAX_INDEX = len(LAST_PLAYED_SCALE) - 1
+
+LAST_PLAYED_TIME_OPTS = _last_played_time_options()
+
+# Rating: 0 = no stars, 1-5 = star count (for combo display)
+RATING_STAR_FILLED = "\u2605"
+RATING_STAR_EMPTY = "\u2606"
+
+
+# Gold for filled stars; gray for empty (so they're not white)
+RATING_STAR_GOLD = QColor(255, 200, 0)
+RATING_STAR_EMPTY_COLOR = QColor(128, 128, 128)
+
+
+def _rating_label(stars: int) -> str:
+    if stars <= 0:
+        return "No stars"
+    # Filled left to right: ★★★☆☆
+    return RATING_STAR_FILLED * stars + RATING_STAR_EMPTY * (5 - stars)
+
+
+class RatingComboDelegate(QStyledItemDelegate):
+    """Paints rating combo items as stars (filled left to right, gold filled / gray empty)."""
+
+    def paint(self, painter: QPainter, option, index) -> None:
+        text = index.data(Qt.ItemDataRole.DisplayRole) or ""
+        opt = QStyleOptionViewItem(option)
+        rect = opt.rect.adjusted(2, 0, -2, 0)
+        cy = rect.center().y()
+        line_h = opt.fontMetrics.lineSpacing()
+        star_y = cy - line_h // 2
+        rating = index.data(Qt.ItemDataRole.UserRole)
+        if rating is None:
+            painter.drawText(rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
+            return
+        rating = int(rating) if rating is not None else 0
+        painter.save()
+        star_x = rect.x()
+        for i in range(1, 6):
+            filled = i <= rating
+            char = RATING_STAR_FILLED if filled else RATING_STAR_EMPTY
+            color = RATING_STAR_GOLD if filled else RATING_STAR_EMPTY_COLOR
+            painter.setPen(QPen(color))
+            painter.drawText(star_x + (i - 1) * 14, star_y, 14, line_h, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, char)
+        painter.restore()
+
+
+def _parse_mm_ss(text: str) -> Optional[int]:
+    """Parse 'm:ss' or 'mm:ss' to total seconds, or None if invalid."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    parts = text.split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        m, s = int(parts[0].strip()), int(parts[1].strip())
+        if m < 0 or s < 0 or s >= 60:
+            return None
+        return m * 60 + s
+    except ValueError:
+        return None
+
+
+def _format_mm_ss(seconds: int) -> str:
+    """Format seconds as m:ss or mm:ss."""
+    if seconds <= 0:
+        return "0:00"
+    m, s = divmod(seconds, 60)
+    return f"{m}:{s:02d}"
 
 
 class LibraryFilterStatusDelegate(QStyledItemDelegate):
@@ -192,6 +259,7 @@ class LibraryTableModel(QAbstractTableModel):
         self._rows: list[LibrarySongRow] = []
         self._filter_title_composer: str = ""
         self._filter_transcriber: str = ""
+        self._filter_transcriber_in: Optional[list[str]] = None
         self._filter_duration_min: Optional[int] = None
         self._filter_duration_max: Optional[int] = None
         self._filter_rating_min: Optional[int] = None
@@ -202,6 +270,8 @@ class LibraryTableModel(QAbstractTableModel):
         self._filter_last_played_never: bool = False
         self._filter_last_played_min_seconds_ago: Optional[int] = None
         self._filter_last_played_max_seconds_ago: Optional[int] = None
+        self._filter_last_played_after_iso: Optional[str] = None
+        self._filter_last_played_before_iso: Optional[str] = None
         self._filter_in_set: Optional[str] = None  # "yes", "no", or None for either
         self._default_status_name: Optional[str] = None
         self._default_status_color: Optional[str] = None
@@ -210,6 +280,7 @@ class LibraryTableModel(QAbstractTableModel):
         self,
         title_or_composer: str = "",
         transcriber: str = "",
+        transcriber_in: Optional[list[str]] = None,
         duration_min: Optional[int] = None,
         duration_max: Optional[int] = None,
         rating_min: Optional[int] = None,
@@ -220,10 +291,13 @@ class LibraryTableModel(QAbstractTableModel):
         last_played_never: bool = False,
         last_played_min_seconds_ago: Optional[int] = None,
         last_played_max_seconds_ago: Optional[int] = None,
+        last_played_after_iso: Optional[str] = None,
+        last_played_before_iso: Optional[str] = None,
         in_set: Optional[str] = None,
     ) -> None:
         self._filter_title_composer = (title_or_composer or "").strip()
         self._filter_transcriber = (transcriber or "").strip()
+        self._filter_transcriber_in = transcriber_in if transcriber_in else None
         self._filter_duration_min = duration_min
         self._filter_duration_max = duration_max
         self._filter_rating_min = rating_min
@@ -234,6 +308,8 @@ class LibraryTableModel(QAbstractTableModel):
         self._filter_last_played_never = last_played_never
         self._filter_last_played_min_seconds_ago = last_played_min_seconds_ago
         self._filter_last_played_max_seconds_ago = last_played_max_seconds_ago
+        self._filter_last_played_after_iso = last_played_after_iso
+        self._filter_last_played_before_iso = last_played_before_iso
         self._filter_in_set = in_set if in_set in ("yes", "no") else None
         self.refresh()
 
@@ -256,6 +332,7 @@ class LibraryTableModel(QAbstractTableModel):
             self._conn,
             title_or_composer_substring=self._filter_title_composer or None,
             transcriber_substring=self._filter_transcriber or None,
+            transcriber_in=self._filter_transcriber_in,
             duration_min_sec=self._filter_duration_min,
             duration_max_sec=self._filter_duration_max,
             rating_min=self._filter_rating_min,
@@ -266,6 +343,8 @@ class LibraryTableModel(QAbstractTableModel):
             last_played_never=self._filter_last_played_never,
             last_played_min_seconds_ago=self._filter_last_played_min_seconds_ago,
             last_played_max_seconds_ago=self._filter_last_played_max_seconds_ago,
+            last_played_after_iso=self._filter_last_played_after_iso,
+            last_played_before_iso=self._filter_last_played_before_iso,
             in_set_filter=self._filter_in_set,
             limit=2000,
         )
@@ -477,141 +556,137 @@ class LibraryView(QWidget):
         self.app_state = app_state
         layout = QVBoxLayout(self)
 
-        # Filter panel: multiple rows, all apply immediately
+        # ---- Main filter row: Title/Composer, Status, In set, Rating from/to, More Filters ----
         filter_widget = QWidget()
         filter_layout = QVBoxLayout(filter_widget)
         filter_layout.setContentsMargins(0, 0, 0, 4)
 
-        # Row 1: Title/Composer, Transcriber, In set, Status, Refresh
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("Title / Composer:"))
+        main_row = QHBoxLayout()
+        main_row.addWidget(QLabel("Title / Composer:"))
         self.title_composer_edit = QLineEdit()
         self.title_composer_edit.setPlaceholderText("Filter by title or composer")
         self.title_composer_edit.setClearButtonEnabled(True)
         self.title_composer_edit.setMaximumWidth(220)
         self.title_composer_edit.textChanged.connect(self._apply_filters)
-        row1.addWidget(self.title_composer_edit)
-        row1.addWidget(QLabel("Transcriber:"))
-        self.transcriber_edit = QLineEdit()
-        self.transcriber_edit.setPlaceholderText("Filter")
-        self.transcriber_edit.setClearButtonEnabled(True)
-        self.transcriber_edit.setMaximumWidth(140)
-        self.transcriber_edit.textChanged.connect(self._apply_filters)
-        row1.addWidget(self.transcriber_edit)
-        row1.addWidget(QLabel("In set:"))
+        main_row.addWidget(self.title_composer_edit)
+        main_row.addWidget(QLabel("Status:"))
+        self.status_btn = QPushButton("All")
+        self.status_btn.setCheckable(True)
+        self.status_btn.clicked.connect(self._on_status_filter_clicked)
+        main_row.addWidget(self.status_btn)
+        main_row.addWidget(QLabel("In set:"))
         self.in_set_combo = QComboBox()
         self.in_set_combo.addItem("Either", None)
         self.in_set_combo.addItem("Yes", "yes")
         self.in_set_combo.addItem("No", "no")
         self.in_set_combo.currentIndexChanged.connect(self._apply_filters)
-        row1.addWidget(self.in_set_combo)
-        self.status_btn = QPushButton("Status (all)")
-        self.status_btn.setCheckable(True)
-        self.status_btn.clicked.connect(self._on_status_filter_clicked)
-        row1.addWidget(self.status_btn)
-        self.refresh_btn = QPushButton("Refresh")
-        self.refresh_btn.clicked.connect(self._apply_filters)
-        row1.addWidget(self.refresh_btn)
-        row1.addStretch()
-        filter_layout.addLayout(row1)
+        main_row.addWidget(self.in_set_combo)
+        main_row.addWidget(QLabel("Rating:"))
+        self.rating_from_combo = QComboBox()
+        self.rating_from_combo.setItemDelegate(RatingComboDelegate(self.rating_from_combo))
+        for i in range(6):
+            self.rating_from_combo.addItem(_rating_label(i), i)
+        self.rating_from_combo.currentIndexChanged.connect(self._on_rating_from_changed)
+        main_row.addWidget(self.rating_from_combo)
+        main_row.addWidget(QLabel("to"))
+        self.rating_to_combo = QComboBox()
+        self.rating_to_combo.setItemDelegate(RatingComboDelegate(self.rating_to_combo))
+        for i in range(6):
+            self.rating_to_combo.addItem(_rating_label(i), i)
+        self.rating_to_combo.setCurrentIndex(5)  # 5 stars default
+        self.rating_to_combo.currentIndexChanged.connect(self._on_rating_to_changed)
+        main_row.addWidget(self.rating_to_combo)
+        self.more_filters_btn = QPushButton("More Filters")
+        self.more_filters_btn.setCheckable(True)
+        self.more_filters_btn.toggled.connect(self._on_more_filters_toggled)
+        main_row.addWidget(self.more_filters_btn)
+        main_row.addStretch()
+        filter_layout.addLayout(main_row)
 
-        # Row 2: Duration (min/max), Last played (Never + range)
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("Duration (s):"))
-        self.duration_min_slider = QSlider(Qt.Orientation.Horizontal)
-        self.duration_min_slider.setRange(0, 7200)  # 0 = no min, up to 2h
-        self.duration_min_slider.setValue(0)
-        self.duration_min_slider.valueChanged.connect(self._update_filter_labels)
-        self.duration_min_slider.valueChanged.connect(self._apply_filters)
-        self.duration_min_slider.setMinimumWidth(100)
-        row2.addWidget(self.duration_min_slider)
-        self.duration_min_label = QLabel("—")
-        self.duration_min_label.setMinimumWidth(36)
-        row2.addWidget(self.duration_min_label)
-        row2.addWidget(QLabel("to"))
-        self.duration_max_slider = QSlider(Qt.Orientation.Horizontal)
-        self.duration_max_slider.setRange(0, 7200)  # 0 = no max
-        self.duration_max_slider.setValue(0)
-        self.duration_max_slider.valueChanged.connect(self._update_filter_labels)
-        self.duration_max_slider.valueChanged.connect(self._apply_filters)
-        self.duration_max_slider.setMinimumWidth(100)
-        row2.addWidget(self.duration_max_slider)
-        self.duration_max_label = QLabel("—")
-        self.duration_max_label.setMinimumWidth(36)
-        row2.addWidget(self.duration_max_label)
-        row2.addSpacing(16)
-        self.last_played_never_check = QCheckBox("Never")
-        self.last_played_never_check.toggled.connect(self._on_last_played_never_toggled)
-        self.last_played_never_check.toggled.connect(self._apply_filters)
-        row2.addWidget(self.last_played_never_check)
-        row2.addWidget(QLabel("Last played:"))
-        self.last_played_min_slider = QSlider(Qt.Orientation.Horizontal)
-        self.last_played_min_slider.setRange(0, LAST_PLAYED_MAX_INDEX)
-        self.last_played_min_slider.setValue(LAST_PLAYED_MAX_INDEX)
-        self.last_played_min_slider.valueChanged.connect(self._update_filter_labels)
-        self.last_played_min_slider.valueChanged.connect(self._apply_filters)
-        self.last_played_min_slider.setMinimumWidth(80)
-        row2.addWidget(self.last_played_min_slider)
-        self.last_played_min_label = QLabel("—")
-        row2.addWidget(self.last_played_min_label)
-        row2.addWidget(QLabel("to"))
-        self.last_played_max_slider = QSlider(Qt.Orientation.Horizontal)
-        self.last_played_max_slider.setRange(0, LAST_PLAYED_MAX_INDEX)
-        self.last_played_max_slider.setValue(0)
-        self.last_played_max_slider.valueChanged.connect(self._update_filter_labels)
-        self.last_played_max_slider.valueChanged.connect(self._apply_filters)
-        self.last_played_max_slider.setMinimumWidth(80)
-        row2.addWidget(self.last_played_max_slider)
-        self.last_played_max_label = QLabel("Just now")
-        row2.addWidget(self.last_played_max_label)
-        row2.addStretch()
-        filter_layout.addLayout(row2)
-
-        # Row 3: Parts (1–24), Rating (1–5)
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel("Parts:"))
-        self.parts_min_slider = QSlider(Qt.Orientation.Horizontal)
-        self.parts_min_slider.setRange(1, 24)
-        self.parts_min_slider.setValue(1)
-        self.parts_min_slider.valueChanged.connect(self._update_filter_labels)
-        self.parts_min_slider.valueChanged.connect(self._apply_filters)
-        self.parts_min_slider.setMinimumWidth(80)
-        row3.addWidget(self.parts_min_slider)
-        self.parts_min_label = QLabel("1")
-        row3.addWidget(self.parts_min_label)
-        row3.addWidget(QLabel("to"))
-        self.parts_max_slider = QSlider(Qt.Orientation.Horizontal)
-        self.parts_max_slider.setRange(1, 24)
-        self.parts_max_slider.setValue(24)
-        self.parts_max_slider.valueChanged.connect(self._update_filter_labels)
-        self.parts_max_slider.valueChanged.connect(self._apply_filters)
-        self.parts_max_slider.setMinimumWidth(80)
-        row3.addWidget(self.parts_max_slider)
-        self.parts_max_label = QLabel("24")
-        row3.addWidget(self.parts_max_label)
-        row3.addSpacing(16)
-        row3.addWidget(QLabel("Rating:"))
-        self.rating_min_slider = QSlider(Qt.Orientation.Horizontal)
-        self.rating_min_slider.setRange(1, 5)
-        self.rating_min_slider.setValue(1)
-        self.rating_min_slider.valueChanged.connect(self._update_filter_labels)
-        self.rating_min_slider.valueChanged.connect(self._apply_filters)
-        self.rating_min_slider.setMinimumWidth(60)
-        row3.addWidget(self.rating_min_slider)
-        self.rating_min_label = QLabel("1")
-        row3.addWidget(self.rating_min_label)
-        row3.addWidget(QLabel("to"))
-        self.rating_max_slider = QSlider(Qt.Orientation.Horizontal)
-        self.rating_max_slider.setRange(1, 5)
-        self.rating_max_slider.setValue(5)
-        self.rating_max_slider.valueChanged.connect(self._update_filter_labels)
-        self.rating_max_slider.valueChanged.connect(self._apply_filters)
-        self.rating_max_slider.setMinimumWidth(60)
-        row3.addWidget(self.rating_max_slider)
-        self.rating_max_label = QLabel("5")
-        row3.addWidget(self.rating_max_label)
-        row3.addStretch()
-        filter_layout.addLayout(row3)
+        # ---- More Filters panel (collapsible) ----
+        self.more_filters_panel = QWidget()
+        more_layout = QVBoxLayout(self.more_filters_panel)
+        more_layout.setContentsMargins(0, 8, 0, 4)
+        more_row1 = QHBoxLayout()
+        more_row1.addWidget(QLabel("Duration:"))
+        self.duration_min_edit = QLineEdit()
+        self.duration_min_edit.setPlaceholderText("m:ss")
+        self.duration_min_edit.setMaximumWidth(56)
+        self.duration_min_edit.textChanged.connect(self._on_duration_min_changed)
+        self.duration_min_none = QCheckBox("None")
+        self.duration_min_none.setChecked(True)
+        self.duration_min_none.toggled.connect(self._on_duration_none_toggled)
+        self.duration_min_edit.setEnabled(False)
+        more_row1.addWidget(self.duration_min_edit)
+        more_row1.addWidget(self.duration_min_none)
+        more_row1.addWidget(QLabel("to"))
+        self.duration_max_edit = QLineEdit()
+        self.duration_max_edit.setPlaceholderText("m:ss")
+        self.duration_max_edit.setMaximumWidth(56)
+        self.duration_max_edit.textChanged.connect(self._on_duration_max_changed)
+        self.duration_max_none = QCheckBox("None")
+        self.duration_max_none.setChecked(True)
+        self.duration_max_none.toggled.connect(self._on_duration_none_toggled)
+        self.duration_max_edit.setEnabled(False)
+        more_row1.addWidget(self.duration_max_edit)
+        more_row1.addWidget(self.duration_max_none)
+        more_row1.addSpacing(16)
+        more_row1.addWidget(QLabel("Last played:"))
+        self.last_played_mode_combo = QComboBox()
+        self.last_played_mode_combo.addItem("Time range", "time")
+        self.last_played_mode_combo.addItem("Date range", "date")
+        self.last_played_mode_combo.currentIndexChanged.connect(self._on_last_played_mode_changed)
+        more_row1.addWidget(self.last_played_mode_combo)
+        self.last_played_from_combo = QComboBox()
+        for label, sec in LAST_PLAYED_TIME_OPTS:
+            self.last_played_from_combo.addItem(label, sec)
+        self.last_played_from_combo.currentIndexChanged.connect(self._on_last_played_from_time_changed)
+        more_row1.addWidget(self.last_played_from_combo)
+        self.last_played_to_combo = QComboBox()
+        for label, sec in LAST_PLAYED_TIME_OPTS:
+            self.last_played_to_combo.addItem(label, sec)
+        self.last_played_to_combo.setCurrentIndex(self.last_played_to_combo.count() - 1)
+        self.last_played_to_combo.currentIndexChanged.connect(self._on_last_played_to_time_changed)
+        more_row1.addWidget(self.last_played_to_combo)
+        self.last_played_from_dt = QDateTimeEdit()
+        self.last_played_from_dt.setCalendarPopup(True)
+        self.last_played_from_dt.setDisplayFormat("yyyy-MM-dd hh:mm")
+        self.last_played_from_dt.setVisible(False)
+        self.last_played_from_dt.dateTimeChanged.connect(self._on_last_played_from_date_changed)
+        more_row1.addWidget(self.last_played_from_dt)
+        self.last_played_to_dt = QDateTimeEdit()
+        self.last_played_to_dt.setCalendarPopup(True)
+        self.last_played_to_dt.setDisplayFormat("yyyy-MM-dd hh:mm")
+        self.last_played_to_dt.setVisible(False)
+        self.last_played_to_dt.dateTimeChanged.connect(self._on_last_played_to_date_changed)
+        more_row1.addWidget(self.last_played_to_dt)
+        more_row1.addStretch()
+        more_layout.addLayout(more_row1)
+        more_row2 = QHBoxLayout()
+        more_row2.addWidget(QLabel("Parts:"))
+        self.parts_min_combo = QComboBox()
+        for n in range(1, 25):
+            self.parts_min_combo.addItem(str(n), n)
+        self.parts_min_combo.setCurrentIndex(0)
+        self.parts_min_combo.currentIndexChanged.connect(self._on_parts_min_changed)
+        more_row2.addWidget(self.parts_min_combo)
+        more_row2.addWidget(QLabel("to"))
+        self.parts_max_combo = QComboBox()
+        for n in range(1, 25):
+            self.parts_max_combo.addItem(str(n), n)
+        self.parts_max_combo.setCurrentIndex(23)
+        self.parts_max_combo.currentIndexChanged.connect(self._on_parts_max_changed)
+        more_row2.addWidget(self.parts_max_combo)
+        more_row2.addSpacing(16)
+        more_row2.addWidget(QLabel("Transcriber:"))
+        self.transcriber_btn = QPushButton("All")
+        self.transcriber_btn.setCheckable(True)
+        self.transcriber_btn.clicked.connect(self._on_transcriber_filter_clicked)
+        more_row2.addWidget(self.transcriber_btn)
+        more_row2.addStretch()
+        more_layout.addLayout(more_row2)
+        self.more_filters_panel.setVisible(False)
+        filter_layout.addWidget(self.more_filters_panel)
 
         layout.addWidget(filter_widget)
 
@@ -660,9 +735,10 @@ class LibraryView(QWidget):
         self.table.viewport().installEventFilter(self)
         layout.addWidget(self.table)
 
-        self._selected_status_ids: list[int] = []  # empty = all
+        self._selected_status_ids: list[int] = []
         self._status_popup: QWidget | None = None
-        self._update_filter_labels()
+        self._selected_transcribers: list[str] = []
+        self._transcriber_popup: QWidget | None = None
         self.model.refresh()
 
     # Sortable columns: Title, Composer, Duration, Last played, Parts, Rating, Transcriber
@@ -839,7 +915,7 @@ class LibraryView(QWidget):
         list_widget = QListWidget()
         list_widget.setMaximumHeight(220)
         statuses = list_statuses(self.app_state.conn)
-        all_item = QListWidgetItem("(All)")
+        all_item = QListWidgetItem("[All]")
         all_item.setData(Qt.ItemDataRole.UserRole, None)
         all_item.setFlags(all_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
         all_item.setCheckState(Qt.CheckState.Checked if not self._selected_status_ids else Qt.CheckState.Unchecked)
@@ -870,7 +946,7 @@ class LibraryView(QWidget):
                 if not self._selected_status_ids:
                     all_item.setCheckState(Qt.CheckState.Checked)
             list_widget.blockSignals(False)
-            self.status_btn.setText("Status (all)" if not self._selected_status_ids else f"Status ({len(self._selected_status_ids)})")
+            self.status_btn.setText("All" if not self._selected_status_ids else f"Status ({len(self._selected_status_ids)})")
             self._apply_filters()
 
         list_widget.itemChanged.connect(sync_and_apply)
@@ -883,64 +959,222 @@ class LibraryView(QWidget):
         popup.destroyed.connect(on_popup_closed)
         self._status_popup = popup
 
-    def _on_last_played_never_toggled(self, checked: bool) -> None:
-        for w in (self.last_played_min_slider, self.last_played_max_slider, self.last_played_min_label, self.last_played_max_label):
-            w.setEnabled(not checked)
+    def _on_more_filters_toggled(self, checked: bool) -> None:
+        self.more_filters_panel.setVisible(checked)
 
-    def _update_filter_labels(self) -> None:
-        v = self.duration_min_slider.value()
-        self.duration_min_label.setText(_format_duration(v) if v > 0 else "—")
-        v = self.duration_max_slider.value()
-        self.duration_max_label.setText(_format_duration(v) if v > 0 else "—")
-        self.parts_min_label.setText(str(self.parts_min_slider.value()))
-        self.parts_max_label.setText(str(self.parts_max_slider.value()))
-        self.rating_min_label.setText(str(self.rating_min_slider.value()))
-        self.rating_max_label.setText(str(self.rating_max_slider.value()))
-        if not self.last_played_never_check.isChecked():
-            i = self.last_played_min_slider.value()
-            self.last_played_min_label.setText(LAST_PLAYED_SCALE[i][0] if 0 <= i <= LAST_PLAYED_MAX_INDEX else "—")
-            i = self.last_played_max_slider.value()
-            self.last_played_max_label.setText(LAST_PLAYED_SCALE[i][0] if 0 <= i <= LAST_PLAYED_MAX_INDEX else "—")
+    def _on_duration_none_toggled(self) -> None:
+        self.duration_min_edit.setEnabled(not self.duration_min_none.isChecked())
+        self.duration_max_edit.setEnabled(not self.duration_max_none.isChecked())
+        if self.duration_min_none.isChecked():
+            self.duration_min_edit.clear()
+        if self.duration_max_none.isChecked():
+            self.duration_max_edit.clear()
+        self._apply_filters()
+
+    def _on_duration_min_changed(self) -> None:
+        if self.duration_min_none.isChecked():
+            return
+        low = _parse_mm_ss(self.duration_min_edit.text())
+        high = _parse_mm_ss(self.duration_max_edit.text()) if not self.duration_max_none.isChecked() else None
+        if low is not None and high is not None and low > high:
+            self.duration_max_edit.blockSignals(True)
+            self.duration_max_edit.setText(_format_mm_ss(low))
+            self.duration_max_edit.blockSignals(False)
+        self._apply_filters()
+
+    def _on_duration_max_changed(self) -> None:
+        if self.duration_max_none.isChecked():
+            return
+        high = _parse_mm_ss(self.duration_max_edit.text())
+        low = _parse_mm_ss(self.duration_min_edit.text()) if not self.duration_min_none.isChecked() else None
+        if high is not None and low is not None and high < low:
+            self.duration_min_edit.blockSignals(True)
+            self.duration_min_edit.setText(_format_mm_ss(high))
+            self.duration_min_edit.blockSignals(False)
+        self._apply_filters()
+
+    def _on_rating_from_changed(self) -> None:
+        r_from = self.rating_from_combo.currentData()
+        r_to = self.rating_to_combo.currentData()
+        if r_from is not None and r_to is not None and r_from > r_to:
+            self.rating_to_combo.blockSignals(True)
+            self.rating_to_combo.setCurrentIndex(self.rating_from_combo.currentIndex())
+            self.rating_to_combo.blockSignals(False)
+        self._apply_filters()
+
+    def _on_rating_to_changed(self) -> None:
+        r_from = self.rating_from_combo.currentData()
+        r_to = self.rating_to_combo.currentData()
+        if r_from is not None and r_to is not None and r_to < r_from:
+            self.rating_from_combo.blockSignals(True)
+            self.rating_from_combo.setCurrentIndex(self.rating_to_combo.currentIndex())
+            self.rating_from_combo.blockSignals(False)
+        self._apply_filters()
+
+    def _on_last_played_mode_changed(self) -> None:
+        is_time = self.last_played_mode_combo.currentData() == "time"
+        self.last_played_from_combo.setVisible(is_time)
+        self.last_played_to_combo.setVisible(is_time)
+        self.last_played_from_dt.setVisible(not is_time)
+        self.last_played_to_dt.setVisible(not is_time)
+        self._apply_filters()
+
+    def _on_last_played_from_time_changed(self) -> None:
+        idx_from = self.last_played_from_combo.currentIndex()
+        idx_to = self.last_played_to_combo.currentIndex()
+        if idx_from > idx_to:
+            self.last_played_to_combo.blockSignals(True)
+            self.last_played_to_combo.setCurrentIndex(idx_from)
+            self.last_played_to_combo.blockSignals(False)
+        self._apply_filters()
+
+    def _on_last_played_to_time_changed(self) -> None:
+        idx_from = self.last_played_from_combo.currentIndex()
+        idx_to = self.last_played_to_combo.currentIndex()
+        if idx_to < idx_from:
+            self.last_played_from_combo.blockSignals(True)
+            self.last_played_from_combo.setCurrentIndex(idx_to)
+            self.last_played_from_combo.blockSignals(False)
+        self._apply_filters()
+
+    def _on_last_played_from_date_changed(self) -> None:
+        dt_from = self.last_played_from_dt.dateTime().toPython()
+        dt_to = self.last_played_to_dt.dateTime().toPython()
+        if dt_from > dt_to:
+            self.last_played_to_dt.blockSignals(True)
+            self.last_played_to_dt.setDateTime(self.last_played_from_dt.dateTime())
+            self.last_played_to_dt.blockSignals(False)
+        self._apply_filters()
+
+    def _on_last_played_to_date_changed(self) -> None:
+        dt_from = self.last_played_from_dt.dateTime().toPython()
+        dt_to = self.last_played_to_dt.dateTime().toPython()
+        if dt_to < dt_from:
+            self.last_played_from_dt.blockSignals(True)
+            self.last_played_from_dt.setDateTime(self.last_played_to_dt.dateTime())
+            self.last_played_from_dt.blockSignals(False)
+        self._apply_filters()
+
+    def _on_parts_min_changed(self) -> None:
+        lo = self.parts_min_combo.currentData()
+        hi = self.parts_max_combo.currentData()
+        if lo is not None and hi is not None and lo > hi:
+            self.parts_max_combo.blockSignals(True)
+            self.parts_max_combo.setCurrentIndex(self.parts_min_combo.currentIndex())
+            self.parts_max_combo.blockSignals(False)
+        self._apply_filters()
+
+    def _on_parts_max_changed(self) -> None:
+        lo = self.parts_min_combo.currentData()
+        hi = self.parts_max_combo.currentData()
+        if lo is not None and hi is not None and hi < lo:
+            self.parts_min_combo.blockSignals(True)
+            self.parts_min_combo.setCurrentIndex(self.parts_max_combo.currentIndex())
+            self.parts_min_combo.blockSignals(False)
+        self._apply_filters()
+
+    def _on_transcriber_filter_clicked(self) -> None:
+        if self._transcriber_popup is not None and self._transcriber_popup.isVisible():
+            self._transcriber_popup.close()
+            self.transcriber_btn.setChecked(False)
+            return
+        popup = QFrame(self, Qt.WindowType.Popup)
+        popup.setFrameShape(QFrame.Shape.StyledPanel)
+        layout = QVBoxLayout(popup)
+        list_widget = QListWidget()
+        list_widget.setMaximumHeight(220)
+        transcribers = list_unique_transcribers(self.app_state.conn)
+        all_item = QListWidgetItem("[All]")
+        all_item.setData(Qt.ItemDataRole.UserRole, None)
+        all_item.setFlags(all_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+        all_item.setCheckState(Qt.CheckState.Checked if not self._selected_transcribers else Qt.CheckState.Unchecked)
+        list_widget.addItem(all_item)
+        for t in transcribers:
+            item = QListWidgetItem(t)
+            item.setData(Qt.ItemDataRole.UserRole, t)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if t in self._selected_transcribers else Qt.CheckState.Unchecked)
+            list_widget.addItem(item)
+
+        def sync_transcriber():
+            list_widget.blockSignals(True)
+            if all_item.checkState() == Qt.CheckState.Checked:
+                for i in range(1, list_widget.count()):
+                    list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+                self._selected_transcribers = []
+            else:
+                self._selected_transcribers = []
+                for i in range(1, list_widget.count()):
+                    it = list_widget.item(i)
+                    if it.checkState() == Qt.CheckState.Checked:
+                        self._selected_transcribers.append(it.data(Qt.ItemDataRole.UserRole))
+                if not self._selected_transcribers:
+                    all_item.setCheckState(Qt.CheckState.Checked)
+            list_widget.blockSignals(False)
+            self.transcriber_btn.setText("All" if not self._selected_transcribers else f"Transcriber ({len(self._selected_transcribers)})")
+            self._apply_filters()
+
+        list_widget.itemChanged.connect(sync_transcriber)
+        popup.move(self.transcriber_btn.mapToGlobal(self.transcriber_btn.rect().bottomLeft()))
+        popup.show()
+
+        def on_popup_closed():
+            self.transcriber_btn.setChecked(False)
+            self._transcriber_popup = None
+        popup.destroyed.connect(on_popup_closed)
+        self._transcriber_popup = popup
 
     def _apply_filters(self) -> None:
-        # Clamp dual sliders: min <= max for duration/parts/rating; for last_played, "older" index >= "newer" index
-        d_min, d_max = self.duration_min_slider.value(), self.duration_max_slider.value()
-        if d_min > 0 and d_max > 0 and d_min > d_max:
-            self.duration_max_slider.setValue(d_min)
-        p_min, p_max = self.parts_min_slider.value(), self.parts_max_slider.value()
-        if p_min > p_max:
-            self.parts_max_slider.setValue(p_min)
-        r_min, r_max = self.rating_min_slider.value(), self.rating_max_slider.value()
-        if r_min > r_max:
-            self.rating_max_slider.setValue(r_min)
-        lp_min, lp_max = self.last_played_min_slider.value(), self.last_played_max_slider.value()
-        if not self.last_played_never_check.isChecked() and lp_min < lp_max:
-            self.last_played_min_slider.setValue(lp_max)
-
-        duration_min = self.duration_min_slider.value() or None
-        duration_max = self.duration_max_slider.value() or None
-        last_played_never = self.last_played_never_check.isChecked()
-        last_played_min_sec = None
-        last_played_max_sec = None
-        if not last_played_never:
-            lp_min_i = self.last_played_min_slider.value()
-            lp_max_i = self.last_played_max_slider.value()
-            # Full range (Just now to More than 5 years) = no filter
-            if not (lp_min_i >= LAST_PLAYED_MAX_INDEX and lp_max_i <= 0):
-                last_played_min_sec = LAST_PLAYED_SCALE[lp_min_i][1]
-                last_played_max_sec = LAST_PLAYED_SCALE[lp_max_i][1]
+        title = self.title_composer_edit.text()
         status_ids = self._selected_status_ids if self._selected_status_ids else None
         in_set = self.in_set_combo.currentData()
-        r_min, r_max = self.rating_min_slider.value(), self.rating_max_slider.value()
-        rating_min = None if (r_min == 1 and r_max == 5) else r_min
-        rating_max = None if (r_min == 1 and r_max == 5) else r_max
-        p_min, p_max = self.parts_min_slider.value(), self.parts_max_slider.value()
-        part_count_min = None if (p_min == 1 and p_max == 24) else p_min
-        part_count_max = None if (p_min == 1 and p_max == 24) else p_max
+        r_from = self.rating_from_combo.currentData()
+        r_to = self.rating_to_combo.currentData()
+        rating_min = None if (r_from == 0 and r_to == 5) else (r_from if r_from is not None else 0)
+        rating_max = None if (r_from == 0 and r_to == 5) else (r_to if r_to is not None else 5)
+        transcriber_in = self._selected_transcribers if self._selected_transcribers else None
+
+        duration_min = None
+        duration_max = None
+        if not self.duration_min_none.isChecked():
+            duration_min = _parse_mm_ss(self.duration_min_edit.text())
+        if not self.duration_max_none.isChecked():
+            duration_max = _parse_mm_ss(self.duration_max_edit.text())
+
+        last_played_never = False
+        last_played_min_sec = None
+        last_played_max_sec = None
+        last_played_after_iso = None
+        last_played_before_iso = None
+        if self.last_played_mode_combo.currentData() == "time":
+            idx_from = self.last_played_from_combo.currentIndex()
+            idx_to = self.last_played_to_combo.currentIndex()
+            sec_from = self.last_played_from_combo.currentData()
+            sec_to = self.last_played_to_combo.currentData()
+            if sec_to is None:
+                last_played_never = True
+            elif sec_from is not None or sec_to is not None:
+                last_played_min_sec = sec_from  # From = newer (smaller seconds_ago)
+                last_played_max_sec = sec_to    # To = older (larger seconds_ago)
+        else:
+            dt_from = self.last_played_from_dt.dateTime().toPython()
+            dt_to = self.last_played_to_dt.dateTime().toPython()
+            if dt_from.tzinfo is None:
+                dt_from = dt_from.replace(tzinfo=timezone.utc)
+            if dt_to.tzinfo is None:
+                dt_to = dt_to.replace(tzinfo=timezone.utc)
+            last_played_after_iso = dt_from.isoformat()
+            last_played_before_iso = dt_to.isoformat()
+
+        p_lo = self.parts_min_combo.currentData()
+        p_hi = self.parts_max_combo.currentData()
+        part_count_min = None if (p_lo == 1 and p_hi == 24) else (p_lo if p_lo is not None else 1)
+        part_count_max = None if (p_lo == 1 and p_hi == 24) else (p_hi if p_hi is not None else 24)
 
         self.model.set_filters(
-            title_or_composer=self.title_composer_edit.text(),
-            transcriber=self.transcriber_edit.text(),
+            title_or_composer=title,
+            transcriber="",
+            transcriber_in=transcriber_in,
             duration_min=duration_min,
             duration_max=duration_max,
             rating_min=rating_min,
@@ -951,9 +1185,10 @@ class LibraryView(QWidget):
             last_played_never=last_played_never,
             last_played_min_seconds_ago=last_played_min_sec,
             last_played_max_seconds_ago=last_played_max_sec,
+            last_played_after_iso=last_played_after_iso,
+            last_played_before_iso=last_played_before_iso,
             in_set=in_set,
         )
-        # Re-apply sort after model reset so header and proxy stay in sync
         self.table.horizontalHeader().setSortIndicator(self._sort_column, self._sort_order)
         self.proxy.sort(self._sort_column, self._sort_order)
 

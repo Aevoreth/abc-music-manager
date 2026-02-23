@@ -3,3 +3,4 @@
 # UI: PySide6 (Qt for Python) — see DECISIONS 002, 026
 
 PySide6>=6.6.0
+superqt

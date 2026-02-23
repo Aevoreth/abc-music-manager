@@ -16,6 +16,7 @@ from .song_repo import (
 )
 from .library_query import (
     list_library_songs,
+    list_unique_transcribers,
     get_status_list,
     get_song_for_detail,
     LibrarySongRow,
@@ -39,6 +40,7 @@ __all__ = [
     "logical_identity",
     "find_song_by_logical_identity",
     "list_library_songs",
+    "list_unique_transcribers",
     "get_status_list",
     "get_song_for_detail",
     "LibrarySongRow",
