@@ -640,6 +640,10 @@ class LibraryView(QWidget):
         self.reset_filters_btn.setToolTip("Reset all filters to default values")
         self.reset_filters_btn.clicked.connect(self._reset_filters)
         main_row.addWidget(self.reset_filters_btn)
+        self.clear_filters_btn = QPushButton("Clear Filters")
+        self.clear_filters_btn.setToolTip("Clear all filters to most unrestricted (show everything)")
+        self.clear_filters_btn.clicked.connect(self._clear_filters)
+        main_row.addWidget(self.clear_filters_btn)
         main_row.addStretch()
         filter_layout.addLayout(main_row)
 
@@ -1086,9 +1090,46 @@ class LibraryView(QWidget):
         """Reset all filters to default values (from settings)."""
         self._apply_default_filters()
 
-    def _apply_default_filters(self) -> None:
-        """Apply default filter values from preferences. Clears title/composer, then sets all others."""
-        defaults = get_default_filters()
+    def _clear_filters(self) -> None:
+        """Clear all filters to most unrestricted values (show everything)."""
+        self._apply_filters_from_values(
+            in_set=None,
+            rating_from=0,
+            rating_to=5,
+            duration_min_none=True,
+            duration_max_none=True,
+            duration_min_sec=0,
+            duration_max_sec=1200,
+            last_played_mode="time",
+            last_played_from_seconds_ago=0,
+            last_played_to_seconds_ago=None,
+            last_played_from_iso=None,
+            last_played_to_iso=None,
+            parts_min=1,
+            parts_max=24,
+            status_ids=[],
+        )
+
+    def _apply_filters_from_values(
+        self,
+        *,
+        in_set: Optional[str],
+        rating_from: int,
+        rating_to: int,
+        duration_min_none: bool,
+        duration_max_none: bool,
+        duration_min_sec: int,
+        duration_max_sec: int,
+        last_played_mode: str,
+        last_played_from_seconds_ago: Optional[int],
+        last_played_to_seconds_ago: Optional[int],
+        last_played_from_iso: Optional[str],
+        last_played_to_iso: Optional[str],
+        parts_min: int,
+        parts_max: int,
+        status_ids: list[int],
+    ) -> None:
+        """Apply filter values from a dict-like set of parameters. Clears title/composer."""
         self.title_composer_edit.blockSignals(True)
         self.in_set_combo.blockSignals(True)
         self.rating_from_combo.blockSignals(True)
@@ -1106,7 +1147,7 @@ class LibraryView(QWidget):
         self.parts_max_combo.blockSignals(True)
 
         self.title_composer_edit.clear()
-        self._selected_status_ids = list(defaults.get("status_ids") or [])
+        self._selected_status_ids = list(status_ids)
         self.status_btn.setText(
             "All statuses" if not self._selected_status_ids
             else ("1 status" if len(self._selected_status_ids) == 1 else f"{len(self._selected_status_ids)} statuses")
@@ -1114,58 +1155,48 @@ class LibraryView(QWidget):
         if self._status_popup is not None and self._status_popup.isVisible():
             self._status_popup.close()
             self.status_btn.setChecked(False)
-        in_set = defaults.get("in_set")
         for i in range(self.in_set_combo.count()):
             if self.in_set_combo.itemData(i) == in_set:
                 self.in_set_combo.setCurrentIndex(i)
                 break
-        self.rating_from_combo.setCurrentIndex(min(5, max(0, int(defaults.get("rating_from", 0)))))
-        self.rating_to_combo.setCurrentIndex(min(5, max(0, int(defaults.get("rating_to", 5)))))
+        self.rating_from_combo.setCurrentIndex(min(5, max(0, rating_from)))
+        self.rating_to_combo.setCurrentIndex(min(5, max(0, rating_to)))
 
-        dmn = defaults.get("duration_min_none", True)
-        dxn = defaults.get("duration_max_none", True)
-        self.duration_min_none.setChecked(dmn)
-        self.duration_max_none.setChecked(dxn)
-        self.duration_min_edit.setEnabled(not dmn)
-        self.duration_max_edit.setEnabled(not dxn)
-        _seconds_to_time_edit(int(defaults.get("duration_min_sec", 0)), self.duration_min_edit)
-        _seconds_to_time_edit(int(defaults.get("duration_max_sec", 1200)), self.duration_max_edit)
-        if dxn:
+        self.duration_min_none.setChecked(duration_min_none)
+        self.duration_max_none.setChecked(duration_max_none)
+        self.duration_min_edit.setEnabled(not duration_min_none)
+        self.duration_max_edit.setEnabled(not duration_max_none)
+        _seconds_to_time_edit(duration_min_sec, self.duration_min_edit)
+        _seconds_to_time_edit(duration_max_sec, self.duration_max_edit)
+        if duration_max_none:
             self.duration_max_edit.setTime(QTime(0, 0, 0))
-        else:
-            self.duration_max_edit.setTime(QTime(0, 0, 0).addSecs(int(defaults.get("duration_max_sec", 1200))))
 
-        mode = defaults.get("last_played_mode", "time")
-        self.last_played_mode_combo.setCurrentIndex(0 if mode == "time" else 1)
-        self.last_played_from_combo.setVisible(mode == "time")
-        self.last_played_to_combo.setVisible(mode == "time")
-        self.last_played_from_dt.setVisible(mode == "date")
-        self.last_played_to_dt.setVisible(mode == "date")
-        self.last_played_from_combo.setCurrentIndex(_index_for_seconds_ago(defaults.get("last_played_from_seconds_ago", 0)))
+        self.last_played_mode_combo.setCurrentIndex(0 if last_played_mode == "time" else 1)
+        self.last_played_from_combo.setVisible(last_played_mode == "time")
+        self.last_played_to_combo.setVisible(last_played_mode == "time")
+        self.last_played_from_dt.setVisible(last_played_mode == "date")
+        self.last_played_to_dt.setVisible(last_played_mode == "date")
+        self.last_played_from_combo.setCurrentIndex(_index_for_seconds_ago(last_played_from_seconds_ago))
         self.last_played_to_combo.setCurrentIndex(
-            _index_for_seconds_ago(defaults.get("last_played_to_seconds_ago"))
-            if defaults.get("last_played_to_seconds_ago") is not None
+            _index_for_seconds_ago(last_played_to_seconds_ago)
+            if last_played_to_seconds_ago is not None
             else self.last_played_to_combo.count() - 1
         )
-        from_iso = defaults.get("last_played_from_iso")
-        to_iso = defaults.get("last_played_to_iso")
-        if from_iso:
+        if last_played_from_iso:
             try:
-                dt = datetime.fromisoformat(from_iso.replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(last_played_from_iso.replace("Z", "+00:00"))
                 self.last_played_from_dt.setDateTime(QDateTime(dt))
             except Exception:
                 pass
-        if to_iso:
+        if last_played_to_iso:
             try:
-                dt = datetime.fromisoformat(to_iso.replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(last_played_to_iso.replace("Z", "+00:00"))
                 self.last_played_to_dt.setDateTime(QDateTime(dt))
             except Exception:
                 pass
 
-        pm = int(defaults.get("parts_min", 1))
-        px = int(defaults.get("parts_max", 24))
-        self.parts_min_combo.setCurrentIndex(max(0, min(23, pm - 1)))
-        self.parts_max_combo.setCurrentIndex(max(0, min(23, px - 1)))
+        self.parts_min_combo.setCurrentIndex(max(0, min(23, parts_min - 1)))
+        self.parts_max_combo.setCurrentIndex(max(0, min(23, parts_max - 1)))
 
         self._selected_transcribers = []
         self.transcriber_btn.setText("All")
@@ -1190,6 +1221,27 @@ class LibraryView(QWidget):
         self.parts_max_combo.blockSignals(False)
 
         self._apply_filters()
+
+    def _apply_default_filters(self) -> None:
+        """Apply default filter values from preferences. Clears title/composer."""
+        defaults = get_default_filters()
+        self._apply_filters_from_values(
+            in_set=defaults.get("in_set"),
+            rating_from=int(defaults.get("rating_from", 0)),
+            rating_to=int(defaults.get("rating_to", 5)),
+            duration_min_none=bool(defaults.get("duration_min_none", True)),
+            duration_max_none=bool(defaults.get("duration_max_none", True)),
+            duration_min_sec=int(defaults.get("duration_min_sec", 0)),
+            duration_max_sec=int(defaults.get("duration_max_sec", 1200)),
+            last_played_mode=defaults.get("last_played_mode", "time") or "time",
+            last_played_from_seconds_ago=defaults.get("last_played_from_seconds_ago", 0),
+            last_played_to_seconds_ago=defaults.get("last_played_to_seconds_ago"),
+            last_played_from_iso=defaults.get("last_played_from_iso"),
+            last_played_to_iso=defaults.get("last_played_to_iso"),
+            parts_min=int(defaults.get("parts_min", 1)),
+            parts_max=int(defaults.get("parts_max", 24)),
+            status_ids=list(defaults.get("status_ids") or []),
+        )
 
     def _on_duration_none_toggled(self) -> None:
         self.duration_min_edit.setEnabled(not self.duration_min_none.isChecked())
