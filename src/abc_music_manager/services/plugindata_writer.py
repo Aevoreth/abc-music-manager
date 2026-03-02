@@ -166,6 +166,7 @@ def build_plugindata_lua(conn) -> tuple[str, int, int]:
                         "part_number": p.part_number,
                         "part_name": p.part_name,
                         "instrument_id": iid,
+                        "title_from_t": p.title_from_t,
                     })
             except Exception:
                 continue
@@ -193,8 +194,9 @@ def build_plugindata_lua(conn) -> tuple[str, int, int]:
         for p in parts_list:
             part_number = p.get("part_number", len(tracks) + 1)
             track_id = str(part_number)
+            title_from_t = (p.get("title_from_t") or "").strip()
             part_name = (p.get("part_name") or "").strip()
-            track_name = part_name if part_name else f"Part {part_number}"
+            track_name = title_from_t or title or part_name or f"Part {part_number}"
             tracks.append((track_id, track_name))
 
         if not tracks:

@@ -35,6 +35,7 @@ def _parts_to_json(parsed: ParsedSong, conn: sqlite3.Connection) -> str:
             "part_number": p.part_number,
             "part_name": p.part_name,
             "instrument_id": instrument_id,
+            "title_from_t": p.title_from_t,
         })
     return json.dumps(out) if out else "[]"
 
