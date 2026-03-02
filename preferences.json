@@ -2,6 +2,26 @@
   "lotro_root": "C:\\Users\\psybo\\Documents\\The Lord of the Rings Online",
   "default_status_id": 1,
   "window_geometry": "AdnQywADAAAAAAeA////+AAADv8AAAQHAAAI5QAAAJQAAAzMAAADTwAAAAECAAAAB4AAAAeAAAAAFwAADv8AAAQH",
-  "splitter_state": "AAAA/wAAAAEAAAACAAAAYgAAA3sB/////wEAAAABAA==",
-  "set_export_dir": "Aev/Sets"
+  "splitter_state": "AAAA/wAAAAEAAAACAAAAYgAAA4AB/////wEAAAABAA==",
+  "set_export_dir": "Aev/Sets",
+  "default_filters": {
+    "in_set": null,
+    "rating_from": 3,
+    "rating_to": 5,
+    "duration_min_none": true,
+    "duration_max_none": true,
+    "duration_min_sec": 0,
+    "duration_max_sec": 1200,
+    "last_played_mode": "time",
+    "last_played_from_seconds_ago": 0,
+    "last_played_to_seconds_ago": null,
+    "last_played_from_iso": null,
+    "last_played_to_iso": null,
+    "parts_min": 8,
+    "parts_max": 12,
+    "status_ids": [
+      2,
+      3
+    ]
+  }
 }

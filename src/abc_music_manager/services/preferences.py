@@ -107,6 +107,51 @@ def set_splitter_state(state_b64: str) -> None:
     save_preferences(prefs)
 
 
+# --- Default library filters ---
+# Stored under "default_filters" key. Keys: in_set, rating_from, rating_to, duration_min_none,
+# duration_max_none, duration_min_sec, duration_max_sec, last_played_mode, last_played_from_seconds_ago,
+# last_played_to_seconds_ago, last_played_from_iso, last_played_to_iso, parts_min, parts_max, status_ids.
+
+_BUILTIN_DEFAULT_FILTERS: dict[str, Any] = {
+    "in_set": None,
+    "rating_from": 0,
+    "rating_to": 5,
+    "duration_min_none": True,
+    "duration_max_none": True,
+    "duration_min_sec": 0,
+    "duration_max_sec": 1200,  # 20 minutes
+    "last_played_mode": "time",
+    "last_played_from_seconds_ago": 0,
+    "last_played_to_seconds_ago": None,
+    "last_played_from_iso": None,
+    "last_played_to_iso": None,
+    "parts_min": 1,
+    "parts_max": 24,
+    "status_ids": [],
+}
+
+
+def get_default_filters() -> dict[str, Any]:
+    """Return default library filter values. Merges stored prefs with built-in defaults."""
+    prefs = load_preferences()
+    stored = prefs.get("default_filters")
+    if not isinstance(stored, dict):
+        return _BUILTIN_DEFAULT_FILTERS.copy()
+    out = _BUILTIN_DEFAULT_FILTERS.copy()
+    for k in out:
+        if k in stored:
+            out[k] = stored[k]
+    return out
+
+
+def set_default_filters(filters: dict[str, Any]) -> None:
+    """Save default library filter values."""
+    prefs = load_preferences()
+    valid = {k: v for k, v in filters.items() if k in _BUILTIN_DEFAULT_FILTERS}
+    prefs["default_filters"] = valid
+    save_preferences(prefs)
+
+
 # --- Lord of the Rings Online root directory ---
 # Single root containing \Music\ (library) and \PluginData\<account>\AllServers\ (SongbookData.plugindata).
 

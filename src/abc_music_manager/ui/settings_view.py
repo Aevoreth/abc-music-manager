@@ -29,8 +29,10 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QStyledItemDelegate,
     QStyleOptionViewItem,
+    QTimeEdit,
+    QDateTimeEdit,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTime, QDateTime, QDate
 from PySide6.QtGui import QColor, QPainter, QPen
 
 from ..services.app_state import AppState
@@ -49,11 +51,22 @@ from ..services.preferences import (
     ensure_default_lotro_root,
     to_music_relative,
     resolve_music_path,
+    get_default_filters,
+    set_default_filters,
 )
 from ..db import list_folder_rules, add_folder_rule, update_folder_rule, delete_folder_rule, FolderRuleRow, RuleType
 from ..db.status_repo import list_statuses, add_status, update_status, delete_status, reorder_statuses, StatusRow
 from ..db.account_target import list_account_targets, add_account_target, update_account_target, delete_account_target, AccountTargetRow
 from .theme import STATUS_CIRCLE_DIAMETER, COLOR_TEXT_SECONDARY
+from .library_view import (
+    LAST_PLAYED_TIME_OPTS,
+    _index_for_seconds_ago,
+    _rating_label,
+    RatingComboBox,
+    RatingComboDelegate,
+    _time_edit_to_seconds,
+    _seconds_to_time_edit,
+)
 
 # Data role for status color in status table Name column and default status combo
 StatusColorRole = Qt.ItemDataRole.UserRole + 10
@@ -390,6 +403,7 @@ class SettingsView(QWidget):
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_appearance_tab(), "Appearance")
+        self.tabs.addTab(self._build_default_filters_tab(), "Default filters")
         self.tabs.addTab(self._build_folder_rules_tab(), "Folder rules")
         self.tabs.addTab(self._build_statuses_tab(), "Statuses")
         self.tabs.addTab(self._build_account_targets_tab(), "Account targets")
@@ -428,6 +442,212 @@ class SettingsView(QWidget):
         self.base_font_size_spin.valueChanged.connect(self._on_base_font_size_changed)
         v.addStretch()
         return w
+
+    def _build_default_filters_tab(self) -> QWidget:
+        """Settings tab for default library filter values (used on startup and when Reset Filters is clicked)."""
+        w = QWidget()
+        v = QVBoxLayout(w)
+        desc = QLabel(
+            "Configure default values for library filters. These apply when you open the app and when you click Reset Filters."
+        )
+        desc.setWordWrap(True)
+        desc.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        v.addWidget(desc)
+
+        defaults = get_default_filters()
+
+        # Main row: In set, Rating
+        main_row = QHBoxLayout()
+        main_row.addWidget(QLabel("In set:"))
+        self._df_in_set_combo = QComboBox()
+        self._df_in_set_combo.addItem("Either", None)
+        self._df_in_set_combo.addItem("Yes", "yes")
+        self._df_in_set_combo.addItem("No", "no")
+        in_set = defaults.get("in_set")
+        for i in range(self._df_in_set_combo.count()):
+            if self._df_in_set_combo.itemData(i) == in_set:
+                self._df_in_set_combo.setCurrentIndex(i)
+                break
+        main_row.addWidget(self._df_in_set_combo)
+
+        main_row.addWidget(QLabel("Rating:"))
+        self._df_rating_from_combo = RatingComboBox()
+        self._df_rating_from_combo.setItemDelegate(RatingComboDelegate(self._df_rating_from_combo))
+        for i in range(6):
+            self._df_rating_from_combo.addItem(_rating_label(i), i)
+        self._df_rating_from_combo.setCurrentIndex(int(defaults.get("rating_from", 0)))
+        main_row.addWidget(self._df_rating_from_combo)
+        main_row.addWidget(QLabel("to"))
+        self._df_rating_to_combo = RatingComboBox()
+        self._df_rating_to_combo.setItemDelegate(RatingComboDelegate(self._df_rating_to_combo))
+        for i in range(6):
+            self._df_rating_to_combo.addItem(_rating_label(i), i)
+        r_to = int(defaults.get("rating_to", 5))
+        self._df_rating_to_combo.setCurrentIndex(min(5, max(0, r_to)))
+        main_row.addWidget(self._df_rating_to_combo)
+        main_row.addStretch()
+        v.addLayout(main_row)
+
+        # Duration
+        dur_row = QHBoxLayout()
+        dur_row.addWidget(QLabel("Duration:"))
+        self._df_duration_min_none = QCheckBox("None")
+        self._df_duration_min_none.setChecked(defaults.get("duration_min_none", True))
+        self._df_duration_min_none.toggled.connect(lambda: self._df_duration_min_edit.setEnabled(not self._df_duration_min_none.isChecked()))
+        dur_row.addWidget(self._df_duration_min_none)
+        self._df_duration_min_edit = QTimeEdit()
+        self._df_duration_min_edit.setDisplayFormat("m:ss")
+        self._df_duration_min_edit.setTime(QTime(0, 0, 0).addSecs(int(defaults.get("duration_min_sec", 0))))
+        self._df_duration_min_edit.setEnabled(not self._df_duration_min_none.isChecked())
+        self._df_duration_min_edit.setMinimumWidth(88)
+        dur_row.addWidget(self._df_duration_min_edit)
+        dur_row.addWidget(QLabel("to"))
+        self._df_duration_max_none = QCheckBox("None")
+        self._df_duration_max_none.setChecked(defaults.get("duration_max_none", True))
+        self._df_duration_max_none.toggled.connect(lambda: self._df_duration_max_edit.setEnabled(not self._df_duration_max_none.isChecked()))
+        dur_row.addWidget(self._df_duration_max_none)
+        self._df_duration_max_edit = QTimeEdit()
+        self._df_duration_max_edit.setDisplayFormat("m:ss")
+        self._df_duration_max_edit.setTime(QTime(0, 0, 0).addSecs(int(defaults.get("duration_max_sec", 1200))))
+        self._df_duration_max_edit.setEnabled(not self._df_duration_max_none.isChecked())
+        self._df_duration_max_edit.setMinimumWidth(88)
+        dur_row.addWidget(self._df_duration_max_edit)
+        dur_row.addStretch()
+        v.addLayout(dur_row)
+
+        # Last played
+        lp_row = QHBoxLayout()
+        lp_row.addWidget(QLabel("Last played:"))
+        self._df_last_played_mode_combo = QComboBox()
+        self._df_last_played_mode_combo.addItem("Time range", "time")
+        self._df_last_played_mode_combo.addItem("Date range", "date")
+        mode = defaults.get("last_played_mode", "time")
+        self._df_last_played_mode_combo.setCurrentIndex(0 if mode == "time" else 1)
+        self._df_last_played_mode_combo.currentIndexChanged.connect(self._on_df_last_played_mode_changed)
+        lp_row.addWidget(self._df_last_played_mode_combo)
+        self._df_last_played_from_combo = QComboBox()
+        for label, sec in LAST_PLAYED_TIME_OPTS:
+            self._df_last_played_from_combo.addItem(label, sec)
+        sec_from = defaults.get("last_played_from_seconds_ago", 0)
+        self._df_last_played_from_combo.setCurrentIndex(_index_for_seconds_ago(sec_from))
+        lp_row.addWidget(self._df_last_played_from_combo)
+        self._df_last_played_to_combo = QComboBox()
+        for label, sec in LAST_PLAYED_TIME_OPTS:
+            self._df_last_played_to_combo.addItem(label, sec)
+        sec_to = defaults.get("last_played_to_seconds_ago")
+        self._df_last_played_to_combo.setCurrentIndex(
+            _index_for_seconds_ago(sec_to) if sec_to is not None else self._df_last_played_to_combo.count() - 1
+        )
+        lp_row.addWidget(self._df_last_played_to_combo)
+        self._df_last_played_from_combo.setVisible(mode == "time")
+        self._df_last_played_to_combo.setVisible(mode == "time")
+        self._df_last_played_from_dt = QDateTimeEdit()
+        self._df_last_played_from_dt.setCalendarPopup(True)
+        self._df_last_played_from_dt.setDisplayFormat("yyyy-MM-dd hh:mm")
+        self._df_last_played_from_dt.setVisible(mode == "date")
+        lp_row.addWidget(self._df_last_played_from_dt)
+        self._df_last_played_to_dt = QDateTimeEdit()
+        self._df_last_played_to_dt.setCalendarPopup(True)
+        self._df_last_played_to_dt.setDisplayFormat("yyyy-MM-dd hh:mm")
+        self._df_last_played_to_dt.setVisible(mode == "date")
+        lp_row.addWidget(self._df_last_played_to_dt)
+        lp_row.addStretch()
+        v.addLayout(lp_row)
+
+        # Parts
+        parts_row = QHBoxLayout()
+        parts_row.addWidget(QLabel("Parts:"))
+        self._df_parts_min_combo = QComboBox()
+        for n in range(1, 25):
+            self._df_parts_min_combo.addItem(str(n), n)
+        self._df_parts_min_combo.setCurrentIndex(int(defaults.get("parts_min", 1)) - 1)
+        parts_row.addWidget(self._df_parts_min_combo)
+        parts_row.addWidget(QLabel("to"))
+        self._df_parts_max_combo = QComboBox()
+        for n in range(1, 25):
+            self._df_parts_max_combo.addItem(str(n), n)
+        self._df_parts_max_combo.setCurrentIndex(int(defaults.get("parts_max", 24)) - 1)
+        parts_row.addWidget(self._df_parts_max_combo)
+        parts_row.addStretch()
+        v.addLayout(parts_row)
+
+        # Status filter defaults
+        status_row = QHBoxLayout()
+        status_row.addWidget(QLabel("Default status filter:"))
+        status_desc = QLabel("(All = no status filter by default)")
+        status_desc.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY};")
+        status_row.addWidget(status_desc)
+        status_row.addStretch()
+        v.addLayout(status_row)
+        self._df_status_checkboxes: list[tuple[QCheckBox, int]] = []
+        status_cb_layout = QHBoxLayout()
+        self._df_status_all_cb = QCheckBox("All statuses")
+        self._df_status_all_cb.setObjectName("df_status_all")
+        self._df_status_all_cb.toggled.connect(self._on_df_status_all_toggled)
+        status_cb_layout.addWidget(self._df_status_all_cb)
+        default_status_ids = defaults.get("status_ids") or []
+        for s in list_statuses(self.app_state.conn):
+            cb = QCheckBox(s.name)
+            cb.setChecked(s.id in default_status_ids)
+            cb.setProperty("status_id", s.id)
+            cb.toggled.connect(self._on_df_status_cb_toggled)
+            self._df_status_checkboxes.append((cb, s.id))
+            status_cb_layout.addWidget(cb)
+        if not default_status_ids:
+            self._df_status_all_cb.setChecked(True)
+        status_cb_layout.addStretch()
+        v.addLayout(status_cb_layout)
+
+        save_btn = QPushButton("Save as default filters")
+        save_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        save_btn.clicked.connect(self._on_save_default_filters)
+        v.addWidget(save_btn)
+        v.addStretch()
+        return w
+
+    def _on_df_last_played_mode_changed(self) -> None:
+        is_time = self._df_last_played_mode_combo.currentData() == "time"
+        self._df_last_played_from_combo.setVisible(is_time)
+        self._df_last_played_to_combo.setVisible(is_time)
+        self._df_last_played_from_dt.setVisible(not is_time)
+        self._df_last_played_to_dt.setVisible(not is_time)
+
+    def _on_df_status_all_toggled(self, checked: bool) -> None:
+        if checked:
+            for cb, _ in self._df_status_checkboxes:
+                cb.blockSignals(True)
+                cb.setChecked(False)
+                cb.blockSignals(False)
+
+    def _on_df_status_cb_toggled(self) -> None:
+        if any(cb.isChecked() for cb, _ in self._df_status_checkboxes):
+            self._df_status_all_cb.blockSignals(True)
+            self._df_status_all_cb.setChecked(False)
+            self._df_status_all_cb.blockSignals(False)
+
+    def _on_save_default_filters(self) -> None:
+        in_set = self._df_in_set_combo.currentData()
+        r_from = self._df_rating_from_combo.currentData()
+        r_to = self._df_rating_to_combo.currentData()
+        filters = {
+            "in_set": in_set,
+            "rating_from": int(r_from) if r_from is not None else 0,
+            "rating_to": int(r_to) if r_to is not None else 5,
+            "duration_min_none": self._df_duration_min_none.isChecked(),
+            "duration_max_none": self._df_duration_max_none.isChecked(),
+            "duration_min_sec": _time_edit_to_seconds(self._df_duration_min_edit) if not self._df_duration_min_none.isChecked() else 0,
+            "duration_max_sec": _time_edit_to_seconds(self._df_duration_max_edit) if not self._df_duration_max_none.isChecked() else 1200,
+            "last_played_mode": self._df_last_played_mode_combo.currentData() or "time",
+            "last_played_from_seconds_ago": self._df_last_played_from_combo.currentData() if self._df_last_played_mode_combo.currentData() == "time" else 0,
+            "last_played_to_seconds_ago": self._df_last_played_to_combo.currentData() if self._df_last_played_mode_combo.currentData() == "time" else None,
+            "last_played_from_iso": self._df_last_played_from_dt.dateTime().toPython().isoformat() if self._df_last_played_mode_combo.currentData() == "date" else None,
+            "last_played_to_iso": self._df_last_played_to_dt.dateTime().toPython().isoformat() if self._df_last_played_mode_combo.currentData() == "date" else None,
+            "parts_min": self._df_parts_min_combo.currentData() or 1,
+            "parts_max": self._df_parts_max_combo.currentData() or 24,
+            "status_ids": [sid for cb, sid in self._df_status_checkboxes if cb.isChecked()],
+        }
+        set_default_filters(filters)
+        QMessageBox.information(self, "Saved", "Default filters have been saved.")
 
     def _on_base_font_default_changed(self, _state: int = 0) -> None:
         use_default = self.base_font_default_check.isChecked()

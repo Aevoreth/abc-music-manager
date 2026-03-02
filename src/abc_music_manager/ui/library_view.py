@@ -40,6 +40,7 @@ from PySide6.QtCore import Qt, QTime, QDateTime, QDate, QAbstractTableModel, QMo
 from PySide6.QtGui import QColor, QAction, QPainter, QFont, QBrush, QPen, QIcon, QPixmap
 
 from ..services.app_state import AppState
+from ..services.preferences import get_default_filters
 from ..db import list_library_songs, list_unique_transcribers, get_status_list, LibrarySongRow
 from ..db.status_repo import list_statuses
 from ..db.setlist_repo import (
@@ -98,6 +99,17 @@ def _last_played_time_options() -> list[tuple[str, Optional[int]]]:
 
 
 LAST_PLAYED_TIME_OPTS = _last_played_time_options()
+
+
+def _index_for_seconds_ago(seconds_ago: Optional[int]) -> int:
+    """Return combo index for LAST_PLAYED_TIME_OPTS. None = last index (Never)."""
+    if seconds_ago is None:
+        return len(LAST_PLAYED_TIME_OPTS) - 1
+    for i, (_, sec) in enumerate(LAST_PLAYED_TIME_OPTS):
+        if sec == seconds_ago:
+            return i
+    return 0
+
 
 # Rating: 0 = no stars, 1-5 = star count (for combo display)
 RATING_STAR_FILLED = "\u2605"
@@ -775,7 +787,7 @@ class LibraryView(QWidget):
         self._status_popup: QWidget | None = None
         self._selected_transcribers: list[str] = []
         self._transcriber_popup: QWidget | None = None
-        self.model.refresh()
+        self._apply_default_filters()
 
     # Sortable columns: Title, Composer, Duration, Last played, Parts, Rating, Transcriber
     _SORTABLE_COLUMNS = (0, 1, 2, 3, 5, 6, 9)
@@ -1071,8 +1083,12 @@ class LibraryView(QWidget):
         self.more_filters_panel.setVisible(checked)
 
     def _reset_filters(self) -> None:
-        """Reset all filters to default values."""
-        # Block signals to avoid multiple _apply_filters during reset
+        """Reset all filters to default values (from settings)."""
+        self._apply_default_filters()
+
+    def _apply_default_filters(self) -> None:
+        """Apply default filter values from preferences. Clears title/composer, then sets all others."""
+        defaults = get_default_filters()
         self.title_composer_edit.blockSignals(True)
         self.in_set_combo.blockSignals(True)
         self.rating_from_combo.blockSignals(True)
@@ -1089,31 +1105,67 @@ class LibraryView(QWidget):
         self.parts_min_combo.blockSignals(True)
         self.parts_max_combo.blockSignals(True)
 
-        # Main row
         self.title_composer_edit.clear()
-        self._selected_status_ids = []
-        self.status_btn.setText("All statuses")
+        self._selected_status_ids = list(defaults.get("status_ids") or [])
+        self.status_btn.setText(
+            "All statuses" if not self._selected_status_ids
+            else ("1 status" if len(self._selected_status_ids) == 1 else f"{len(self._selected_status_ids)} statuses")
+        )
         if self._status_popup is not None and self._status_popup.isVisible():
             self._status_popup.close()
             self.status_btn.setChecked(False)
-        self.in_set_combo.setCurrentIndex(0)
-        self.rating_from_combo.setCurrentIndex(0)
-        self.rating_to_combo.setCurrentIndex(5)
+        in_set = defaults.get("in_set")
+        for i in range(self.in_set_combo.count()):
+            if self.in_set_combo.itemData(i) == in_set:
+                self.in_set_combo.setCurrentIndex(i)
+                break
+        self.rating_from_combo.setCurrentIndex(min(5, max(0, int(defaults.get("rating_from", 0)))))
+        self.rating_to_combo.setCurrentIndex(min(5, max(0, int(defaults.get("rating_to", 5)))))
 
-        # More filters panel
-        self.duration_min_none.setChecked(True)
-        self.duration_max_none.setChecked(True)
-        self.duration_min_edit.setTime(QTime(0, 0, 0))
-        self.duration_min_edit.setEnabled(False)
-        self.duration_max_edit.setTime(QTime(0, 0, 0))
-        self.duration_max_edit.setEnabled(False)
-        self.last_played_mode_combo.setCurrentIndex(0)
-        self.last_played_from_combo.setCurrentIndex(0)
-        self.last_played_to_combo.setCurrentIndex(self.last_played_to_combo.count() - 1)
-        self.last_played_from_dt.setDateTime(QDateTime(QDate(2000, 1, 1), QTime(0, 0, 0)))
-        self.last_played_to_dt.setDateTime(QDateTime.currentDateTime())
-        self.parts_min_combo.setCurrentIndex(0)
-        self.parts_max_combo.setCurrentIndex(23)
+        dmn = defaults.get("duration_min_none", True)
+        dxn = defaults.get("duration_max_none", True)
+        self.duration_min_none.setChecked(dmn)
+        self.duration_max_none.setChecked(dxn)
+        self.duration_min_edit.setEnabled(not dmn)
+        self.duration_max_edit.setEnabled(not dxn)
+        _seconds_to_time_edit(int(defaults.get("duration_min_sec", 0)), self.duration_min_edit)
+        _seconds_to_time_edit(int(defaults.get("duration_max_sec", 1200)), self.duration_max_edit)
+        if dxn:
+            self.duration_max_edit.setTime(QTime(0, 0, 0))
+        else:
+            self.duration_max_edit.setTime(QTime(0, 0, 0).addSecs(int(defaults.get("duration_max_sec", 1200))))
+
+        mode = defaults.get("last_played_mode", "time")
+        self.last_played_mode_combo.setCurrentIndex(0 if mode == "time" else 1)
+        self.last_played_from_combo.setVisible(mode == "time")
+        self.last_played_to_combo.setVisible(mode == "time")
+        self.last_played_from_dt.setVisible(mode == "date")
+        self.last_played_to_dt.setVisible(mode == "date")
+        self.last_played_from_combo.setCurrentIndex(_index_for_seconds_ago(defaults.get("last_played_from_seconds_ago", 0)))
+        self.last_played_to_combo.setCurrentIndex(
+            _index_for_seconds_ago(defaults.get("last_played_to_seconds_ago"))
+            if defaults.get("last_played_to_seconds_ago") is not None
+            else self.last_played_to_combo.count() - 1
+        )
+        from_iso = defaults.get("last_played_from_iso")
+        to_iso = defaults.get("last_played_to_iso")
+        if from_iso:
+            try:
+                dt = datetime.fromisoformat(from_iso.replace("Z", "+00:00"))
+                self.last_played_from_dt.setDateTime(QDateTime(dt))
+            except Exception:
+                pass
+        if to_iso:
+            try:
+                dt = datetime.fromisoformat(to_iso.replace("Z", "+00:00"))
+                self.last_played_to_dt.setDateTime(QDateTime(dt))
+            except Exception:
+                pass
+
+        pm = int(defaults.get("parts_min", 1))
+        px = int(defaults.get("parts_max", 24))
+        self.parts_min_combo.setCurrentIndex(max(0, min(23, pm - 1)))
+        self.parts_max_combo.setCurrentIndex(max(0, min(23, px - 1)))
 
         self._selected_transcribers = []
         self.transcriber_btn.setText("All")
@@ -1121,7 +1173,6 @@ class LibraryView(QWidget):
             self._transcriber_popup.close()
             self.transcriber_btn.setChecked(False)
 
-        # Unblock signals
         self.title_composer_edit.blockSignals(False)
         self.in_set_combo.blockSignals(False)
         self.rating_from_combo.blockSignals(False)
