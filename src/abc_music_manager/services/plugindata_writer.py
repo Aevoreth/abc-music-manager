@@ -186,7 +186,7 @@ def build_plugindata_lua(conn) -> tuple[str, int, int]:
             ancestor = "/" + "/".join(parts[: i + 1]) + "/"
             dirs_set.add(ancestor)
 
-        filename = path.name
+        filename = path.stem
         duration_str = _format_duration(duration_seconds)
         artist = (composers or "").strip() or "Unknown"
 
