@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QApplication,
 )
-from PySide6.QtCore import Qt, QTime, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QRect, QSize, Signal, QTimer
+from PySide6.QtCore import Qt, QTime, QDateTime, QDate, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QRect, QSize, Signal, QTimer
 from PySide6.QtGui import QColor, QAction, QPainter, QFont, QBrush, QPen, QIcon, QPixmap
 
 from ..services.app_state import AppState
@@ -624,6 +624,10 @@ class LibraryView(QWidget):
         self.more_filters_btn.setCheckable(True)
         self.more_filters_btn.toggled.connect(self._on_more_filters_toggled)
         main_row.addWidget(self.more_filters_btn)
+        self.reset_filters_btn = QPushButton("Reset Filters")
+        self.reset_filters_btn.setToolTip("Reset all filters to default values")
+        self.reset_filters_btn.clicked.connect(self._reset_filters)
+        main_row.addWidget(self.reset_filters_btn)
         main_row.addStretch()
         filter_layout.addLayout(main_row)
 
@@ -1065,6 +1069,76 @@ class LibraryView(QWidget):
 
     def _on_more_filters_toggled(self, checked: bool) -> None:
         self.more_filters_panel.setVisible(checked)
+
+    def _reset_filters(self) -> None:
+        """Reset all filters to default values."""
+        # Block signals to avoid multiple _apply_filters during reset
+        self.title_composer_edit.blockSignals(True)
+        self.in_set_combo.blockSignals(True)
+        self.rating_from_combo.blockSignals(True)
+        self.rating_to_combo.blockSignals(True)
+        self.duration_min_none.blockSignals(True)
+        self.duration_max_none.blockSignals(True)
+        self.duration_min_edit.blockSignals(True)
+        self.duration_max_edit.blockSignals(True)
+        self.last_played_mode_combo.blockSignals(True)
+        self.last_played_from_combo.blockSignals(True)
+        self.last_played_to_combo.blockSignals(True)
+        self.last_played_from_dt.blockSignals(True)
+        self.last_played_to_dt.blockSignals(True)
+        self.parts_min_combo.blockSignals(True)
+        self.parts_max_combo.blockSignals(True)
+
+        # Main row
+        self.title_composer_edit.clear()
+        self._selected_status_ids = []
+        self.status_btn.setText("All statuses")
+        if self._status_popup is not None and self._status_popup.isVisible():
+            self._status_popup.close()
+            self.status_btn.setChecked(False)
+        self.in_set_combo.setCurrentIndex(0)
+        self.rating_from_combo.setCurrentIndex(0)
+        self.rating_to_combo.setCurrentIndex(5)
+
+        # More filters panel
+        self.duration_min_none.setChecked(True)
+        self.duration_max_none.setChecked(True)
+        self.duration_min_edit.setTime(QTime(0, 0, 0))
+        self.duration_min_edit.setEnabled(False)
+        self.duration_max_edit.setTime(QTime(0, 0, 0))
+        self.duration_max_edit.setEnabled(False)
+        self.last_played_mode_combo.setCurrentIndex(0)
+        self.last_played_from_combo.setCurrentIndex(0)
+        self.last_played_to_combo.setCurrentIndex(self.last_played_to_combo.count() - 1)
+        self.last_played_from_dt.setDateTime(QDateTime(QDate(2000, 1, 1), QTime(0, 0, 0)))
+        self.last_played_to_dt.setDateTime(QDateTime.currentDateTime())
+        self.parts_min_combo.setCurrentIndex(0)
+        self.parts_max_combo.setCurrentIndex(23)
+
+        self._selected_transcribers = []
+        self.transcriber_btn.setText("All")
+        if self._transcriber_popup is not None and self._transcriber_popup.isVisible():
+            self._transcriber_popup.close()
+            self.transcriber_btn.setChecked(False)
+
+        # Unblock signals
+        self.title_composer_edit.blockSignals(False)
+        self.in_set_combo.blockSignals(False)
+        self.rating_from_combo.blockSignals(False)
+        self.rating_to_combo.blockSignals(False)
+        self.duration_min_none.blockSignals(False)
+        self.duration_max_none.blockSignals(False)
+        self.duration_min_edit.blockSignals(False)
+        self.duration_max_edit.blockSignals(False)
+        self.last_played_mode_combo.blockSignals(False)
+        self.last_played_from_combo.blockSignals(False)
+        self.last_played_to_combo.blockSignals(False)
+        self.last_played_from_dt.blockSignals(False)
+        self.last_played_to_dt.blockSignals(False)
+        self.parts_min_combo.blockSignals(False)
+        self.parts_max_combo.blockSignals(False)
+
+        self._apply_filters()
 
     def _on_duration_none_toggled(self) -> None:
         self.duration_min_edit.setEnabled(not self.duration_min_none.isChecked())
