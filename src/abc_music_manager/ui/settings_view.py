@@ -4,6 +4,8 @@ Settings: folder rules, statuses, account targets (PluginData).
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QApplication,
     QWidget,
@@ -1000,16 +1002,63 @@ class SettingsView(QWidget):
     def _build_account_targets_tab(self) -> QWidget:
         w = QWidget()
         v = QVBoxLayout(w)
+        btn_row = QHBoxLayout()
+        scan_btn = QPushButton("Scan Account Targets")
+        scan_btn.clicked.connect(self._scan_account_targets)
+        add_btn = QPushButton("Add account target")
+        add_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        btn_row.addWidget(scan_btn)
+        btn_row.addStretch()
+        btn_row.addWidget(add_btn)
+        v.addLayout(btn_row)
         self.account_table = QTableWidget()
         self.account_table.setColumnCount(4)
         self.account_table.setHorizontalHeaderLabels(["Account", "Path", "Enabled", "Actions"])
-        self.account_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for col in range(4):
+            self.account_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.ResizeToContents)
         v.addWidget(self.account_table)
-        add_btn = QPushButton("Add account target")
         add_btn.clicked.connect(self._add_account_target)
-        v.addWidget(add_btn)
         self._refresh_account_targets()
         return w
+
+    def _scan_account_targets(self) -> None:
+        lotro_root = get_lotro_root()
+        if not lotro_root:
+            QMessageBox.warning(
+                self,
+                "Scan Account Targets",
+                "LOTRO root directory is not set. Configure it in the Folder rules tab.",
+            )
+            return
+        plugin_data_dir = Path(lotro_root) / "PluginData"
+        if not plugin_data_dir.exists() or not plugin_data_dir.is_dir():
+            QMessageBox.warning(
+                self,
+                "Scan Account Targets",
+                "PluginData folder not found."
+            )
+            return
+        existing = set()
+        for r in list_account_targets(self.app_state.conn):
+            existing.add(r.account_name.lower())
+            existing.add((r.plugin_data_path or "").lower())
+        added = 0
+        for child in plugin_data_dir.iterdir():
+            if child.is_dir():
+                account_name = child.name
+                plugin_data_path = str(plugin_data_dir / account_name / "AllServers")
+                if account_name.lower() not in existing and plugin_data_path.lower() not in existing:
+                    add_account_target(self.app_state.conn, account_name, plugin_data_path, enabled=True)
+                    added += 1
+                    existing.add(account_name.lower())
+                    existing.add(plugin_data_path.lower())
+        self._refresh_account_targets()
+        if added > 0:
+            QMessageBox.information(
+                self,
+                "Scan Account Targets",
+                f"Found {added} new account(s)."
+            )
 
     def _refresh_account_targets(self) -> None:
         rows = list_account_targets(self.app_state.conn)
@@ -1017,7 +1066,17 @@ class SettingsView(QWidget):
         for i, r in enumerate(rows):
             self.account_table.setItem(i, 0, QTableWidgetItem(r.account_name))
             self.account_table.setItem(i, 1, QTableWidgetItem(r.plugin_data_path))
-            self.account_table.setItem(i, 2, QTableWidgetItem("Yes" if r.enabled else "No"))
+            enabled_check = QCheckBox()
+            enabled_check.setChecked(r.enabled)
+            enabled_check.stateChanged.connect(
+                lambda state, target=r: self._on_account_target_enabled_changed(target, state)
+            )
+            cell_widget = QWidget()
+            cell_layout = QHBoxLayout(cell_widget)
+            cell_layout.setContentsMargins(4, 4, 4, 4)
+            cell_layout.addWidget(enabled_check)
+            cell_layout.addStretch()
+            self.account_table.setCellWidget(i, 2, cell_widget)
             edit_btn = QPushButton("Edit")
             edit_btn.clicked.connect(lambda checked=False, row=r: self._edit_account_target(row))
             del_btn = QPushButton("Delete")
@@ -1028,6 +1087,10 @@ class SettingsView(QWidget):
             cell_layout.addWidget(del_btn)
             self.account_table.setCellWidget(i, 3, cell)
         self.account_table.setRowCount(len(rows))
+
+    def _on_account_target_enabled_changed(self, target: AccountTargetRow, state: int) -> None:
+        enabled = state == int(Qt.CheckState.Checked)
+        update_account_target(self.app_state.conn, target.id, enabled=enabled)
 
     def _add_account_target(self) -> None:
         dlg = AccountTargetEditor(self)
