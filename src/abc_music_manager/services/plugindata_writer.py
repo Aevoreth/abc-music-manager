@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Callable
 
 from ..db.folder_rule import get_exclude_rules_for_songbook, ExcludeRuleForExport
 from ..db.library_query import get_song_metadata_for_file_path
@@ -125,11 +126,12 @@ def _format_duration(seconds: int | None) -> str:
     return f"{m}:{s:02d}"
 
 
-def build_plugindata_lua(conn) -> str:
+def build_plugindata_lua(conn) -> tuple[str, int, int]:
     """
     Build Lua table string for SongbookData.plugindata.
     Structure: Directories (unique dir paths) + Songs (Filepath, Filename, Tracks, Transcriber, Artist).
     Paths are relative to \\Music\\, forward slashes, dirs as /path/to/dir/.
+    Returns (lua_string, num_songs, num_directories).
     """
     music_root = get_music_root()
     set_export_dir = get_set_export_dir()
@@ -235,29 +237,53 @@ def build_plugindata_lua(conn) -> str:
         lines.append("\t\t},")
     lines.append("\t}")
     lines.append("}")
-    return "\n".join(lines)
+    return "\n".join(lines), len(songs_sorted), len(dirs_sorted)
 
 
-def write_plugindata_to_path(conn, target_path: str) -> None:
+def write_plugindata_to_path(conn, target_path: str, lua_content: str) -> None:
     """Write SongbookData.plugindata (Lua) to the given directory."""
-    lua_content = build_plugindata_lua(conn)
     path = Path(target_path)
     path.mkdir(parents=True, exist_ok=True)
     out_file = path / "SongbookData.plugindata"
     out_file.write_text(lua_content, encoding="utf-8")
 
 
-def write_plugindata_all_targets(conn) -> tuple[int, list[str]]:
+def write_plugindata_all_targets(
+    conn,
+    log_fn: Callable[[str, bool], None] | None = None,
+) -> tuple[int, list[str]]:
     """
     Write to all enabled AccountTargets. Returns (success_count, list of errors).
+    If log_fn(message, is_error) is provided, it is called with progress messages.
     """
     targets = [t for t in list_account_targets(conn) if t.enabled]
-    errors = []
+
+    def _log(msg: str, is_error: bool = False) -> None:
+        if log_fn:
+            log_fn(msg, is_error)
+
+    _log("Starting PluginData export...")
+    _log(f"Found {len(targets)} enabled target(s).")
+
+    _log("Building songbook data from library...")
+    lua_content, num_songs, num_dirs = build_plugindata_lua(conn)
+    _log(f"Built songbook: {num_songs} songs, {num_dirs} directories.")
+
+    errors: list[str] = []
     success = 0
     for t in targets:
+        _log(f"Writing to {t.account_name} ({t.plugin_data_path})...")
         try:
-            write_plugindata_to_path(conn, t.plugin_data_path)
+            write_plugindata_to_path(conn, t.plugin_data_path, lua_content)
             success += 1
+            _log(f"  OK")
         except Exception as e:
-            errors.append(f"{t.account_name}: {e}")
+            err_msg = f"{t.account_name}: {e}"
+            errors.append(err_msg)
+            _log(f"  Error: {e}", is_error=True)
+
+    if errors:
+        _log(f"\nExport complete: {success} succeeded, {len(errors)} failed.")
+    else:
+        _log(f"\nExport complete: {success} target(s) written.")
     return success, errors
