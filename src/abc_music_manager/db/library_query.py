@@ -249,3 +249,19 @@ def get_title_composers_for_file_path(conn: sqlite3.Connection, file_path: str) 
     )
     row = cur.fetchone()
     return (row[0], row[1]) if row else None
+
+
+def get_song_metadata_for_file_path(
+    conn: sqlite3.Connection, file_path: str
+) -> Optional[tuple[str, str, Optional[str], Optional[int], Optional[str]]]:
+    """
+    Return (title, composers, transcriber, duration_seconds, parts_json) for a file path
+    if it exists in SongFile, else None. Used for SongbookData.plugindata generation.
+    """
+    cur = conn.execute(
+        """SELECT s.title, s.composers, s.transcriber, s.duration_seconds, s.parts
+           FROM Song s JOIN SongFile f ON f.song_id = s.id WHERE f.file_path = ? LIMIT 1""",
+        (file_path,),
+    )
+    row = cur.fetchone()
+    return (row[0], row[1], row[2], row[3], row[4]) if row else None
