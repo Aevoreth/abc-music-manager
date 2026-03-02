@@ -12,7 +12,7 @@ from pathlib import Path
 
 from ..db.folder_rule import get_exclude_rules_for_songbook, ExcludeRuleForExport
 from ..db.library_query import get_song_metadata_for_file_path
-from ..db.instrument import get_instrument_name, resolve_instrument_id
+from ..db.instrument import resolve_instrument_id
 from ..db.account_target import list_account_targets
 from ..parsing.abc_parser import parse_abc_file
 from ..services.preferences import get_music_root, get_set_export_dir, to_music_relative
@@ -112,6 +112,11 @@ def _lua_escape(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r")
 
 
+def _dir_sort_key(s: str) -> str:
+    """Sort key for directories: case-insensitive, space after 'z'."""
+    return s.lower().replace(" ", "\x7f")
+
+
 def _format_duration(seconds: int | None) -> str:
     """Format duration as M:SS for track names."""
     if seconds is None:
@@ -172,6 +177,11 @@ def build_plugindata_lua(conn) -> str:
         if not dir_part.endswith("/"):
             dir_part += "/"
         dirs_set.add(dir_part)
+        # Add all ancestor directories (contain subdirs that lead to ABC files)
+        parts = [p for p in dir_part.rstrip("/").split("/") if p]
+        for i in range(len(parts)):
+            ancestor = "/" + "/".join(parts[: i + 1]) + "/"
+            dirs_set.add(ancestor)
 
         filename = path.name
         duration_str = _format_duration(duration_seconds)
@@ -179,14 +189,14 @@ def build_plugindata_lua(conn) -> str:
 
         tracks: list[tuple[str, str]] = []
         for p in parts_list:
-            iid = p.get("instrument_id")
-            iname = get_instrument_name(conn, iid) if iid else "Unknown"
-            track_id = str(iid) if iid else str(p.get("part_number", len(tracks) + 1))
-            track_name = f"{title} ({duration_str}) - {iname}"
+            part_number = p.get("part_number", len(tracks) + 1)
+            track_id = str(part_number)
+            part_name = (p.get("part_name") or "").strip()
+            track_name = part_name if part_name else f"Part {part_number}"
             tracks.append((track_id, track_name))
 
         if not tracks:
-            tracks.append(("1", f"{title} ({duration_str}) - Unknown"))
+            tracks.append(("1", "Part 1"))
 
         songs_data.append({
             "filepath": dir_part,
@@ -196,7 +206,8 @@ def build_plugindata_lua(conn) -> str:
             "artist": artist,
         })
 
-    dirs_sorted = sorted(dirs_set)
+    dirs_sorted = sorted(dirs_set, key=_dir_sort_key)
+    songs_sorted = sorted(songs_data, key=lambda s: _dir_sort_key(s["filepath"] + s["filename"]))
     lines = ["return", "{"]
     lines.append('\t["Directories"] =')
     lines.append("\t{")
@@ -205,7 +216,7 @@ def build_plugindata_lua(conn) -> str:
     lines.append("\t},")
     lines.append('\t["Songs"] =')
     lines.append("\t{")
-    for si, song in enumerate(songs_data, 1):
+    for si, song in enumerate(songs_sorted, 1):
         lines.append(f"\t\t[{si}] =")
         lines.append("\t\t{")
         lines.append(f'\t\t\t["Filepath"] = "{_lua_escape(song["filepath"])}",')
