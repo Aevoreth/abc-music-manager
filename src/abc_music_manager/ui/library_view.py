@@ -1460,11 +1460,12 @@ class LibraryView(QWidget):
             idx_to = self.last_played_to_combo.currentIndex()
             sec_from = self.last_played_from_combo.currentData()
             sec_to = self.last_played_to_combo.currentData()
-            if sec_to is None:
+            if sec_from is None and sec_to is None:
+                # Both "Never": only show never-played songs
                 last_played_never = True
             elif sec_from is not None or sec_to is not None:
                 last_played_min_sec = sec_from  # From = newer (smaller seconds_ago)
-                last_played_max_sec = sec_to    # To = older (larger seconds_ago)
+                last_played_max_sec = sec_to    # To = older (larger seconds_ago); None = no upper bound
         else:
             dt_from = self.last_played_from_dt.dateTime().toPython()
             dt_to = self.last_played_to_dt.dateTime().toPython()

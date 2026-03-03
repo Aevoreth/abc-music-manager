@@ -124,11 +124,27 @@ def list_library_songs(
             args.append(last_played_before_iso)
     elif last_played_min_seconds_ago is not None or last_played_max_seconds_ago is not None:
         # Song played within range: last_played_at between (now - max_ago) and (now - min_ago)
+        # When either bound is None (="Never"), include never-played songs (last_played_at IS NULL)
+        # Use datetime(s.last_played_at) so ISO 8601 (e.g. 2025-03-02T19:03:23+00:00) compares
+        # correctly with datetime('now', ...) which returns YYYY-MM-DD HH:MM:SS.
+        include_never_played = (
+            last_played_max_seconds_ago is None or last_played_min_seconds_ago is None
+        )
         if last_played_max_seconds_ago is not None:
-            conditions.append("s.last_played_at >= datetime('now', ?)")
+            if include_never_played:
+                conditions.append(
+                    "(datetime(s.last_played_at) >= datetime('now', ?) OR s.last_played_at IS NULL)"
+                )
+            else:
+                conditions.append("datetime(s.last_played_at) >= datetime('now', ?)")
             args.append(f"-{last_played_max_seconds_ago} seconds")
         if last_played_min_seconds_ago is not None:
-            conditions.append("s.last_played_at <= datetime('now', ?)")
+            if include_never_played:
+                conditions.append(
+                    "(datetime(s.last_played_at) <= datetime('now', ?) OR s.last_played_at IS NULL)"
+                )
+            else:
+                conditions.append("datetime(s.last_played_at) <= datetime('now', ?)")
             args.append(f"-{last_played_min_seconds_ago} seconds")
     if in_set_filter == "yes":
         conditions.append("""EXISTS (
