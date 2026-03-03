@@ -29,6 +29,7 @@ from ..db import get_song_for_detail, get_status_list
 from ..db.library_query import get_primary_file_path_for_song
 from ..db.song_repo import update_song_app_metadata, ensure_song_from_parsed
 from ..db.play_log import log_play
+from .play_history_dialog import open_play_history_dialog
 from ..parsing import parse_abc_content
 from ..scanning.scanner import _file_mtime_str, _file_hash
 
@@ -104,9 +105,15 @@ class SongDetailDialog(QDialog):
         self.play_history_label = QLabel()
         self.play_history_label.setWordWrap(True)
         form.addRow("", self.play_history_label)
+        history_btn_layout = QHBoxLayout()
         mark_played_btn = QPushButton("Mark as played now")
         mark_played_btn.clicked.connect(self._mark_played)
-        form.addRow("", mark_played_btn)
+        edit_history_btn = QPushButton("Edit play history...")
+        edit_history_btn.clicked.connect(self._edit_play_history)
+        history_btn_layout.addWidget(mark_played_btn)
+        history_btn_layout.addWidget(edit_history_btn)
+        history_btn_layout.addStretch()
+        form.addRow("", history_btn_layout)
         return w
 
     def _build_abc_tab(self) -> QWidget:
@@ -186,6 +193,17 @@ class SongDetailDialog(QDialog):
         self._load_song()
         self._load_play_history()
         QMessageBox.information(self, "Play logged", "Play recorded.")
+
+    def _edit_play_history(self) -> None:
+        data = get_song_for_detail(self.app_state.conn, self.song_id)
+        title = data["title"] if data else "Song"
+        open_play_history_dialog(
+            self.app_state,
+            self.song_id,
+            title,
+            self,
+            on_refresh=self._load_song,
+        )
 
     def _load_abc_content(self) -> None:
         self.abc_edit.clear()

@@ -51,7 +51,8 @@ from ..db.setlist_repo import (
     get_setlists_containing_song,
 )
 from ..db.song_layout_repo import list_song_layouts_for_song_and_band
-from ..db.play_log import log_play, log_play_at, get_play_history
+from ..db.play_log import log_play, log_play_at
+from .play_history_dialog import open_play_history_dialog
 from ..db.song_repo import update_song_app_metadata
 from .theme import (
     STATUS_CIRCLE_DIAMETER,
@@ -922,39 +923,13 @@ class LibraryView(QWidget):
         self.model.refresh()
 
     def _on_play_history(self, song_id: int, song_title: str) -> None:
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QDialogButtonBox
-        history = get_play_history(self.app_state.conn, song_id)
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"Play history — {song_title}")
-        layout = QVBoxLayout(dlg)
-        text = QTextEdit(dlg)
-        text.setReadOnly(True)
-        if not history:
-            text.setPlainText("No plays recorded.")
-        else:
-            lines = []
-            for played_at_iso, setlist_name, context_note in history:
-                try:
-                    dt = datetime.fromisoformat(played_at_iso.replace("Z", "+00:00"))
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    local = dt.astimezone()
-                    when = local.strftime("%Y-%m-%d %H:%M")
-                except Exception:
-                    when = played_at_iso
-                parts = [when]
-                if setlist_name:
-                    parts.append(f"Set: {setlist_name}")
-                if context_note:
-                    parts.append(context_note)
-                lines.append("  |  ".join(parts))
-            text.setPlainText("\n".join(lines))
-        layout.addWidget(text)
-        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
-        bb.accepted.connect(dlg.accept)
-        layout.addWidget(bb)
-        dlg.resize(480, 320)
-        dlg.exec()
+        open_play_history_dialog(
+            self.app_state,
+            song_id,
+            song_title,
+            self,
+            on_refresh=self.model.refresh,
+        )
 
     def _on_set_play_time(self, song_id: int) -> None:
         from PySide6.QtWidgets import QDialog, QDialogButtonBox
