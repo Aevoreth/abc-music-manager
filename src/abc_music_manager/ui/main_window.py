@@ -196,23 +196,9 @@ class MainWindow(QMainWindow):
         self._go_to_page(self.PAGES.index("Settings"))
 
     def _on_write_plugindata(self) -> None:
-        from ..services.plugindata_writer import write_plugindata_all_targets
-        try:
-            success, errors = write_plugindata_all_targets(self.app_state.conn)
-            if errors:
-                QMessageBox.warning(
-                    self,
-                    "PluginData write",
-                    f"Written to {success} target(s).\nErrors:\n" + "\n".join(errors),
-                )
-            else:
-                QMessageBox.information(
-                    self,
-                    "PluginData write",
-                    f"Written to {success} target(s).",
-                )
-        except Exception as e:
-            QMessageBox.critical(self, "PluginData write failed", str(e))
+        from .plugindata_export_dialog import PlugindataExportDialog
+        dlg = PlugindataExportDialog(self.app_state.conn, self)
+        dlg.exec()
 
     def _on_about(self) -> None:
         QMessageBox.about(

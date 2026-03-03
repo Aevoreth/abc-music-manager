@@ -22,6 +22,7 @@ class PartInfo:
     part_number: int
     part_name: Optional[str] = None
     made_for: Optional[str] = None  # caller resolves to instrument_id
+    title_from_t: Optional[str] = None  # from T: in part block (for plugindata track name)
 
 
 @dataclass
@@ -91,7 +92,7 @@ def _parse_headers(content: str) -> tuple[dict[str, str], str, str, str]:
 def _parse_parts(content: str) -> list[PartInfo]:
     """
     Find all X: lines; each starts a part block until next X: or EOF.
-    In each block: X: -> part_number, %%part-name -> part_name, %%made-for -> made_for.
+    In each block: X: -> part_number, T: -> title_from_t, %%part-name -> part_name, %%made-for -> made_for.
     """
     parts: list[PartInfo] = []
     x_pattern = re.compile(r"^X:\s*(\d+)", re.IGNORECASE)
@@ -104,22 +105,26 @@ def _parse_parts(content: str) -> list[PartInfo]:
             part_num = int(m.group(1))
             part_name: Optional[str] = None
             made_for: Optional[str] = None
+            title_from_t: Optional[str] = None
             i += 1
             while i < len(lines):
                 rest = lines[i]
                 stripped = rest.strip()
                 if x_pattern.match(stripped):
                     break
-                tag = _MAESTRO_TAG.match(stripped)
-                if tag:
-                    name = tag.group(1).strip().lower()
-                    val = (tag.group(2) or "").strip()
-                    if name == "part-name":
-                        part_name = val or None
-                    elif name == "made-for":
-                        made_for = val or None
+                if stripped.startswith("T:") and title_from_t is None:
+                    title_from_t = stripped[2:].strip() or None
+                else:
+                    tag = _MAESTRO_TAG.match(stripped)
+                    if tag:
+                        name = tag.group(1).strip().lower()
+                        val = (tag.group(2) or "").strip()
+                        if name == "part-name":
+                            part_name = val or None
+                        elif name == "made-for":
+                            made_for = val or None
                 i += 1
-            parts.append(PartInfo(part_number=part_num, part_name=part_name, made_for=made_for))
+            parts.append(PartInfo(part_number=part_num, part_name=part_name, made_for=made_for, title_from_t=title_from_t))
             continue
         i += 1
     return parts
