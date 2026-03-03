@@ -135,6 +135,7 @@ class MainWindow(QMainWindow):
         data = self._splitter.saveState()
         if not data.isEmpty():
             set_splitter_state(data.toBase64().data().decode("utf-8"))
+        self.library_view._save_library_table_header_state()
         super().closeEvent(event)
 
     def _build_menu_bar(self) -> None:

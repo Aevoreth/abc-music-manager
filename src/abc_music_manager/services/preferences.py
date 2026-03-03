@@ -107,6 +107,19 @@ def set_splitter_state(state_b64: str) -> None:
     save_preferences(prefs)
 
 
+def get_library_table_header_state() -> str | None:
+    """Saved library table header state (base64 from QHeaderView.saveState()). None if not set."""
+    prefs = load_preferences()
+    return prefs.get("library_table_header_state")
+
+
+def set_library_table_header_state(state_b64: str) -> None:
+    """Save library table header state (base64 from QHeaderView.saveState())."""
+    prefs = load_preferences()
+    prefs["library_table_header_state"] = state_b64
+    save_preferences(prefs)
+
+
 # --- Default library filters ---
 # Stored under "default_filters" key. Keys: in_set, rating_from, rating_to, duration_min_none,
 # duration_max_none, duration_min_sec, duration_max_sec, last_played_mode, last_played_from_seconds_ago,

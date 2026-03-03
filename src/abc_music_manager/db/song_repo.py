@@ -178,6 +178,69 @@ def find_song_by_logical_identity(
     return [r[0] for r in cur.fetchall()]
 
 
+def get_file_paths_for_song(conn: sqlite3.Connection, song_id: int) -> list[str]:
+    """Return all file paths linked to this song."""
+    cur = conn.execute("SELECT file_path FROM SongFile WHERE song_id = ?", (song_id,))
+    return [r[0] for r in cur.fetchall()]
+
+
+def relocate_song_file(
+    conn: sqlite3.Connection,
+    song_id: int,
+    old_path: str,
+    new_path: str,
+    parsed: ParsedSong,
+    *,
+    file_mtime: str | None = None,
+    file_hash: str | None = None,
+    is_primary_library: bool = True,
+    is_set_copy: bool = False,
+    scan_excluded: bool = False,
+) -> None:
+    """
+    Update a SongFile's path (e.g. file was moved). Updates Song metadata from parsed.
+    """
+    now = _now()
+    parts_json = _parts_to_json(parsed, conn)
+    cur = conn.execute(
+        "SELECT id FROM SongFile WHERE song_id = ? AND file_path = ?",
+        (song_id, old_path),
+    )
+    row = cur.fetchone()
+    if not row:
+        return
+    file_id = row[0]
+    conn.execute(
+        """UPDATE Song SET title = ?, composers = ?, duration_seconds = ?, transcriber = ?,
+           parts = ?, updated_at = ? WHERE id = ?""",
+        (
+            parsed.title,
+            parsed.composers,
+            parsed.duration_seconds,
+            parsed.transcriber,
+            parts_json,
+            now,
+            song_id,
+        ),
+    )
+    conn.execute(
+        """UPDATE SongFile SET file_path = ?, file_mtime = ?, file_hash = ?, export_timestamp = ?,
+           is_primary_library = ?, is_set_copy = ?, scan_excluded = ?, updated_at = ? WHERE id = ?""",
+        (
+            new_path,
+            file_mtime,
+            file_hash,
+            parsed.export_timestamp,
+            1 if is_primary_library else 0,
+            1 if is_set_copy else 0,
+            1 if scan_excluded else 0,
+            now,
+            file_id,
+        ),
+    )
+    conn.commit()
+
+
 def update_song_app_metadata(
     conn: sqlite3.Connection,
     song_id: int,

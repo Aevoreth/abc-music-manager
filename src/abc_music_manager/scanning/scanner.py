@@ -10,13 +10,28 @@ import sqlite3
 from pathlib import Path
 from typing import Callable
 
+try:
+    from send2trash import send2trash
+except ImportError:
+    send2trash = None
+
+
+def _send_to_trash(path: str) -> None:
+    """Move file to recycle bin/trash. No-op if send2trash unavailable."""
+    if send2trash and Path(path).is_file():
+        try:
+            send2trash(path)
+        except Exception:
+            pass
+
 from ..parsing.abc_parser import parse_abc_file, ParsedSong
 from ..db.folder_rule import get_enabled_roots
 from ..db.song_repo import (
     ensure_song_from_parsed,
-    link_file_to_song,
+    get_file_paths_for_song,
     logical_identity,
     find_song_by_logical_identity,
+    relocate_song_file,
 )
 
 
@@ -105,7 +120,8 @@ def _file_hash(path: Path) -> str | None:
         return None
 
 
-# Duplicate resolution: callback (conn, new_file_path, parsed, existing_song_ids) -> ("link", song_id) | ("separate", None) | ("ignore", None)
+# Duplicate resolution: callback returns (action, existing_song_id).
+# Actions: keep_existing, keep_existing_delete_new, keep_new, keep_new_delete_existing, separate, ignore
 DuplicateResolutionResult = tuple[str, int | None]
 
 
@@ -138,7 +154,9 @@ def run_scan(
     scanned = 0
     errors = 0
     scanned_paths: set[str] = set()
+    deferred_duplicates: list[tuple[str, ParsedSong, str | None, str | None, bool, bool, bool, list[int]]] = []
 
+    # Phase 1: Full scan — update existing paths, add non-duplicates, defer potential duplicates
     for i, path in enumerate(files):
         if progress_callback:
             progress_callback(i + 1, total)
@@ -171,38 +189,14 @@ def run_scan(
             scanned += 1
             continue
 
-        # New file: check for primary-library duplicate
+        # New file: check for primary-library duplicate — defer until full scan done
         if is_primary and on_duplicate:
             norm_title, composers, part_count = logical_identity(parsed)
             existing_ids = find_song_by_logical_identity(conn, norm_title, composers, part_count)
             if existing_ids:
-                action, link_song_id = on_duplicate(conn, path_str, parsed, existing_ids)
-                if action == "link" and link_song_id is not None:
-                    link_file_to_song(
-                        conn,
-                        link_song_id,
-                        path_str,
-                        file_mtime=mtime,
-                        file_hash=file_hash_val,
-                        export_timestamp=parsed.export_timestamp,
-                        is_primary_library=True,
-                        is_set_copy=False,
-                        scan_excluded=False,
-                    )
-                    scanned += 1
-                elif action == "separate":
-                    ensure_song_from_parsed(
-                        conn,
-                        parsed,
-                        path_str,
-                        file_mtime=mtime,
-                        file_hash=file_hash_val,
-                        is_primary_library=is_primary,
-                        is_set_copy=is_set_copy,
-                        scan_excluded=scan_excluded,
-                    )
-                    scanned += 1
-                # "ignore": do not add, scanned unchanged
+                deferred_duplicates.append(
+                    (path_str, parsed, mtime, file_hash_val, is_primary, is_set_copy, scan_excluded, existing_ids)
+                )
                 continue
 
         ensure_song_from_parsed(
@@ -216,6 +210,90 @@ def run_scan(
             scan_excluded=scan_excluded,
         )
         scanned += 1
+
+    # Phase 2: Duplicate resolution — detect moves (file relocated) vs true duplicates
+    for path_str, parsed, mtime, file_hash_val, is_primary, is_set_copy, scan_excluded, existing_ids in deferred_duplicates:
+        # If existing song's file path is not in scanned_paths, it was moved (not a duplicate)
+        move_song_id: int | None = None
+        move_old_path: str | None = None
+        for sid in existing_ids:
+            existing_paths = get_file_paths_for_song(conn, sid)
+            missing_paths = [p for p in existing_paths if p not in scanned_paths]
+            if len(missing_paths) == 1 and len(existing_paths) == 1:
+                move_song_id = sid
+                move_old_path = missing_paths[0]
+                break
+
+        if move_song_id is not None and move_old_path is not None:
+            relocate_song_file(
+                conn,
+                move_song_id,
+                move_old_path,
+                path_str,
+                parsed,
+                file_mtime=mtime,
+                file_hash=file_hash_val,
+                is_primary_library=is_primary,
+                is_set_copy=is_set_copy,
+                scan_excluded=scan_excluded,
+            )
+            scanned += 1
+            continue
+
+        # True duplicate: prompt user
+        action, existing_song_id = on_duplicate(conn, path_str, parsed, existing_ids)
+        if action == "keep_existing":
+            # Don't index new file
+            pass
+        elif action == "keep_existing_delete_new":
+            # Don't index new file, move it to recycle bin
+            _send_to_trash(path_str)
+        elif action == "keep_new" and existing_song_id is not None:
+            existing_paths = get_file_paths_for_song(conn, existing_song_id)
+            if existing_paths:
+                relocate_song_file(
+                    conn,
+                    existing_song_id,
+                    existing_paths[0],
+                    path_str,
+                    parsed,
+                    file_mtime=mtime,
+                    file_hash=file_hash_val,
+                    is_primary_library=is_primary,
+                    is_set_copy=is_set_copy,
+                    scan_excluded=scan_excluded,
+                )
+                scanned += 1
+        elif action == "keep_new_delete_existing" and existing_song_id is not None:
+            existing_paths = get_file_paths_for_song(conn, existing_song_id)
+            if existing_paths:
+                old_path = existing_paths[0]
+                relocate_song_file(
+                    conn,
+                    existing_song_id,
+                    old_path,
+                    path_str,
+                    parsed,
+                    file_mtime=mtime,
+                    file_hash=file_hash_val,
+                    is_primary_library=is_primary,
+                    is_set_copy=is_set_copy,
+                    scan_excluded=scan_excluded,
+                )
+                _send_to_trash(old_path)
+                scanned += 1
+        elif action == "separate":
+            ensure_song_from_parsed(
+                conn,
+                parsed,
+                path_str,
+                file_mtime=mtime,
+                file_hash=file_hash_val,
+                is_primary_library=is_primary,
+                is_set_copy=is_set_copy,
+                scan_excluded=scan_excluded,
+            )
+            scanned += 1
 
     _remove_missing_song_files(conn, scanned_paths)
 

@@ -37,10 +37,11 @@ from PySide6.QtWidgets import (
     QApplication,
 )
 from PySide6.QtCore import Qt, QTime, QDateTime, QDate, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QRect, QSize, Signal, QTimer
+from PySide6.QtCore import QByteArray
 from PySide6.QtGui import QColor, QAction, QPainter, QFont, QBrush, QPen, QIcon, QPixmap
 
 from ..services.app_state import AppState
-from ..services.preferences import get_default_filters
+from ..services.preferences import get_default_filters, get_library_table_header_state, set_library_table_header_state
 from ..db import list_library_songs, list_unique_transcribers, get_status_list, LibrarySongRow
 from ..db.status_repo import list_statuses
 from ..db.setlist_repo import (
@@ -759,6 +760,9 @@ class LibraryView(QWidget):
         self.table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         hh = self.table.horizontalHeader()
+        self._header_save_timer = QTimer(self)
+        self._header_save_timer.setSingleShot(True)
+        self._header_save_timer.timeout.connect(self._save_library_table_header_state)
         hh.setMinimumSectionSize(20)
         hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         hh.resizeSection(0, 280)
@@ -774,6 +778,14 @@ class LibraryView(QWidget):
         hh.setSectionsClickable(True)
         hh.setSortIndicatorShown(True)
         hh.sectionClicked.connect(self._on_header_clicked)
+        hh.sectionResized.connect(self._on_header_section_resized)
+        # Restore saved column widths from preferences
+        saved_header = get_library_table_header_state()
+        if saved_header:
+            data = QByteArray.fromBase64(saved_header.encode("utf-8"))
+            if not data.isEmpty() and hh.restoreState(data):
+                pass  # Restored successfully
+            # else: keep defaults above
         # Row height: 2 lines of text + padding
         fm = self.table.fontMetrics()
         line_h = fm.lineSpacing()
@@ -795,6 +807,14 @@ class LibraryView(QWidget):
 
     # Sortable columns: Title, Composer, Duration, Last played, Parts, Rating, Transcriber
     _SORTABLE_COLUMNS = (0, 1, 2, 3, 5, 6, 9)
+
+    def _on_header_section_resized(self, logical_index: int, old_size: int, new_size: int) -> None:
+        self._header_save_timer.start(150)
+
+    def _save_library_table_header_state(self) -> None:
+        data = self.table.horizontalHeader().saveState()
+        if not data.isEmpty():
+            set_library_table_header_state(data.toBase64().data().decode("utf-8"))
 
     def _on_header_clicked(self, logical_index: int) -> None:
         if logical_index not in self._SORTABLE_COLUMNS:
