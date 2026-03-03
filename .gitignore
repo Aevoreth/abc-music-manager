@@ -23,6 +23,7 @@ Thumbs.db
 # SQLite DBs (if you want to keep local-only)
 *.sqlite
 *.sqlite3
+preferences.json
 
 # Flet (if it generates local artifacts)
 .flet/
