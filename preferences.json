@@ -1,7 +1,7 @@
 {
   "lotro_root": "C:\\Users\\psybo\\Documents\\The Lord of the Rings Online",
   "default_status_id": 1,
-  "window_geometry": "AdnQywADAAAAAAeA////+AAADv8AAAQHAAAHgQAAAJQAAAtoAAADTwAAAAECAAAAB4AAAAeAAAAAFwAADv8AAAQH",
+  "window_geometry": "AdnQywADAAAAAAeA////+AAADv8AAAQHAAAHgQAAAOkAAAtoAAADpAAAAAECAAAAB4AAAAeAAAAAFwAADv8AAAQH",
   "splitter_state": "AAAA/wAAAAEAAAACAAAAhAAABuUB/////wEAAAABAA==",
   "set_export_dir": "Aev/Sets",
   "default_filters": {
@@ -9,9 +9,9 @@
     "rating_from": 0,
     "rating_to": 5,
     "duration_min_none": true,
-    "duration_max_none": true,
+    "duration_max_none": false,
     "duration_min_sec": 0,
-    "duration_max_sec": 1200,
+    "duration_max_sec": 300,
     "last_played_mode": "time",
     "last_played_from_seconds_ago": 0,
     "last_played_to_seconds_ago": null,
@@ -19,8 +19,12 @@
     "last_played_to_iso": null,
     "parts_min": 9,
     "parts_max": 12,
-    "status_ids": []
+    "status_ids": [
+      1,
+      2,
+      3
+    ]
   },
   "base_font_size": 12,
-  "library_table_header_state": "AAAA/wAAAAAAAAABAAAAAAAAAAMBAAAAAAAAAAAAAAAAAAAAAAAABSYAAAAKAAEBAAAAAAAAAAAAAwAAAGQAAAAUAAAAhAAAAAAAAAAKAAABGAAAAAEAAAAAAAAA6QAAAAEAAAAAAAAASgAAAAEAAAAAAAAAZAAAAAEAAAAAAAAAjAAAAAEAAAAAAAAAVwAAAAEAAAADAAAAYwAAAAEAAAADAAAASQAAAAEAAAADAAAAZAAAAAEAAAAAAAAAhAAAAAEAAAAAAAAD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAQ=="
+  "library_table_header_state": "AAAA/wAAAAAAAAABAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAABSYAAAAKAAEBAAAAAAAAAAAAAwAAAGQAAAAUAAAAhAAAAAAAAAAKAAABGAAAAAEAAAAAAAAA6QAAAAEAAAAAAAAASgAAAAEAAAAAAAAAZAAAAAEAAAAAAAAAjAAAAAEAAAAAAAAAVwAAAAEAAAADAAAAYwAAAAEAAAADAAAASQAAAAEAAAADAAAAZAAAAAEAAAAAAAAAhAAAAAEAAAAAAAAD6AAAAAAAAAAAAAAAAAAAAAAAAAAAAQ=="
 }
