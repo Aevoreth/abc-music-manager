@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
-    QFormLayout,
+    QGridLayout,
     QLineEdit,
     QSpinBox,
     QComboBox,
@@ -16,8 +16,8 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QGroupBox,
     QCheckBox,
-    QScrollArea,
     QWidget,
+    QLabel,
 )
 from PySide6.QtCore import Qt
 
@@ -26,42 +26,29 @@ from ..db.player_repo import add_player, update_player, list_player_instruments,
 from ..db.schema import PLAYER_INSTRUMENTS
 from ..db.instrument import get_or_create_instruments_by_names
 
-# Instrument groups for the add/edit dialog
-INSTRUMENT_GROUPS: dict[str, list[str]] = {
-    "Fiddles": [
-        "Basic Fiddle",
-        "Student Fiddle",
-        "Bardic Fiddle",
-        "Lonely Mountain Fiddle",
-        "Sprightly Fiddle",
-        "Traveler's Trusty Fiddle",
+# 4-column layout for instruments in add/edit dialog.
+# Each column: list of (group_name | None, list of instrument names).
+INSTRUMENT_COLUMNS: list[list[tuple[str | None, list[str]]]] = [
+    # Column 1: Fiddles
+    [
+        ("Fiddles", ["Basic Fiddle", "Student Fiddle", "Bardic Fiddle", "Lonely Mountain Fiddle", "Sprightly Fiddle", "Traveler's Trusty Fiddle"]),
     ],
-    "Bassoons": [
-        "Basic Bassoon",
-        "Lonely Mountain Bassoon",
-        "Brusque Bassoon",
+    # Column 2: Bassoons, Basic Flute, Basic Horn, Basic Clarinet, Basic Bagpipe, Basic Pibgorn
+    [
+        ("Bassoons", ["Basic Bassoon", "Lonely Mountain Bassoon", "Brusque Bassoon"]),
+        (None, ["Basic Flute", "Basic Horn", "Basic Clarinet", "Basic Bagpipe", "Basic Pibgorn"]),
     ],
-    "Harps": [
-        "Basic Harp",
-        "Misty Mountain Harp",
+    # Column 3: Harps, Lutes, Basic Theorbo
+    [
+        ("Harps", ["Basic Harp", "Misty Mountain Harp"]),
+        ("Lutes", ["Basic Lute", "Lute of Ages"]),
+        (None, ["Basic Theorbo"]),
     ],
-    "Lutes": [
-        "Basic Lute",
-        "Lute of Ages",
+    # Column 4: Basic Drum, Basic Cowbell, Moor Cowbell, Jaunty Hand-Knells
+    [
+        (None, ["Basic Drum", "Basic Cowbell", "Moor Cowbell", "Jaunty Hand-Knells"]),
     ],
-    "Other": [
-        "Basic Flute",
-        "Basic Horn",
-        "Basic Clarinet",
-        "Basic Bagpipe",
-        "Basic Pibgorn",
-        "Basic Theorbo",
-        "Basic Drum",
-        "Basic Cowbell",
-        "Moor Cowbell",
-        "Jaunty Hand-Knells",
-    ],
-}
+]
 
 # Default unchecked for new characters
 DEFAULT_UNCHECKED_INSTRUMENTS = {"Moor Cowbell", "Jaunty Hand-Knells"}
@@ -138,53 +125,74 @@ class PlayerDialog(QDialog):
         self.player = player
         self._instrument_checkboxes: dict[str, QCheckBox] = {}
         self.setWindowTitle("Edit Character" if player else "New Character")
-        self.setMinimumSize(400, 500)
+        self.setMinimumSize(560, 360)
         layout = QVBoxLayout(self)
 
-        form = QFormLayout()
+        # Name, Level, Class on one line
+        top_row = QHBoxLayout()
+        top_row.addWidget(QLabel("Name:"))
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Character name")
         self.name_edit.setMaxLength(200)
-        form.addRow("Name:", self.name_edit)
-
+        top_row.addWidget(self.name_edit)
+        top_row.addWidget(QLabel("Level:"))
         self.level_spin = QSpinBox()
         self.level_spin.setRange(0, 150)
         self.level_spin.setSpecialValueText("")
         self.level_spin.setValue(0)
         self.level_spin.setToolTip("0 or empty = not set")
-        form.addRow("Level (optional):", self.level_spin)
-
+        self.level_spin.setMaximumWidth(70)
+        top_row.addWidget(self.level_spin)
+        top_row.addWidget(QLabel("Class:"))
         self.class_combo = QComboBox()
         self.class_combo.setEditable(True)
         self.class_combo.addItem("")
         for c in LOTRO_CLASSES:
             self.class_combo.addItem(c)
         self.class_combo.setCurrentIndex(0)
-        form.addRow("Class (optional):", self.class_combo)
+        self.class_combo.setMinimumWidth(120)
+        top_row.addWidget(self.class_combo)
+        top_row.addStretch()
+        layout.addLayout(top_row)
 
-        layout.addLayout(form)
-
-        # Instruments section (grouped)
+        # Instruments section: 4 columns, top-aligned, compact
         instruments_label = QGroupBox("Instruments")
         instruments_inner = QWidget()
-        instruments_layout = QVBoxLayout(instruments_inner)
-        for group_name, names in INSTRUMENT_GROUPS.items():
-            group_box = QGroupBox(group_name)
-            group_layout = QHBoxLayout(group_box)
-            for name in names:
-                cb = QCheckBox(name)
-                default_checked = name not in DEFAULT_UNCHECKED_INSTRUMENTS
-                cb.setChecked(default_checked)
-                self._instrument_checkboxes[name] = cb
-                group_layout.addWidget(cb)
-            group_layout.addStretch()
-            instruments_layout.addWidget(group_box)
-        scroll = QScrollArea()
-        scroll.setWidget(instruments_inner)
-        scroll.setWidgetResizable(True)
-        scroll.setMaximumHeight(220)
+        instruments_row = QHBoxLayout(instruments_inner)
+        instruments_row.setContentsMargins(6, 6, 6, 6)
+        instruments_row.setSpacing(8)
+        instruments_row.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        for column_sections in INSTRUMENT_COLUMNS:
+            col_widget = QWidget()
+            col_layout = QVBoxLayout(col_widget)
+            col_layout.setContentsMargins(4, 0, 4, 0)
+            col_layout.setSpacing(2)
+            col_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+            for group_name, names in column_sections:
+                if group_name:
+                    group_box = QGroupBox(group_name)
+                    group_layout = QVBoxLayout(group_box)
+                    group_layout.setContentsMargins(6, 4, 6, 4)
+                    for name in names:
+                        cb = QCheckBox(name)
+                        cb.setChecked(name not in DEFAULT_UNCHECKED_INSTRUMENTS)
+                        self._instrument_checkboxes[name] = cb
+                        group_layout.addWidget(cb)
+                    col_layout.addWidget(group_box)
+                else:
+                    for name in names:
+                        cb = QCheckBox(name)
+                        cb.setChecked(name not in DEFAULT_UNCHECKED_INSTRUMENTS)
+                        self._instrument_checkboxes[name] = cb
+                        col_layout.addWidget(cb)
+            col_layout.addStretch()
+            instruments_row.addWidget(col_widget, 0, Qt.AlignmentFlag.AlignTop)
+        instruments_row.addStretch()
+
         instruments_main = QVBoxLayout(instruments_label)
-        instruments_main.addWidget(scroll)
+        instruments_main.setContentsMargins(6, 6, 6, 6)
+        instruments_main.addWidget(instruments_inner)
         layout.addWidget(instruments_label)
 
         buttons = QDialogButtonBox(
