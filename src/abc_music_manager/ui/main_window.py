@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
 )
-from PySide6.QtCore import Qt, QByteArray
+from PySide6.QtCore import Qt, QByteArray, QRect
 from PySide6.QtGui import QColor, QFontMetrics, QPalette
 
 from ..services.app_state import AppState
@@ -28,21 +28,37 @@ from ..services.preferences import get_splitter_state, set_splitter_state
 
 def _restore_window_geometry(window: QMainWindow) -> None:
     """Restore main window size and position from preferences if available."""
-    geom_b64 = preferences.get_window_geometry()
-    if not geom_b64:
+    saved = preferences.get_window_geometry()
+    if not saved:
         return
-    data = QByteArray.fromBase64(geom_b64.encode("utf-8"))
-    if data.isEmpty():
-        return
-    window.restoreGeometry(data)
+    if isinstance(saved, dict):
+        # Human-readable format: {x, y, width, height, maximized}
+        x = saved.get("x", 0)
+        y = saved.get("y", 0)
+        w = saved.get("width", 1000)
+        h = saved.get("height", 700)
+        window.setGeometry(QRect(x, y, w, h))
+        if saved.get("maximized"):
+            window.setWindowState(window.windowState() | Qt.WindowState.WindowMaximized)
+    else:
+        # Legacy base64 format
+        data = QByteArray.fromBase64(saved.encode("utf-8"))
+        if not data.isEmpty():
+            window.restoreGeometry(data)
 
 
 def _save_window_geometry(window: QMainWindow) -> None:
-    """Persist main window size and position to preferences."""
-    data = window.saveGeometry()
-    if data.isEmpty():
-        return
-    preferences.set_window_geometry(data.toBase64().data().decode("utf-8"))
+    """Persist main window size and position to preferences (human-readable format)."""
+    # Use normalGeometry when maximized so we get the size/position when un-maximized
+    geom = window.normalGeometry() if (window.windowState() & Qt.WindowState.WindowMaximized) else window.geometry()
+    maximized = bool(window.windowState() & Qt.WindowState.WindowMaximized)
+    preferences.set_window_geometry({
+        "x": geom.x(),
+        "y": geom.y(),
+        "width": geom.width(),
+        "height": geom.height(),
+        "maximized": maximized,
+    })
 
 
 class PlaceholderPage(QWidget):
@@ -122,6 +138,10 @@ class MainWindow(QMainWindow):
             self._splitter_initial_sizes_set = True
             saved = get_splitter_state()
             if saved:
+                if isinstance(saved, list) and len(saved) >= 2:
+                    self._splitter.setSizes(saved)
+                    return
+                # Legacy base64 format
                 data = QByteArray.fromBase64(saved.encode("utf-8"))
                 if not data.isEmpty() and self._splitter.restoreState(data):
                     return
@@ -132,9 +152,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         _save_window_geometry(self)
-        data = self._splitter.saveState()
-        if not data.isEmpty():
-            set_splitter_state(data.toBase64().data().decode("utf-8"))
+        set_splitter_state(self._splitter.sizes())
         self.library_view._save_library_table_header_state()
         super().closeEvent(event)
 

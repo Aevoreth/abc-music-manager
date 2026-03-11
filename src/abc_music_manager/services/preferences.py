@@ -81,42 +81,51 @@ def set_base_font_size(size: int) -> None:
     save_preferences(prefs)
 
 
-def get_window_geometry() -> str | None:
-    """Saved main window geometry (base64). None if not set or invalid."""
+def get_window_geometry() -> dict[str, Any] | str | None:
+    """
+    Saved main window geometry. Returns dict with x, y, width, height, maximized (human-readable),
+    or legacy base64 str. None if not set.
+    """
     prefs = load_preferences()
     return prefs.get("window_geometry")
 
 
-def set_window_geometry(geometry_b64: str) -> None:
-    """Save main window geometry (base64 from QMainWindow.saveGeometry())."""
+def set_window_geometry(geometry: dict[str, Any]) -> None:
+    """Save main window geometry as human-readable dict: x, y, width, height, maximized."""
     prefs = load_preferences()
-    prefs["window_geometry"] = geometry_b64
+    prefs["window_geometry"] = geometry
     save_preferences(prefs)
 
 
-def get_splitter_state() -> str | None:
-    """Saved nav/main splitter state (base64 from QSplitter.saveState()). None if not set."""
+def get_splitter_state() -> list[int] | str | None:
+    """
+    Saved nav/main splitter state. Returns list of sizes (human-readable),
+    or legacy base64 str. None if not set.
+    """
     prefs = load_preferences()
     return prefs.get("splitter_state")
 
 
-def set_splitter_state(state_b64: str) -> None:
-    """Save nav/main splitter state (base64 from QSplitter.saveState())."""
+def set_splitter_state(sizes: list[int]) -> None:
+    """Save nav/main splitter state as human-readable list of section sizes in pixels."""
     prefs = load_preferences()
-    prefs["splitter_state"] = state_b64
+    prefs["splitter_state"] = sizes
     save_preferences(prefs)
 
 
-def get_library_table_header_state() -> str | None:
-    """Saved library table header state (base64 from QHeaderView.saveState()). None if not set."""
+def get_library_table_header_state() -> dict[str, Any] | str | None:
+    """
+    Saved library table header state. Returns dict with section_sizes, sort_column, sort_order
+    (human-readable), or legacy base64 str. None if not set.
+    """
     prefs = load_preferences()
     return prefs.get("library_table_header_state")
 
 
-def set_library_table_header_state(state_b64: str) -> None:
-    """Save library table header state (base64 from QHeaderView.saveState())."""
+def set_library_table_header_state(state: dict[str, Any]) -> None:
+    """Save library table header state as human-readable dict: section_sizes, sort_column, sort_order."""
     prefs = load_preferences()
-    prefs["library_table_header_state"] = state_b64
+    prefs["library_table_header_state"] = state
     save_preferences(prefs)
 
 

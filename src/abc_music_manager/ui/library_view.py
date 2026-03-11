@@ -780,13 +780,38 @@ class LibraryView(QWidget):
         hh.setSortIndicatorShown(True)
         hh.sectionClicked.connect(self._on_header_clicked)
         hh.sectionResized.connect(self._on_header_section_resized)
-        # Restore saved column widths from preferences
+        # Restore saved column widths and sort from preferences
         saved_header = get_library_table_header_state()
         if saved_header:
-            data = QByteArray.fromBase64(saved_header.encode("utf-8"))
-            if not data.isEmpty() and hh.restoreState(data):
-                pass  # Restored successfully
-            # else: keep defaults above
+            if isinstance(saved_header, dict):
+                # Human-readable format: section_sizes, sort_column, sort_order
+                sizes = saved_header.get("section_sizes")
+                if isinstance(sizes, list):
+                    for i, w in enumerate(sizes):
+                        if i < hh.count() and isinstance(w, (int, float)):
+                            hh.resizeSection(i, int(w))
+                sc = saved_header.get("sort_column")
+                so = saved_header.get("sort_order")
+                if isinstance(sc, int) and 0 <= sc < len(LibraryTableModel.COLUMNS):
+                    self._sort_column = sc
+                    self._sort_order = (
+                        Qt.SortOrder.DescendingOrder
+                        if so == "descending"
+                        else Qt.SortOrder.AscendingOrder
+                    )
+                    hh.setSortIndicator(self._sort_column, self._sort_order)
+                    self.proxy.sort(self._sort_column, self._sort_order)
+            else:
+                # Legacy base64 format
+                data = QByteArray.fromBase64(saved_header.encode("utf-8"))
+                if not data.isEmpty() and hh.restoreState(data):
+                    # Sync sort from header (Qt saves it in state)
+                    sc = hh.sortIndicatorSection()
+                    so = hh.sortIndicatorOrder()
+                    if 0 <= sc < len(LibraryTableModel.COLUMNS):
+                        self._sort_column = sc
+                        self._sort_order = so
+                        self.proxy.sort(self._sort_column, self._sort_order)
         # Row height: 2 lines of text + padding
         fm = self.table.fontMetrics()
         line_h = fm.lineSpacing()
@@ -813,9 +838,14 @@ class LibraryView(QWidget):
         self._header_save_timer.start(150)
 
     def _save_library_table_header_state(self) -> None:
-        data = self.table.horizontalHeader().saveState()
-        if not data.isEmpty():
-            set_library_table_header_state(data.toBase64().data().decode("utf-8"))
+        hh = self.table.horizontalHeader()
+        section_sizes = [hh.sectionSize(i) for i in range(hh.count())]
+        sort_order_str = "descending" if self._sort_order == Qt.SortOrder.DescendingOrder else "ascending"
+        set_library_table_header_state({
+            "section_sizes": section_sizes,
+            "sort_column": self._sort_column,
+            "sort_order": sort_order_str,
+        })
 
     def _on_header_clicked(self, logical_index: int) -> None:
         if logical_index not in self._SORTABLE_COLUMNS:
