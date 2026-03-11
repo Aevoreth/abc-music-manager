@@ -53,6 +53,7 @@ Fields:
 
 Notes:
 - `%%made-for` in ABC is parsed as text and matched against name or alternative_names (or create new instrument) to store `instrument_id` in the song’s `parts` JSON.
+- The Players tab uses a fixed list of 24 LOTRO instruments (Basic Fiddle, Student Fiddle, Bardic Fiddle, etc.) for the instrument possession grid. These are seeded at init via seed_player_instruments() and live in the Instrument table.
 
 ---
 
@@ -192,6 +193,8 @@ Fields:
 Fields:
 - id (INTEGER PK)
 - name (TEXT)
+- level (INTEGER NULL) — optional character level (e.g. LOTRO 1–150)
+- class (TEXT NULL) — optional character class (e.g. Minstrel, Hunter)
 - created_at (DATETIME)
 - updated_at (DATETIME)
 
