@@ -23,7 +23,7 @@ from PySide6.QtGui import QColor, QFontMetrics, QPalette
 
 from ..services.app_state import AppState
 from ..services import preferences
-from ..services.preferences import get_splitter_state, set_splitter_state
+from ..services.preferences import get_splitter_state, set_splitter_state, set_bands_splitter_state
 
 
 def _restore_window_geometry(window: QMainWindow) -> None:
@@ -98,9 +98,10 @@ class MainWindow(QMainWindow):
         from .settings_view import SettingsView
         self.library_view = LibraryView(app_state)
         self.setlists_view = SetlistsView(app_state)
+        self.bands_view = BandsView(app_state)
         self.stacked.addWidget(self.library_view)
         self.stacked.addWidget(self.setlists_view)
-        self.stacked.addWidget(BandsView(app_state))
+        self.stacked.addWidget(self.bands_view)
         self.stacked.addWidget(SetPlaybackView(app_state))
         self.stacked.addWidget(SettingsView(app_state))
         self.library_view.navigateToSetlist.connect(self._on_navigate_to_setlist)
@@ -117,7 +118,7 @@ class MainWindow(QMainWindow):
         for name in self.PAGES:
             self.nav_list.addItem(QListWidgetItem(name))
         self.nav_list.setCurrentRow(0)
-        self.nav_list.currentRowChanged.connect(self.stacked.setCurrentIndex)
+        self.nav_list.currentRowChanged.connect(self._on_nav_row_changed)
         # Nav list width: default to fit content (text + padding); user can resize via splitter
         fm = QFontMetrics(self.nav_list.font())
         text_width = max(fm.horizontalAdvance(name) for name in self.PAGES)
@@ -151,8 +152,12 @@ class MainWindow(QMainWindow):
             self._splitter.setSizes([nav_w, total - nav_w - handle_w])
 
     def closeEvent(self, event) -> None:
+        if not self._confirm_leave_page_with_unsaved(-1):
+            event.ignore()
+            return
         _save_window_geometry(self)
         set_splitter_state(self._splitter.sizes())
+        set_bands_splitter_state(self.bands_view.bands_splitter.sizes())
         self.library_view._save_library_table_header_state()
         super().closeEvent(event)
 
@@ -173,7 +178,42 @@ class MainWindow(QMainWindow):
     def _on_tab_changed(self, index: int) -> None:
         self.stacked.setCurrentIndex(index)
 
+    def _page_has_unsaved_changes(self, page_index: int) -> bool:
+        """Return True if the page at index has unsaved changes."""
+        widget = self.stacked.widget(page_index)
+        if hasattr(widget, "has_unsaved_changes") and callable(widget.has_unsaved_changes):
+            return widget.has_unsaved_changes()
+        return False
+
+    def _confirm_leave_page_with_unsaved(self, target_index: int) -> bool:
+        """Return True if the user confirms leaving (or no unsaved changes)."""
+        current = self.stacked.currentIndex()
+        if current == target_index:
+            return True
+        if not self._page_has_unsaved_changes(current):
+            return True
+        reply = QMessageBox.question(
+            self,
+            "Unsaved changes",
+            "You have unsaved changes. Are you sure you want to leave?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
+    def _on_nav_row_changed(self, row: int) -> None:
+        if row < 0:
+            return
+        if not self._confirm_leave_page_with_unsaved(row):
+            self.nav_list.blockSignals(True)
+            self.nav_list.setCurrentRow(self.stacked.currentIndex())
+            self.nav_list.blockSignals(False)
+            return
+        self.stacked.setCurrentIndex(row)
+
     def _go_to_page(self, index: int) -> None:
+        if not self._confirm_leave_page_with_unsaved(index):
+            return
         self.nav_list.setCurrentRow(index)
         self.stacked.setCurrentIndex(index)
 

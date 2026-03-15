@@ -113,6 +113,25 @@ def set_splitter_state(sizes: list[int]) -> None:
     save_preferences(prefs)
 
 
+def get_bands_splitter_state() -> list[int] | None:
+    """Saved bands tab splitter state (band list | editor). Returns list of sizes or None."""
+    prefs = load_preferences()
+    v = prefs.get("bands_splitter_state")
+    if isinstance(v, list) and len(v) >= 2:
+        try:
+            return [int(v[0]), int(v[1])]
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_bands_splitter_state(sizes: list[int]) -> None:
+    """Save bands tab splitter state as list of section sizes in pixels."""
+    prefs = load_preferences()
+    prefs["bands_splitter_state"] = sizes
+    save_preferences(prefs)
+
+
 def get_library_table_header_state() -> dict[str, Any] | str | None:
     """
     Saved library table header state. Returns dict with section_sizes, sort_column, sort_order

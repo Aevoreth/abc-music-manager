@@ -22,10 +22,15 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QGroupBox,
     QHeaderView,
+    QSplitter,
+    QListWidget,
+    QListWidgetItem,
+    QPlainTextEdit,
 )
 from PySide6.QtCore import Qt
 
 from ..services.app_state import AppState
+from ..services.preferences import get_bands_splitter_state
 from ..db.band_repo import (
     list_bands,
     add_band,
@@ -33,16 +38,11 @@ from ..db.band_repo import (
     delete_band,
     list_band_members,
     add_band_member,
-    remove_band_member,
     list_band_layouts,
     add_band_layout,
-    update_band_layout,
-    delete_band_layout,
     list_layout_slots,
     set_layout_slot,
     remove_layout_slot,
-    BandRow,
-    BandLayoutRow,
 )
 from ..db.player_repo import (
     list_players,
@@ -54,6 +54,8 @@ from ..db.instrument import get_or_create_instruments_by_names
 from ..db.schema import PLAYER_INSTRUMENTS
 from .player_dialog import open_new_character_dialog, open_edit_character_dialog
 from .diagonal_header import DiagonalHeaderView
+from .band_layout_grid import BandLayoutGridWidget, LayoutCard, SPAWN_X, SPAWN_Y, MAX_CARDS
+from .add_player_dialog import open_add_player_dialog
 
 
 class BandsView(QWidget):
@@ -63,6 +65,9 @@ class BandsView(QWidget):
         self._selected_band_id: int | None = None
         self._selected_layout_id: int | None = None
         self._instrument_name_to_id: dict[str, int] = {}
+        self._loaded_band_name: str = ""
+        self._loaded_band_notes: str = ""
+        self._bands_splitter_restored: bool = False
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_bands_tab(), "Bands")
@@ -72,61 +77,69 @@ class BandsView(QWidget):
     def _build_bands_tab(self) -> QWidget:
         w = QWidget()
         v = QVBoxLayout(w)
-        v.addWidget(QLabel("Bands"))
-        self.band_table = QTableWidget()
-        self.band_table.setColumnCount(2)
-        self.band_table.setHorizontalHeaderLabels(["Name", "Actions"])
-        self.band_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.band_table.itemSelectionChanged.connect(self._on_band_selected)
-        v.addWidget(self.band_table)
-        h = QHBoxLayout()
-        add_band_btn = QPushButton("Add band")
-        add_band_btn.clicked.connect(self._add_band)
-        h.addWidget(add_band_btn)
-        v.addLayout(h)
 
-        self.band_detail = QGroupBox("Band detail")
-        band_detail_layout = QVBoxLayout(self.band_detail)
+        # Top row: Add Band button
+        add_band_btn = QPushButton("Add Band")
+        fm = add_band_btn.fontMetrics()
+        add_band_btn.setFixedWidth(fm.horizontalAdvance("Add Band") + 24)
+        add_band_btn.clicked.connect(self._add_band)
+        v.addWidget(add_band_btn)
+
+        # Splitter: left = band list, right = band editor
+        self.bands_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        self.band_list = QListWidget()
+        self.band_list.setWordWrap(True)
+        self.band_list.setMinimumWidth(120)
+        self.band_list.setMaximumWidth(300)
+        self.band_list.currentRowChanged.connect(self._on_band_selected)
+        self.bands_splitter.addWidget(self.band_list)
+
+        self.band_editor = QWidget()
+        editor_layout = QVBoxLayout(self.band_editor)
+
+        # Save / Delete row
+        btn_row = QHBoxLayout()
+        self.save_band_btn = QPushButton("Save")
+        self.save_band_btn.setFixedWidth(self.save_band_btn.fontMetrics().horizontalAdvance("Save") + 24)
+        self.save_band_btn.clicked.connect(self._save_band)
+        self.delete_band_btn = QPushButton("Delete")
+        self.delete_band_btn.setFixedWidth(self.delete_band_btn.fontMetrics().horizontalAdvance("Delete") + 24)
+        self.delete_band_btn.clicked.connect(self._delete_selected_band)
+        btn_row.addWidget(self.save_band_btn)
+        btn_row.addWidget(self.delete_band_btn)
+        btn_row.addStretch()
+        editor_layout.addLayout(btn_row)
+
+        # Band name
+        editor_layout.addWidget(QLabel("Band Name:"))
         self.band_name_edit = QLineEdit()
         self.band_name_edit.setPlaceholderText("Band name")
-        band_detail_layout.addWidget(QLabel("Name:"))
-        band_detail_layout.addWidget(self.band_name_edit)
-        self.save_band_btn = QPushButton("Save band name")
-        self.save_band_btn.clicked.connect(self._save_band_name)
-        band_detail_layout.addWidget(self.save_band_btn)
+        editor_layout.addWidget(self.band_name_edit)
 
-        band_detail_layout.addWidget(QLabel("Members (players in this band):"))
-        self.members_list = QTableWidget()
-        self.members_list.setColumnCount(2)
-        self.members_list.setHorizontalHeaderLabels(["Player", "Remove"])
-        band_detail_layout.addWidget(self.members_list)
-        self.add_member_btn = QPushButton("Add member")
-        self.add_member_btn.clicked.connect(self._add_band_member)
-        band_detail_layout.addWidget(self.add_member_btn)
+        # Notes
+        editor_layout.addWidget(QLabel("Notes:"))
+        self.band_notes_edit = QPlainTextEdit()
+        self.band_notes_edit.setPlaceholderText("Notes")
+        self.band_notes_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        self.band_notes_edit.setMinimumHeight(100)
+        self.band_notes_edit.setMaximumHeight(150)
+        editor_layout.addWidget(self.band_notes_edit)
 
-        band_detail_layout.addWidget(QLabel("Layouts:"))
-        self.layouts_list = QTableWidget()
-        self.layouts_list.setColumnCount(3)
-        self.layouts_list.setHorizontalHeaderLabels(["Name", "Edit slots", "Delete"])
-        self.layouts_list.itemSelectionChanged.connect(self._on_layout_selected)
-        band_detail_layout.addWidget(self.layouts_list)
-        self.add_layout_btn = QPushButton("Add layout")
-        self.add_layout_btn.clicked.connect(self._add_layout)
-        band_detail_layout.addWidget(self.add_layout_btn)
+        # Grid
+        self.layout_grid = BandLayoutGridWidget()
+        self.layout_grid.setMinimumSize(300, 200)
+        editor_layout.addWidget(self.layout_grid, 1)
+        self.layout_grid.get_add_player_button().clicked.connect(self._add_player_to_layout)
+        self.layout_grid.cardMoved.connect(self._on_card_moved)
+        self.layout_grid.cardDeleted.connect(self._on_card_deleted)
+        self.layout_grid.cardEditRequested.connect(self._on_card_edit_requested)
 
-        self.layout_slots_group = QGroupBox("Layout slots (position player cards)")
-        self.layout_slots_layout = QVBoxLayout(self.layout_slots_group)
-        self.slots_table = QTableWidget()
-        self.slots_table.setColumnCount(4)
-        self.slots_table.setHorizontalHeaderLabels(["Player", "X", "Y", "Remove"])
-        self.layout_slots_layout.addWidget(self.slots_table)
-        self.add_slot_btn = QPushButton("Add slot")
-        self.add_slot_btn.clicked.connect(self._add_slot)
-        self.layout_slots_layout.addWidget(self.add_slot_btn)
-        band_detail_layout.addWidget(self.layout_slots_group)
+        self.bands_splitter.addWidget(self.band_editor)
+        self.bands_splitter.setStretchFactor(1, 1)
+        v.addWidget(self.bands_splitter)
 
-        v.addWidget(self.band_detail)
-        self.band_detail.setEnabled(False)
+        self.band_editor.setEnabled(False)
         return w
 
     def _build_players_tab(self) -> QWidget:
@@ -209,185 +222,162 @@ class BandsView(QWidget):
         v.addWidget(self.player_table)
         return w
 
-    def _refresh_bands(self) -> None:
+    def _refresh_band_list(self) -> None:
         bands = list_bands(self.app_state.conn)
-        self.band_table.setRowCount(len(bands))
-        for i, b in enumerate(bands):
-            self.band_table.setItem(i, 0, QTableWidgetItem(b.name))
-            btn = QPushButton("Delete")
-            btn.clicked.connect(lambda checked=False, band=b: self._delete_band(band))
-            self.band_table.setCellWidget(i, 1, btn)
-        self.band_table.setRowCount(len(bands))
+        self.band_list.clear()
+        for b in bands:
+            self.band_list.addItem(QListWidgetItem(b.name))
+        if bands and self.band_list.currentRow() < 0:
+            self.band_list.setCurrentRow(0)
 
-    def _on_band_selected(self) -> None:
-        row = self.band_table.currentRow()
+    def _on_band_selected(self, row: int) -> None:
         if row < 0:
             self._selected_band_id = None
-            self.band_detail.setEnabled(False)
+            self._selected_layout_id = None
+            self._loaded_band_name = ""
+            self._loaded_band_notes = ""
+            self.band_editor.setEnabled(False)
             return
         bands = list_bands(self.app_state.conn)
         if row >= len(bands):
             return
-        self._selected_band_id = bands[row].id
-        self.band_detail.setEnabled(True)
-        self.band_name_edit.setText(bands[row].name)
-        self._refresh_members()
-        self._refresh_layouts()
-        self._selected_layout_id = None
-        self.layout_slots_group.setEnabled(False)
+        band = bands[row]
+        self._selected_band_id = band.id
+        self._loaded_band_name = band.name
+        self._loaded_band_notes = band.notes or ""
+        self.band_editor.setEnabled(True)
+        self.band_name_edit.setText(band.name)
+        self.band_notes_edit.setPlainText(band.notes or "")
 
-    def _refresh_members(self) -> None:
-        if self._selected_band_id is None:
-            return
-        player_ids = list_band_members(self.app_state.conn, self._selected_band_id)
-        players = {p.id: p.name for p in list_players(self.app_state.conn)}
-        self.members_list.setRowCount(len(player_ids))
-        for i, pid in enumerate(player_ids):
-            self.members_list.setItem(i, 0, QTableWidgetItem(players.get(pid, str(pid))))
-            btn = QPushButton("Remove")
-            btn.clicked.connect(lambda checked=False, p=pid: self._remove_member(p))
-            self.members_list.setCellWidget(i, 1, btn)
-        self.members_list.setRowCount(len(player_ids))
+        layouts = list_band_layouts(self.app_state.conn, band.id)
+        if layouts:
+            self._selected_layout_id = layouts[0].id
+        else:
+            self._selected_layout_id = add_band_layout(self.app_state.conn, band.id, "Default")
 
-    def _refresh_layouts(self) -> None:
-        if self._selected_band_id is None:
-            return
-        layouts = list_band_layouts(self.app_state.conn, self._selected_band_id)
-        self.layouts_list.setRowCount(len(layouts))
-        for i, lay in enumerate(layouts):
-            self.layouts_list.setItem(i, 0, QTableWidgetItem(lay.name))
-            edit_btn = QPushButton("Edit slots")
-            edit_btn.clicked.connect(lambda checked=False, l=lay: self._edit_layout_slots(l))
-            self.layouts_list.setCellWidget(i, 1, edit_btn)
-            del_btn = QPushButton("Delete")
-            del_btn.clicked.connect(lambda checked=False, l=lay: self._delete_layout(l))
-            self.layouts_list.setCellWidget(i, 2, del_btn)
-        self.layouts_list.setRowCount(len(layouts))
+        self._load_grid_from_layout()
 
-    def _on_layout_selected(self) -> None:
-        row = self.layouts_list.currentRow()
-        if row < 0 or self._selected_band_id is None:
-            self._selected_layout_id = None
-            self.layout_slots_group.setEnabled(False)
-            return
-        layouts = list_band_layouts(self.app_state.conn, self._selected_band_id)
-        if row >= len(layouts):
-            return
-        self._selected_layout_id = layouts[row].id
-        self.layout_slots_group.setEnabled(True)
-        self._refresh_slots()
-
-    def _refresh_slots(self) -> None:
+    def _load_grid_from_layout(self) -> None:
         if self._selected_layout_id is None:
+            self.layout_grid.set_cards([])
             return
         slots = list_layout_slots(self.app_state.conn, self._selected_layout_id)
         players = {p.id: p.name for p in list_players(self.app_state.conn)}
-        self.slots_table.setRowCount(len(slots))
-        for i, s in enumerate(slots):
-            self.slots_table.setItem(i, 0, QTableWidgetItem(players.get(s.player_id, str(s.player_id))))
-            self.slots_table.setItem(i, 1, QTableWidgetItem(str(s.x)))
-            self.slots_table.setItem(i, 2, QTableWidgetItem(str(s.y)))
-            btn = QPushButton("Remove")
-            btn.clicked.connect(lambda checked=False, slot=s: self._remove_slot(slot))
-            self.slots_table.setCellWidget(i, 3, btn)
-        self.slots_table.setRowCount(len(slots))
+        cards = [
+            LayoutCard(
+                player_id=s.player_id,
+                player_name=players.get(s.player_id, str(s.player_id)),
+                x=s.x,
+                y=s.y,
+            )
+            for s in slots
+        ]
+        self.layout_grid.set_cards(cards)
 
     def _add_band(self) -> None:
-        from PySide6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "New band", "Band name:")
-        if ok and name and name.strip():
-            add_band(self.app_state.conn, name.strip())
-            self._refresh_bands()
-
-    def _save_band_name(self) -> None:
-        if self._selected_band_id is None:
-            return
-        name = self.band_name_edit.text().strip()
-        if name:
-            update_band(self.app_state.conn, self._selected_band_id, name)
-            self._refresh_bands()
-
-    def _delete_band(self, band: BandRow) -> None:
-        if QMessageBox.question(self, "Confirm", f"Delete band '{band.name}'?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-            delete_band(self.app_state.conn, band.id)
-            self._selected_band_id = None
-            self._refresh_bands()
-
-    def _add_band_member(self) -> None:
-        if self._selected_band_id is None:
-            return
-        players = list_players(self.app_state.conn)
-        existing = set(list_band_members(self.app_state.conn, self._selected_band_id))
-        available = [p for p in players if p.id not in existing]
-        if not available:
-            QMessageBox.information(self, "Info", "All players are already in this band.")
-            return
-        from PySide6.QtWidgets import QInputDialog
-        names = [p.name for p in available]
-        name, ok = QInputDialog.getItem(self, "Add member", "Player:", names, 0, False)
-        if ok and name:
-            pid = next(p.id for p in available if p.name == name)
-            add_band_member(self.app_state.conn, self._selected_band_id, pid)
-            self._refresh_members()
-
-    def _remove_member(self, player_id: int) -> None:
-        if self._selected_band_id is None:
-            return
-        remove_band_member(self.app_state.conn, self._selected_band_id, player_id)
-        self._refresh_members()
-
-    def _add_layout(self) -> None:
-        if self._selected_band_id is None:
-            return
-        from PySide6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "New layout", "Layout name:")
-        if ok and name and name.strip():
-            add_band_layout(self.app_state.conn, self._selected_band_id, name.strip())
-            self._refresh_layouts()
-
-    def _edit_layout_slots(self, layout: BandLayoutRow) -> None:
-        self._selected_layout_id = layout.id
-        self.layout_slots_group.setEnabled(True)
-        self._refresh_slots()
-        for i in range(self.layouts_list.rowCount()):
-            if self.layouts_list.item(i, 0).text() == layout.name:
-                self.layouts_list.selectRow(i)
+        bands = list_bands(self.app_state.conn)
+        existing = sum(1 for b in bands if b.name.startswith("New Band"))
+        name = f"New Band {existing + 1}"
+        add_band(self.app_state.conn, name)
+        self._refresh_band_list()
+        for i, b in enumerate(list_bands(self.app_state.conn)):
+            if b.name == name:
+                self.band_list.setCurrentRow(i)
                 break
 
-    def _delete_layout(self, layout: BandLayoutRow) -> None:
-        if QMessageBox.question(self, "Confirm", f"Delete layout '{layout.name}'?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-            delete_band_layout(self.app_state.conn, layout.id)
-            self._selected_layout_id = None
-            self._refresh_layouts()
+    def _save_band(self) -> None:
+        if self._selected_band_id is None or self._selected_layout_id is None:
+            return
+        name = self.band_name_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Save", "Band name cannot be empty.")
+            return
+        notes = self.band_notes_edit.toPlainText().strip() or None
 
-    def _add_slot(self) -> None:
-        if self._selected_layout_id is None:
-            return
-        players = list_players(self.app_state.conn)
-        band_id = next((b.id for b in list_bands(self.app_state.conn) for lay in list_band_layouts(self.app_state.conn, b.id) if lay.id == self._selected_layout_id), None)
-        if band_id is None:
-            return
-        member_ids = set(list_band_members(self.app_state.conn, band_id))
+        has_overlap = self.layout_grid.has_any_overlap()
+        if has_overlap:
+            QMessageBox.warning(
+                self,
+                "Layout overlap",
+                "Some cards overlap. Save is allowed, but consider rearranging.",
+                QMessageBox.StandardButton.Ok,
+            )
+
+        update_band(self.app_state.conn, self._selected_band_id, name, notes=notes)
+
+        cards = self.layout_grid.get_cards()
         existing_slots = list_layout_slots(self.app_state.conn, self._selected_layout_id)
         existing_player_ids = {s.player_id for s in existing_slots}
-        available = [p for p in players if p.id in member_ids and p.id not in existing_player_ids]
-        if not available:
-            QMessageBox.information(self, "Info", "No more players to add, or add members to the band first.")
-            return
-        from PySide6.QtWidgets import QInputDialog
-        names = [p.name for p in available]
-        name, ok = QInputDialog.getItem(self, "Add slot", "Player:", names, 0, False)
-        if ok and name:
-            pid = next(p.id for p in available if p.name == name)
-            x, okx = QInputDialog.getInt(self, "Position", "X:", 0, 0, 100)
-            y, oky = QInputDialog.getInt(self, "Position", "Y:", 0, 0, 100)
-            if okx and oky:
-                set_layout_slot(self.app_state.conn, self._selected_layout_id, pid, x, y)
-                self._refresh_slots()
+        for c in cards:
+            add_band_member(self.app_state.conn, self._selected_band_id, c.player_id)
+            set_layout_slot(self.app_state.conn, self._selected_layout_id, c.player_id, c.x, c.y)
+        for s in existing_slots:
+            if s.player_id not in {c.player_id for c in cards}:
+                remove_layout_slot(self.app_state.conn, self._selected_layout_id, s.player_id)
 
-    def _remove_slot(self, slot) -> None:
-        remove_layout_slot(self.app_state.conn, slot.band_layout_id, slot.player_id)
-        self._refresh_slots()
+        self._loaded_band_name = self.band_name_edit.text().strip()
+        self._loaded_band_notes = self.band_notes_edit.toPlainText().strip() or ""
+        self._refresh_band_list()
+        self._load_grid_from_layout()
+
+    def has_unsaved_changes(self) -> bool:
+        """Return True if the Bands tab has unsaved edits (name or notes)."""
+        if not self.band_editor.isEnabled() or self._selected_band_id is None:
+            return False
+        name = self.band_name_edit.text().strip()
+        notes = self.band_notes_edit.toPlainText().strip() or ""
+        return name != self._loaded_band_name or notes != self._loaded_band_notes
+
+    def _delete_selected_band(self) -> None:
+        if self._selected_band_id is None:
+            return
+        bands = list_bands(self.app_state.conn)
+        band = next((b for b in bands if b.id == self._selected_band_id), None)
+        if band and QMessageBox.question(
+            self, "Confirm", f"Delete band '{band.name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) == QMessageBox.StandardButton.Yes:
+            delete_band(self.app_state.conn, band.id)
+            self._selected_band_id = None
+            self._selected_layout_id = None
+            self._loaded_band_name = ""
+            self._loaded_band_notes = ""
+            self._refresh_band_list()
+            self.band_editor.setEnabled(False)
+
+    def _add_player_to_layout(self) -> None:
+        if self._selected_band_id is None or self._selected_layout_id is None:
+            return
+        cards = self.layout_grid.get_cards()
+        if len(cards) >= MAX_CARDS:
+            QMessageBox.information(self, "Add Player", f"Maximum {MAX_CARDS} cards allowed.")
+            return
+        exclude = {c.player_id for c in cards}
+        result = open_add_player_dialog(self.app_state, exclude, self)
+        if result:
+            pid, pname = result
+            add_band_member(self.app_state.conn, self._selected_band_id, pid)
+            set_layout_slot(self.app_state.conn, self._selected_layout_id, pid, SPAWN_X, SPAWN_Y)
+            card = LayoutCard(player_id=pid, player_name=pname, x=SPAWN_X, y=SPAWN_Y)
+            self.layout_grid.add_card(card)
+
+    def _on_card_moved(self, player_id: int, new_x: int, new_y: int) -> None:
+        if self._selected_layout_id is None:
+            return
+        set_layout_slot(self.app_state.conn, self._selected_layout_id, player_id, new_x, new_y)
+
+    def _on_card_deleted(self, player_id: int) -> None:
+        if self._selected_layout_id is None:
+            return
+        remove_layout_slot(self.app_state.conn, self._selected_layout_id, player_id)
+        self.layout_grid.remove_card(player_id)
+
+    def _on_card_edit_requested(self, player_id: int) -> None:
+        players = list_players(self.app_state.conn)
+        player = next((p for p in players if p.id == player_id), None)
+        if player and open_edit_character_dialog(self.app_state, player, self):
+            self._load_grid_from_layout()
 
     def _add_player(self) -> None:
         if open_new_character_dialog(self.app_state, self):
@@ -475,5 +465,10 @@ class BandsView(QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        self._refresh_bands()
+        self._refresh_band_list()
         self._refresh_players()
+        if not self._bands_splitter_restored:
+            self._bands_splitter_restored = True
+            saved = get_bands_splitter_state()
+            if saved:
+                self.bands_splitter.setSizes(saved)
