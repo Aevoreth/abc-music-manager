@@ -309,6 +309,16 @@ def _migrate_folder_rule_include_in_export(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_band_notes(conn: sqlite3.Connection) -> None:
+    """Add notes column to Band table if missing."""
+    cur = conn.execute("PRAGMA table_info(Band)")
+    columns = [row[1] for row in cur.fetchall()]
+    if "notes" in columns:
+        return
+    conn.execute("ALTER TABLE Band ADD COLUMN notes TEXT")
+    conn.commit()
+
+
 # 24 LOTRO instruments for Players tab possession grid (user-specified order).
 # Exported for use by player_repo and bands_view.
 PLAYER_INSTRUMENTS = [
@@ -374,6 +384,7 @@ def init_database(db_path: Path | None = None) -> sqlite3.Connection:
     create_schema(conn)
     _migrate_status_drop_is_active(conn)
     _migrate_folder_rule_include_in_export(conn)
+    _migrate_band_notes(conn)
     _migrate_player_level_class(conn)
     seed_defaults(conn)
     seed_player_instruments(conn)

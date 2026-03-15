@@ -15,6 +15,7 @@ def _now() -> str:
 class BandRow:
     id: int
     name: str
+    notes: str | None
     created_at: str
     updated_at: str
 
@@ -42,19 +43,34 @@ class BandLayoutSlotRow:
 
 
 def list_bands(conn: sqlite3.Connection) -> list[BandRow]:
-    cur = conn.execute("SELECT id, name, created_at, updated_at FROM Band ORDER BY name")
-    return [BandRow(id=r[0], name=r[1], created_at=r[2], updated_at=r[3]) for r in cur.fetchall()]
+    cur = conn.execute("SELECT id, name, created_at, updated_at, notes FROM Band ORDER BY name")
+    return [BandRow(id=r[0], name=r[1], notes=r[4], created_at=r[2], updated_at=r[3]) for r in cur.fetchall()]
 
 
-def add_band(conn: sqlite3.Connection, name: str) -> int:
+def add_band(conn: sqlite3.Connection, name: str, notes: str | None = None) -> int:
     now = _now()
-    cur = conn.execute("INSERT INTO Band (name, created_at, updated_at) VALUES (?, ?, ?)", (name.strip(), now, now))
+    cur = conn.execute(
+        "INSERT INTO Band (name, notes, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        (name.strip(), notes or None, now, now),
+    )
     conn.commit()
     return cur.lastrowid
 
 
-def update_band(conn: sqlite3.Connection, band_id: int, name: str) -> None:
-    conn.execute("UPDATE Band SET name = ?, updated_at = ? WHERE id = ?", (name.strip(), _now(), band_id))
+def update_band(
+    conn: sqlite3.Connection,
+    band_id: int,
+    name: str,
+    notes: str | None = None,
+) -> None:
+    now = _now()
+    if notes is not None:
+        conn.execute(
+            "UPDATE Band SET name = ?, notes = ?, updated_at = ? WHERE id = ?",
+            (name.strip(), notes or None, now, band_id),
+        )
+    else:
+        conn.execute("UPDATE Band SET name = ?, updated_at = ? WHERE id = ?", (name.strip(), now, band_id))
     conn.commit()
 
 
@@ -140,8 +156,8 @@ def set_layout_slot(
     player_id: int,
     x: int,
     y: int,
-    width_units: int = 7,
-    height_units: int = 5,
+    width_units: int = 9,
+    height_units: int = 7,
 ) -> None:
     """Set or update one slot (one player per slot). Remove any existing slot for this player in this layout first."""
     now = _now()
