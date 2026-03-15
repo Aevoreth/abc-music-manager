@@ -38,7 +38,7 @@ class LayoutCard:
     y: int
     part_number: str = "###"
     part_name: str = "(Part Name)"
-    instrument_name: str = "Made for Instrument"
+    instrument_name: str = "(Made for Instrument)"
 
 
 def _rects_overlap(

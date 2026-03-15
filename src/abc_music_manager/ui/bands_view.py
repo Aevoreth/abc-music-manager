@@ -98,7 +98,9 @@ class BandsView(QWidget):
         self.band_editor = QWidget()
         editor_layout = QVBoxLayout(self.band_editor)
 
-        # Save / Delete row
+        # Top row: left = Save/Delete/Name, right = Notes
+        top_row = QHBoxLayout()
+        left_col = QVBoxLayout()
         btn_row = QHBoxLayout()
         self.save_band_btn = QPushButton("Save")
         self.save_band_btn.setFixedWidth(self.save_band_btn.fontMetrics().horizontalAdvance("Save") + 24)
@@ -109,22 +111,23 @@ class BandsView(QWidget):
         btn_row.addWidget(self.save_band_btn)
         btn_row.addWidget(self.delete_band_btn)
         btn_row.addStretch()
-        editor_layout.addLayout(btn_row)
-
-        # Band name
-        editor_layout.addWidget(QLabel("Band Name:"))
+        left_col.addLayout(btn_row)
+        left_col.addWidget(QLabel("Band Name:"))
         self.band_name_edit = QLineEdit()
         self.band_name_edit.setPlaceholderText("Band name")
-        editor_layout.addWidget(self.band_name_edit)
+        left_col.addWidget(self.band_name_edit)
 
-        # Notes
-        editor_layout.addWidget(QLabel("Notes:"))
+        right_col = QVBoxLayout()
+        right_col.addWidget(QLabel("Notes:"))
         self.band_notes_edit = QPlainTextEdit()
         self.band_notes_edit.setPlaceholderText("Notes")
         self.band_notes_edit.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
-        self.band_notes_edit.setMinimumHeight(100)
-        self.band_notes_edit.setMaximumHeight(150)
-        editor_layout.addWidget(self.band_notes_edit)
+        self.band_notes_edit.setFixedHeight(75)
+        right_col.addWidget(self.band_notes_edit)
+
+        top_row.addLayout(left_col)
+        top_row.addLayout(right_col)
+        editor_layout.addLayout(top_row)
 
         # Grid
         self.layout_grid = BandLayoutGridWidget()
