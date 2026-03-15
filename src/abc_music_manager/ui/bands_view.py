@@ -64,6 +64,8 @@ class BandsView(QWidget):
         self._selected_band_id: int | None = None
         self._selected_layout_id: int | None = None
         self._instrument_name_to_id: dict[str, int] = {}
+        self._loaded_band_name: str = ""
+        self._loaded_band_notes: str = ""
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_bands_tab(), "Bands")
@@ -230,6 +232,8 @@ class BandsView(QWidget):
         if row < 0:
             self._selected_band_id = None
             self._selected_layout_id = None
+            self._loaded_band_name = ""
+            self._loaded_band_notes = ""
             self.band_editor.setEnabled(False)
             return
         bands = list_bands(self.app_state.conn)
@@ -237,6 +241,8 @@ class BandsView(QWidget):
             return
         band = bands[row]
         self._selected_band_id = band.id
+        self._loaded_band_name = band.name
+        self._loaded_band_notes = band.notes or ""
         self.band_editor.setEnabled(True)
         self.band_name_edit.setText(band.name)
         self.band_notes_edit.setPlainText(band.notes or "")
@@ -307,8 +313,18 @@ class BandsView(QWidget):
             if s.player_id not in {c.player_id for c in cards}:
                 remove_layout_slot(self.app_state.conn, self._selected_layout_id, s.player_id)
 
+        self._loaded_band_name = self.band_name_edit.text().strip()
+        self._loaded_band_notes = self.band_notes_edit.toPlainText().strip() or ""
         self._refresh_band_list()
         self._load_grid_from_layout()
+
+    def has_unsaved_changes(self) -> bool:
+        """Return True if the Bands tab has unsaved edits (name or notes)."""
+        if not self.band_editor.isEnabled() or self._selected_band_id is None:
+            return False
+        name = self.band_name_edit.text().strip()
+        notes = self.band_notes_edit.toPlainText().strip() or ""
+        return name != self._loaded_band_name or notes != self._loaded_band_notes
 
     def _delete_selected_band(self) -> None:
         if self._selected_band_id is None:
@@ -323,6 +339,8 @@ class BandsView(QWidget):
             delete_band(self.app_state.conn, band.id)
             self._selected_band_id = None
             self._selected_layout_id = None
+            self._loaded_band_name = ""
+            self._loaded_band_notes = ""
             self._refresh_band_list()
             self.band_editor.setEnabled(False)
 

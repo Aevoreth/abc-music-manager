@@ -25,7 +25,7 @@ X_MIN, X_MAX = -145, 145
 Y_MIN, Y_MAX = -105, 105
 MAX_CARDS = 24
 SPAWN_X, SPAWN_Y = -4, -3
-PIXELS_PER_UNIT = 14
+PIXELS_PER_UNIT = 15
 
 
 @dataclass
@@ -37,8 +37,8 @@ class LayoutCard:
     x: int
     y: int
     part_number: str = "###"
-    part_name: str = "Misty Mountain Harp"
-    instrument_name: str = "Misty Mountain Harp"
+    part_name: str = "(Part Name)"
+    instrument_name: str = "Made for Instrument"
 
 
 def _rects_overlap(
@@ -206,35 +206,44 @@ class BandLayoutGridWidget(QWidget):
             painter.setBrush(QColor(COLOR_SURFACE))
             painter.drawRoundedRect(rect, 4, 4)
 
-            # Card content
+            # Card content - all text centered
             painter.setPen(QColor(COLOR_ON_SURFACE))
             margin = 4
             inner = rect.adjusted(margin, margin, -margin, -margin)
+            center = Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop
 
-            # Top row: player name (simplified - no Edit/Delete buttons drawn, just text)
             font = painter.font()
             font.setPointSize(font.pointSize())
-            painter.setFont(font)
-            painter.drawText(inner, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft, card.player_name)
+            fm_reg = QFontMetrics(font)
+            y = inner.top()
 
-            # Part number (large)
+            # Player name
+            painter.setFont(font)
+            line_h = fm_reg.height()
+            painter.drawText(QRect(inner.left(), y, inner.width(), line_h), center, card.player_name)
+            y += line_h + 2
+
+            # Part number (large, bold)
             big_font = QFont(font)
-            big_font.setPointSize(font.pointSize() + 4)
+            big_font.setPointSize(font.pointSize() + 14)
+            big_font.setWeight(QFont.Weight.Bold)
             painter.setFont(big_font)
-            fm = QFontMetrics(big_font)
-            part_num_rect = inner.adjusted(0, fm.height() + 2, 0, 0)
-            painter.drawText(part_num_rect, Qt.AlignmentFlag.AlignLeft, card.part_number)
+            fm_big = QFontMetrics(big_font)
+            line_h = fm_big.height()
+            painter.drawText(QRect(inner.left(), y, inner.width(), line_h), center, card.part_number)
+            y += line_h + 2
 
             # Instrument / part name
             painter.setFont(font)
-            inst_rect = inner.adjusted(0, fm.height() * 2 + 6, 0, 0)
-            painter.drawText(inst_rect, Qt.AlignmentFlag.AlignLeft, card.instrument_name)
+            line_h = fm_reg.height()
+            painter.drawText(QRect(inner.left(), y, inner.width(), line_h), center, card.instrument_name)
+            y += line_h + 2
 
+            # Part name (slightly smaller)
             small_font = QFont(font)
             small_font.setPointSize(max(8, font.pointSize() - 1))
             painter.setFont(small_font)
-            part_rect = inner.adjusted(0, fm.height() * 3 + 10, 0, 0)
-            painter.drawText(part_rect, Qt.AlignmentFlag.AlignLeft, card.part_name)
+            painter.drawText(QRect(inner.left(), y, inner.width(), inner.bottom() - y), center, card.part_name)
 
         self._add_player_btn.raise_()
 
