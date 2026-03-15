@@ -309,6 +309,61 @@ def _migrate_folder_rule_include_in_export(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+# 24 LOTRO instruments for Players tab possession grid (user-specified order).
+# Exported for use by player_repo and bands_view.
+PLAYER_INSTRUMENTS = [
+    "Basic Fiddle",
+    "Student Fiddle",
+    "Bardic Fiddle",
+    "Lonely Mountain Fiddle",
+    "Sprightly Fiddle",
+    "Traveler's Trusty Fiddle",
+    "Basic Bassoon",
+    "Lonely Mountain Bassoon",
+    "Brusque Bassoon",
+    "Basic Flute",
+    "Basic Horn",
+    "Basic Clarinet",
+    "Basic Bagpipe",
+    "Basic Pibgorn",
+    "Basic Harp",
+    "Misty Mountain Harp",
+    "Basic Lute",
+    "Lute of Ages",
+    "Basic Theorbo",
+    "Basic Drum",
+    "Basic Cowbell",
+    "Moor Cowbell",
+    "Jaunty Hand-Knells",
+]
+
+
+def _migrate_player_level_class(conn: sqlite3.Connection) -> None:
+    """Add level and class columns to Player table if missing."""
+    cur = conn.execute("PRAGMA table_info(Player)")
+    columns = [row[1] for row in cur.fetchall()]
+    if "level" not in columns:
+        conn.execute("ALTER TABLE Player ADD COLUMN level INTEGER")
+        conn.commit()
+    if "class" not in columns:
+        conn.execute("ALTER TABLE Player ADD COLUMN class TEXT")
+        conn.commit()
+
+
+def seed_player_instruments(conn: sqlite3.Connection) -> None:
+    """Ensure all 24 LOTRO player instruments exist in Instrument table."""
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    for name in PLAYER_INSTRUMENTS:
+        cur = conn.execute("SELECT id FROM Instrument WHERE name = ?", (name,))
+        if cur.fetchone() is None:
+            conn.execute(
+                "INSERT INTO Instrument (name, alternative_names, created_at, updated_at) VALUES (?, NULL, ?, ?)",
+                (name, now, now),
+            )
+    conn.commit()
+
+
 def init_database(db_path: Path | None = None) -> sqlite3.Connection:
     """
     Create or open the database at db_path (default: get_db_path()), create schema, run migrations, seed defaults.
@@ -319,6 +374,8 @@ def init_database(db_path: Path | None = None) -> sqlite3.Connection:
     create_schema(conn)
     _migrate_status_drop_is_active(conn)
     _migrate_folder_rule_include_in_export(conn)
+    _migrate_player_level_class(conn)
     seed_defaults(conn)
+    seed_player_instruments(conn)
     _backfill_song_status_ids(conn)
     return conn

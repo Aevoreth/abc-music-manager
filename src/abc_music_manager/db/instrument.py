@@ -56,3 +56,14 @@ def list_instruments(conn: sqlite3.Connection) -> list[tuple[int, str]]:
     """Return (id, name) for all instruments, for dropdowns."""
     cur = conn.execute("SELECT id, name FROM Instrument ORDER BY name")
     return cur.fetchall()
+
+
+def get_or_create_instruments_by_names(
+    conn: sqlite3.Connection, names: list[str]
+) -> dict[str, int]:
+    """Return {name: instrument_id} for the given names, creating any that don't exist."""
+    result: dict[str, int] = {}
+    for name in names:
+        if name and name.strip():
+            result[name] = _get_or_create_by_name(conn, name.strip())
+    return result

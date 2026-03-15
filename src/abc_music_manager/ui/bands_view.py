@@ -5,6 +5,8 @@ REQUIREMENTS §5.
 
 from __future__ import annotations
 
+from math import sqrt
+
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -17,10 +19,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QComboBox,
     QSpinBox,
-    QCheckBox,
     QMessageBox,
-    QDialog,
-    QFormLayout,
     QGroupBox,
     QHeaderView,
 )
@@ -47,15 +46,14 @@ from ..db.band_repo import (
 )
 from ..db.player_repo import (
     list_players,
-    add_player,
-    update_player,
     delete_player,
-    list_player_instruments,
-    set_player_instrument,
-    remove_player_instrument,
+    list_player_instruments_bulk,
     PlayerRow,
 )
-from ..db.instrument import list_instruments
+from ..db.instrument import get_or_create_instruments_by_names
+from ..db.schema import PLAYER_INSTRUMENTS
+from .player_dialog import open_new_character_dialog, open_edit_character_dialog
+from .diagonal_header import DiagonalHeaderView
 
 
 class BandsView(QWidget):
@@ -64,7 +62,7 @@ class BandsView(QWidget):
         self.app_state = app_state
         self._selected_band_id: int | None = None
         self._selected_layout_id: int | None = None
-        self._selected_player_id: int | None = None
+        self._instrument_name_to_id: dict[str, int] = {}
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_bands_tab(), "Bands")
@@ -134,28 +132,81 @@ class BandsView(QWidget):
     def _build_players_tab(self) -> QWidget:
         w = QWidget()
         v = QVBoxLayout(w)
-        v.addWidget(QLabel("Players"))
-        self.player_table = QTableWidget()
-        self.player_table.setColumnCount(2)
-        self.player_table.setHorizontalHeaderLabels(["Name", "Actions"])
-        self.player_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.player_table.itemSelectionChanged.connect(self._on_player_selected)
-        v.addWidget(self.player_table)
-        add_pl_btn = QPushButton("Add player")
-        add_pl_btn.clicked.connect(self._add_player)
-        v.addWidget(add_pl_btn)
+        # Filter row
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("Name:"))
+        self.player_name_filter = QLineEdit()
+        self.player_name_filter.setPlaceholderText("Filter by name")
+        self.player_name_filter.setClearButtonEnabled(True)
+        self.player_name_filter.setMaximumWidth(180)
+        self.player_name_filter.textChanged.connect(self._apply_player_filters)
+        filter_row.addWidget(self.player_name_filter)
+        filter_row.addWidget(QLabel("Level:"))
+        self.player_level_min = QSpinBox()
+        self.player_level_min.setRange(0, 150)
+        self.player_level_min.setSpecialValueText("—")
+        self.player_level_min.setValue(0)
+        self.player_level_min.valueChanged.connect(self._apply_player_filters)
+        filter_row.addWidget(self.player_level_min)
+        filter_row.addWidget(QLabel("to"))
+        self.player_level_max = QSpinBox()
+        self.player_level_max.setRange(0, 150)
+        self.player_level_max.setSpecialValueText("—")
+        self.player_level_max.setValue(0)
+        self.player_level_max.valueChanged.connect(self._apply_player_filters)
+        filter_row.addWidget(self.player_level_max)
+        filter_row.addWidget(QLabel("Class:"))
+        self.player_class_filter = QLineEdit()
+        self.player_class_filter.setPlaceholderText("Filter by class")
+        self.player_class_filter.setClearButtonEnabled(True)
+        self.player_class_filter.setMaximumWidth(120)
+        self.player_class_filter.textChanged.connect(self._apply_player_filters)
+        filter_row.addWidget(self.player_class_filter)
+        filter_row.addWidget(QLabel("Instrument:"))
+        self.player_instrument_filter = QComboBox()
+        self.player_instrument_filter.addItem("All", None)
+        for name in PLAYER_INSTRUMENTS:
+            self.player_instrument_filter.addItem(name, name)
+        self.player_instrument_filter.currentIndexChanged.connect(self._apply_player_filters)
+        filter_row.addWidget(self.player_instrument_filter)
+        reset_btn = QPushButton("Reset Filters")
+        reset_btn.clicked.connect(self._reset_player_filters)
+        filter_row.addWidget(reset_btn)
+        filter_row.addStretch()
+        v.addLayout(filter_row)
 
-        self.player_detail = QGroupBox("Player detail — instruments & proficiency")
-        pd_layout = QVBoxLayout(self.player_detail)
-        self.player_instruments_table = QTableWidget()
-        self.player_instruments_table.setColumnCount(4)
-        self.player_instruments_table.setHorizontalHeaderLabels(["Instrument", "Has instrument", "Proficiency", "Remove"])
-        pd_layout.addWidget(self.player_instruments_table)
-        self.add_instrument_btn = QPushButton("Add instrument")
-        self.add_instrument_btn.clicked.connect(self._add_player_instrument)
-        pd_layout.addWidget(self.add_instrument_btn)
-        v.addWidget(self.player_detail)
-        self.player_detail.setEnabled(False)
+        # New Character button (width = text width)
+        self.new_character_btn = QPushButton("New Character")
+        self.new_character_btn.clicked.connect(self._add_player)
+        fm = self.new_character_btn.fontMetrics()
+        self.new_character_btn.setFixedWidth(fm.horizontalAdvance("New Character") + 24)
+        v.addWidget(self.new_character_btn)
+
+        # Players table
+        num_instruments = len(PLAYER_INSTRUMENTS)
+        num_cols = 4 + num_instruments  # Name, Level, Class, instruments..., Actions
+        self.player_table = QTableWidget()
+        self.player_table.setColumnCount(num_cols)
+        headers = ["Name", "Level", "Class"] + list(PLAYER_INSTRUMENTS) + ["Actions"]
+        self.player_table.setHorizontalHeaderLabels(headers)
+        header = DiagonalHeaderView(
+            self.player_table,
+            diagonal_start=3,
+            diagonal_end=3 + num_instruments - 1,
+        )
+        self.player_table.setHorizontalHeader(header)
+        # Ensure header has enough height for diagonal text (longest instrument name)
+        fm = header.fontMetrics()
+        max_diag = max(
+            (fm.horizontalAdvance(name) + fm.height()) / sqrt(2)
+            for name in PLAYER_INSTRUMENTS
+        )
+        header.setMinimumHeight(int(max_diag) + 12)
+        for col in range(3, 3 + num_instruments):
+            self.player_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Fixed)
+            self.player_table.horizontalHeader().resizeSection(col, 26)
+        self.player_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        v.addWidget(self.player_table)
         return w
 
     def _refresh_bands(self) -> None:
@@ -339,91 +390,88 @@ class BandsView(QWidget):
         self._refresh_slots()
 
     def _add_player(self) -> None:
-        from PySide6.QtWidgets import QInputDialog
-        name, ok = QInputDialog.getText(self, "New player", "Player name:")
-        if ok and name and name.strip():
-            add_player(self.app_state.conn, name.strip())
+        if open_new_character_dialog(self.app_state, self):
             self._refresh_players()
 
-    def _on_player_selected(self) -> None:
-        row = self.player_table.currentRow()
-        if row < 0:
-            self._selected_player_id = None
-            self.player_detail.setEnabled(False)
-            return
-        players = list_players(self.app_state.conn)
-        if row >= len(players):
-            return
-        self._selected_player_id = players[row].id
-        self.player_detail.setEnabled(True)
-        self._refresh_player_instruments()
+    def _reset_player_filters(self) -> None:
+        self.player_name_filter.clear()
+        self.player_level_min.setValue(0)
+        self.player_level_max.setValue(0)
+        self.player_class_filter.clear()
+        self.player_instrument_filter.setCurrentIndex(0)
+        self._refresh_players()
+
+    def _apply_player_filters(self) -> None:
+        self._refresh_players()
 
     def _refresh_players(self) -> None:
-        players = list_players(self.app_state.conn)
+        name_sub = self.player_name_filter.text().strip() or None
+        level_min = self.player_level_min.value() if self.player_level_min.value() > 0 else None
+        level_max = self.player_level_max.value() if self.player_level_max.value() > 0 else None
+        class_sub = self.player_class_filter.text().strip() or None
+        instrument_ids = None
+        inst_name = self.player_instrument_filter.currentData()
+        if inst_name:
+            if not self._instrument_name_to_id:
+                self._instrument_name_to_id = get_or_create_instruments_by_names(
+                    self.app_state.conn, PLAYER_INSTRUMENTS
+                )
+            if inst_name in self._instrument_name_to_id:
+                instrument_ids = [self._instrument_name_to_id[inst_name]]
+
+        players = list_players(
+            self.app_state.conn,
+            name_substring=name_sub,
+            level_min=level_min,
+            level_max=level_max,
+            class_substring=class_sub,
+            instrument_ids=instrument_ids,
+        )
+        if not self._instrument_name_to_id:
+            self._instrument_name_to_id = get_or_create_instruments_by_names(
+                self.app_state.conn, PLAYER_INSTRUMENTS
+            )
+        instrument_ids_list = [self._instrument_name_to_id[n] for n in PLAYER_INSTRUMENTS]
+        bulk = list_player_instruments_bulk(self.app_state.conn, [p.id for p in players])
+
+        num_instruments = len(PLAYER_INSTRUMENTS)
         self.player_table.setRowCount(len(players))
         for i, p in enumerate(players):
             self.player_table.setItem(i, 0, QTableWidgetItem(p.name))
-            btn = QPushButton("Delete")
-            btn.clicked.connect(lambda checked=False, pl=p: self._delete_player(pl))
-            self.player_table.setCellWidget(i, 1, btn)
-        self.player_table.setRowCount(len(players))
+            self.player_table.setItem(i, 1, QTableWidgetItem(str(p.level) if p.level is not None else ""))
+            self.player_table.setItem(i, 2, QTableWidgetItem(p.class_ or ""))
+            has_set = bulk.get(p.id, set())
+            for j, iid in enumerate(instrument_ids_list):
+                item = QTableWidgetItem("\u2713" if iid in has_set else "")
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.player_table.setItem(i, 3 + j, item)
+            actions_widget = QWidget()
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(2, 0, 2, 0)
+            edit_btn = QPushButton("Edit")
+            edit_btn.clicked.connect(lambda checked=False, pl=p: self._edit_player(pl))
+            del_btn = QPushButton("Delete")
+            del_btn.clicked.connect(lambda checked=False, pl=p: self._delete_player(pl))
+            actions_layout.addWidget(edit_btn)
+            actions_layout.addWidget(del_btn)
+            self.player_table.setCellWidget(i, 3 + num_instruments, actions_widget)
+        self.player_table.resizeRowsToContents()
 
-    def _refresh_player_instruments(self) -> None:
-        if self._selected_player_id is None:
-            return
-        rows = list_player_instruments(self.app_state.conn, self._selected_player_id)
-        self.player_instruments_table.setRowCount(len(rows))
-        for i, (iid, iname, has_inv, prof) in enumerate(rows):
-            self.player_instruments_table.setItem(i, 0, QTableWidgetItem(iname))
-            self.player_instruments_table.setItem(i, 1, QTableWidgetItem("Yes" if has_inv else "No"))
-            prof_cb = QCheckBox()
-            prof_cb.setChecked(prof)
-            prof_cb.stateChanged.connect(lambda state, inst_id=iid: self._set_proficiency(inst_id, state == Qt.CheckState.Checked))
-            self.player_instruments_table.setCellWidget(i, 2, prof_cb)
-            btn = QPushButton("Remove")
-            btn.clicked.connect(lambda checked=False, inst_id=iid: self._remove_player_instrument(inst_id))
-            self.player_instruments_table.setCellWidget(i, 3, btn)
-        self.player_instruments_table.setRowCount(len(rows))
-
-    def _delete_player(self, player: PlayerRow) -> None:
-        if QMessageBox.question(self, "Confirm", f"Delete player '{player.name}'?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-            delete_player(self.app_state.conn, player.id)
-            self._selected_player_id = None
+    def _edit_player(self, player: PlayerRow) -> None:
+        if open_edit_character_dialog(self.app_state, player, self):
             self._refresh_players()
 
-    def _add_player_instrument(self) -> None:
-        if self._selected_player_id is None:
-            return
-        instruments = list_instruments(self.app_state.conn)
-        existing_ids = {r[0] for r in list_player_instruments(self.app_state.conn, self._selected_player_id)}
-        available = [(iid, name) for iid, name in instruments if iid not in existing_ids]
-        if not available:
-            QMessageBox.information(self, "Info", "All instruments already added, or add instruments in Settings/parsing first.")
-            return
-        from PySide6.QtWidgets import QInputDialog
-        names = [n for _, n in available]
-        name, ok = QInputDialog.getItem(self, "Add instrument", "Instrument:", names, 0, False)
-        if ok and name:
-            iid = next(iid for iid, n in available if n == name)
-            set_player_instrument(self.app_state.conn, self._selected_player_id, iid, has_instrument=True, has_proficiency=False)
-            self._refresh_player_instruments()
-
-    def _set_proficiency(self, instrument_id: int, has_proficiency: bool) -> None:
-        if self._selected_player_id is None:
-            return
-        set_player_instrument(
-            self.app_state.conn,
-            self._selected_player_id,
-            instrument_id,
-            has_instrument=True,
-            has_proficiency=has_proficiency,
-        )
-
-    def _remove_player_instrument(self, instrument_id: int) -> None:
-        if self._selected_player_id is None:
-            return
-        remove_player_instrument(self.app_state.conn, self._selected_player_id, instrument_id)
-        self._refresh_player_instruments()
+    def _delete_player(self, player: PlayerRow) -> None:
+        if QMessageBox.question(
+            self,
+            "Confirm",
+            f"Delete player '{player.name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) == QMessageBox.StandardButton.Yes:
+            delete_player(self.app_state.conn, player.id)
+            self._refresh_players()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
