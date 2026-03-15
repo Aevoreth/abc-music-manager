@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from ..services.app_state import AppState
+from ..services.preferences import get_bands_splitter_state
 from ..db.band_repo import (
     list_bands,
     add_band,
@@ -66,6 +67,7 @@ class BandsView(QWidget):
         self._instrument_name_to_id: dict[str, int] = {}
         self._loaded_band_name: str = ""
         self._loaded_band_notes: str = ""
+        self._bands_splitter_restored: bool = False
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_bands_tab(), "Bands")
@@ -84,14 +86,14 @@ class BandsView(QWidget):
         v.addWidget(add_band_btn)
 
         # Splitter: left = band list, right = band editor
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.bands_splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self.band_list = QListWidget()
         self.band_list.setWordWrap(True)
         self.band_list.setMinimumWidth(120)
         self.band_list.setMaximumWidth(300)
         self.band_list.currentRowChanged.connect(self._on_band_selected)
-        splitter.addWidget(self.band_list)
+        self.bands_splitter.addWidget(self.band_list)
 
         self.band_editor = QWidget()
         editor_layout = QVBoxLayout(self.band_editor)
@@ -133,9 +135,9 @@ class BandsView(QWidget):
         self.layout_grid.cardDeleted.connect(self._on_card_deleted)
         self.layout_grid.cardEditRequested.connect(self._on_card_edit_requested)
 
-        splitter.addWidget(self.band_editor)
-        splitter.setStretchFactor(1, 1)
-        v.addWidget(splitter)
+        self.bands_splitter.addWidget(self.band_editor)
+        self.bands_splitter.setStretchFactor(1, 1)
+        v.addWidget(self.bands_splitter)
 
         self.band_editor.setEnabled(False)
         return w
@@ -465,3 +467,8 @@ class BandsView(QWidget):
         super().showEvent(event)
         self._refresh_band_list()
         self._refresh_players()
+        if not self._bands_splitter_restored:
+            self._bands_splitter_restored = True
+            saved = get_bands_splitter_state()
+            if saved:
+                self.bands_splitter.setSizes(saved)

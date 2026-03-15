@@ -23,7 +23,7 @@ from PySide6.QtGui import QColor, QFontMetrics, QPalette
 
 from ..services.app_state import AppState
 from ..services import preferences
-from ..services.preferences import get_splitter_state, set_splitter_state
+from ..services.preferences import get_splitter_state, set_splitter_state, set_bands_splitter_state
 
 
 def _restore_window_geometry(window: QMainWindow) -> None:
@@ -157,6 +157,7 @@ class MainWindow(QMainWindow):
             return
         _save_window_geometry(self)
         set_splitter_state(self._splitter.sizes())
+        set_bands_splitter_state(self.bands_view.bands_splitter.sizes())
         self.library_view._save_library_table_header_state()
         super().closeEvent(event)
 
