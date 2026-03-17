@@ -29,6 +29,8 @@ COLOR_TEXT_HEADER = "#e8d4a0"
 COLOR_TEXT_SECONDARY = "#b4a8a8"
 COLOR_TEXT_DISABLED = "#5c5460"
 COLOR_ERROR = "#7a3030"
+# Part assigned to player without that instrument (setlist editor)
+COLOR_WARNING_ORANGE = "#d48a3a"
 COLOR_SURFACE_VARIANT = "#1e1a2e"
 # Softer highlight for selection/focus (avoids bright yellow on tables)
 COLOR_HIGHLIGHT = "#3d3654"

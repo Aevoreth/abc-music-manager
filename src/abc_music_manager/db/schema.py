@@ -166,6 +166,10 @@ def create_schema(conn: sqlite3.Connection) -> None:
             locked INTEGER NOT NULL DEFAULT 0,
             default_change_duration_seconds INTEGER,
             export_naming_rules TEXT,
+            notes TEXT,
+            set_date TEXT,
+            set_time TEXT,
+            target_duration_seconds INTEGER,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
@@ -319,6 +323,31 @@ def _migrate_band_notes(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_setlist_notes(conn: sqlite3.Connection) -> None:
+    """Add notes column to Setlist table if missing."""
+    cur = conn.execute("PRAGMA table_info(Setlist)")
+    columns = [row[1] for row in cur.fetchall()]
+    if "notes" in columns:
+        return
+    conn.execute("ALTER TABLE Setlist ADD COLUMN notes TEXT")
+    conn.commit()
+
+
+def _migrate_setlist_date_time_target(conn: sqlite3.Connection) -> None:
+    """Add set_date, set_time, target_duration_seconds to Setlist if missing."""
+    cur = conn.execute("PRAGMA table_info(Setlist)")
+    columns = [row[1] for row in cur.fetchall()]
+    if "set_date" not in columns:
+        conn.execute("ALTER TABLE Setlist ADD COLUMN set_date TEXT")
+        conn.commit()
+    if "set_time" not in columns:
+        conn.execute("ALTER TABLE Setlist ADD COLUMN set_time TEXT")
+        conn.commit()
+    if "target_duration_seconds" not in columns:
+        conn.execute("ALTER TABLE Setlist ADD COLUMN target_duration_seconds INTEGER")
+        conn.commit()
+
+
 # 24 LOTRO instruments for Players tab possession grid (user-specified order).
 # Exported for use by player_repo and bands_view.
 PLAYER_INSTRUMENTS = [
@@ -385,6 +414,8 @@ def init_database(db_path: Path | None = None) -> sqlite3.Connection:
     _migrate_status_drop_is_active(conn)
     _migrate_folder_rule_include_in_export(conn)
     _migrate_band_notes(conn)
+    _migrate_setlist_notes(conn)
+    _migrate_setlist_date_time_target(conn)
     _migrate_player_level_class(conn)
     seed_defaults(conn)
     seed_player_instruments(conn)

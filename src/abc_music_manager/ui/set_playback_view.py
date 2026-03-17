@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QObject, Signal
 
 from ..services.app_state import AppState
-from ..db.setlist_repo import list_setlists, list_setlist_items
+from ..db.setlist_repo import list_setlists, list_setlist_items, get_setlist_band_assignments
 from ..db.song_layout_repo import get_song_layout_assignments
 from ..db import get_instrument_name
 from ..db.band_repo import list_layout_slots
@@ -40,6 +40,7 @@ def _get_next_song_layout_slots(conn, setlist_item_id: int) -> list[tuple[str, i
         return []
     song_layout_id, song_id = row[0], row[1]
     assignments = get_song_layout_assignments(conn, song_layout_id)
+    overrides = get_setlist_band_assignments(conn, setlist_item_id)
     parts_json = conn.execute("SELECT parts FROM Song WHERE id = ?", (song_id,)).fetchone()
     parts = json.loads(parts_json[0]) if parts_json and parts_json[0] else []
     parts_by_num = {p["part_number"]: p for p in parts}
@@ -47,7 +48,10 @@ def _get_next_song_layout_slots(conn, setlist_item_id: int) -> list[tuple[str, i
     result = []
     for a in assignments:
         player_name = players.get(a.player_id, str(a.player_id))
-        part_num = a.part_number
+        if a.player_id in overrides:
+            part_num = overrides[a.player_id]
+        else:
+            part_num = a.part_number
         instrument_name = "—"
         if part_num is not None and part_num in parts_by_num:
             iid = parts_by_num[part_num].get("instrument_id")

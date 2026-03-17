@@ -442,9 +442,12 @@ class BandsView(QWidget):
             actions_widget = QWidget()
             actions_layout = QHBoxLayout(actions_widget)
             actions_layout.setContentsMargins(2, 0, 2, 0)
+            _btn_style = "padding: 1px 4px; font-size: 11px; min-width: 22px;"
             edit_btn = QPushButton("Edit")
+            edit_btn.setStyleSheet(_btn_style)
             edit_btn.clicked.connect(lambda checked=False, pl=p: self._edit_player(pl))
             del_btn = QPushButton("Delete")
+            del_btn.setStyleSheet(_btn_style)
             del_btn.clicked.connect(lambda checked=False, pl=p: self._delete_player(pl))
             actions_layout.addWidget(edit_btn)
             actions_layout.addWidget(del_btn)

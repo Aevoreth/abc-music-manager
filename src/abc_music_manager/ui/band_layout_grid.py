@@ -16,6 +16,7 @@ from .theme import (
     COLOR_OUTLINE,
     COLOR_ON_SURFACE,
     COLOR_ERROR,
+    COLOR_WARNING_ORANGE,
 )
 
 # Grid and card specs
@@ -39,6 +40,8 @@ class LayoutCard:
     part_number: str = "###"
     part_name: str = "(Part Name)"
     instrument_name: str = "(Made for Instrument)"
+    instrument_warning: bool = False
+    part_duplicate: bool = False  # Part assigned to multiple players
 
 
 def _rects_overlap(
@@ -96,6 +99,8 @@ class BandLayoutGridWidget(QWidget):
             part_number=c.part_number,
             part_name=c.part_name,
             instrument_name=c.instrument_name,
+            instrument_warning=getattr(c, "instrument_warning", False),
+            part_duplicate=getattr(c, "part_duplicate", False),
         ) for c in self._cards]
 
     def add_card(self, card: LayoutCard) -> bool:
@@ -207,7 +212,8 @@ class BandLayoutGridWidget(QWidget):
             painter.drawRoundedRect(rect, 4, 4)
 
             # Card content - all text centered
-            painter.setPen(QColor(COLOR_ON_SURFACE))
+            dup_color = QColor("#ff4444") if getattr(card, "part_duplicate", False) else QColor(COLOR_ON_SURFACE)
+            painter.setPen(dup_color)
             margin = 4
             inner = rect.adjusted(margin, margin, -margin, -margin)
             center = Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop
@@ -217,7 +223,8 @@ class BandLayoutGridWidget(QWidget):
             fm_reg = QFontMetrics(font)
             y = inner.top()
 
-            # Player name
+            # Player name (never duplicated)
+            painter.setPen(QColor(COLOR_ON_SURFACE))
             painter.setFont(font)
             line_h = fm_reg.height()
             painter.drawText(QRect(inner.left(), y, inner.width(), line_h), center, card.player_name)
@@ -230,12 +237,17 @@ class BandLayoutGridWidget(QWidget):
             painter.setFont(big_font)
             fm_big = QFontMetrics(big_font)
             line_h = fm_big.height()
+            painter.setPen(dup_color)
             painter.drawText(QRect(inner.left(), y, inner.width(), line_h), center, card.part_number)
             y += line_h + 2
 
             # Instrument / part name
             painter.setFont(font)
             line_h = fm_reg.height()
+            if getattr(card, "part_duplicate", False):
+                painter.setPen(dup_color)
+            elif getattr(card, "instrument_warning", False):
+                painter.setPen(QColor(COLOR_WARNING_ORANGE))
             painter.drawText(QRect(inner.left(), y, inner.width(), line_h), center, card.instrument_name)
             y += line_h + 2
 
@@ -243,7 +255,10 @@ class BandLayoutGridWidget(QWidget):
             small_font = QFont(font)
             small_font.setPointSize(max(8, font.pointSize() - 1))
             painter.setFont(small_font)
+            painter.setPen(dup_color)
             painter.drawText(QRect(inner.left(), y, inner.width(), inner.bottom() - y), center, card.part_name)
+
+            painter.setPen(QColor(COLOR_ON_SURFACE))
 
         self._add_player_btn.raise_()
 

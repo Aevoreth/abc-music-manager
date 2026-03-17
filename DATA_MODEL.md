@@ -158,6 +158,10 @@ Fields:
 - locked (BOOLEAN NOT NULL DEFAULT 0)
 - default_change_duration_seconds (INTEGER NULL)
 - export_naming_rules (TEXT NULL) — JSON/text blob
+- notes (TEXT NULL)
+- set_date (TEXT NULL) — ISO date YYYY-MM-DD when the set is scheduled
+- set_time (TEXT NULL) — Time HH:MM when the set starts
+- target_duration_seconds (INTEGER NULL) — Target total duration for the set
 - created_at (DATETIME)
 - updated_at (DATETIME)
 

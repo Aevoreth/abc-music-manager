@@ -132,6 +132,42 @@ def set_bands_splitter_state(sizes: list[int]) -> None:
     save_preferences(prefs)
 
 
+def get_setlists_splitter_state() -> list[int] | None:
+    """Saved setlists tab splitter (setlist list | editor)."""
+    prefs = load_preferences()
+    v = prefs.get("setlists_splitter_state")
+    if isinstance(v, list) and len(v) >= 2:
+        try:
+            return [int(v[0]), int(v[1])]
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_setlists_splitter_state(sizes: list[int]) -> None:
+    prefs = load_preferences()
+    prefs["setlists_splitter_state"] = sizes
+    save_preferences(prefs)
+
+
+def get_setlists_editor_splitter_state() -> list[int] | None:
+    """Saved setlists editor splitter (options+songs | band layout)."""
+    prefs = load_preferences()
+    v = prefs.get("setlists_editor_splitter_state")
+    if isinstance(v, list) and len(v) >= 2:
+        try:
+            return [int(v[0]), int(v[1])]
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_setlists_editor_splitter_state(sizes: list[int]) -> None:
+    prefs = load_preferences()
+    prefs["setlists_editor_splitter_state"] = sizes
+    save_preferences(prefs)
+
+
 def get_library_table_header_state() -> dict[str, Any] | str | None:
     """
     Saved library table header state. Returns dict with section_sizes, sort_column, sort_order
