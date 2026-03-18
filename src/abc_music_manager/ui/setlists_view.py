@@ -31,11 +31,18 @@ from PySide6.QtWidgets import (
     QTimeEdit,
     QScrollArea,
 )
-from PySide6.QtCore import Qt, QDate, QTime
+from PySide6.QtCore import Qt, QDate, QTime, QTimer
 from PySide6.QtGui import QColor, QFont
 
 from ..services.app_state import AppState
-from ..services.preferences import get_setlists_splitter_state, get_setlists_editor_splitter_state
+from ..services.preferences import (
+    get_setlists_splitter_state,
+    get_setlists_editor_splitter_state,
+    get_setlists_top_split_state,
+    get_setlists_songs_table_header_state,
+    set_setlists_top_split_state,
+    set_setlists_songs_table_header_state,
+)
 from ..db import list_library_songs
 from ..db.setlist_repo import (
     list_setlists,
@@ -89,6 +96,14 @@ class SetlistsView(QWidget):
         self._filling_songs = False
         self._splitter_restored = False
         self._editor_splitter_restored = False
+        self._top_split_restored = False
+        self._songs_table_header_restored = False
+        self._songs_header_save_timer = QTimer(self)
+        self._songs_header_save_timer.setSingleShot(True)
+        self._songs_header_save_timer.timeout.connect(self._save_songs_table_header_state)
+        self._top_split_save_timer = QTimer(self)
+        self._top_split_save_timer.setSingleShot(True)
+        self._top_split_save_timer.timeout.connect(lambda: set_setlists_top_split_state(self.top_split.sizes()))
 
         root = QVBoxLayout(self)
 
@@ -109,7 +124,7 @@ class SetlistsView(QWidget):
         editor = QWidget()
         editor_layout = QVBoxLayout(editor)
 
-        top_split = QSplitter(Qt.Orientation.Horizontal)
+        self.top_split = QSplitter(Qt.Orientation.Horizontal)
         meta_col = QWidget()
         mv = QVBoxLayout(meta_col)
 
@@ -176,7 +191,7 @@ class SetlistsView(QWidget):
         meta_scroll.setWidget(meta_col)
         meta_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         meta_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        top_split.addWidget(meta_scroll)
+        self.top_split.addWidget(meta_scroll)
 
         songs_col = QWidget()
         sv = QVBoxLayout(songs_col)
@@ -201,20 +216,22 @@ class SetlistsView(QWidget):
         self.songs_table.verticalHeader().setSectionsClickable(True)
         self.songs_table.verticalHeader().sectionMoved.connect(self._on_song_row_moved)
         self.songs_table.itemSelectionChanged.connect(self._on_song_selection_changed)
+        self.songs_table.horizontalHeader().sectionResized.connect(self._on_songs_header_section_resized)
         songs_scroll = QScrollArea()
         songs_scroll.setWidgetResizable(True)
         songs_scroll.setWidget(songs_col)
         songs_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         songs_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         sv.addWidget(self.songs_table, 1)
-        top_split.addWidget(songs_scroll)
-        top_split.setStretchFactor(1, 2)
+        self.top_split.addWidget(songs_scroll)
+        self.top_split.setStretchFactor(1, 2)
+        self.top_split.splitterMoved.connect(lambda: self._top_split_save_timer.start(150))
 
         self.assignment_panel = SetlistBandAssignmentPanel(app_state)
         self.assignment_panel.assignment_changed.connect(self._on_assignment_changed)
 
         self.editor_splitter = QSplitter(Qt.Orientation.Vertical)
-        self.editor_splitter.addWidget(top_split)
+        self.editor_splitter.addWidget(self.top_split)
         self.editor_splitter.addWidget(self.assignment_panel)
         self.editor_splitter.setStretchFactor(0, 1)
         self.editor_splitter.setStretchFactor(1, 2)
@@ -380,15 +397,22 @@ class SetlistsView(QWidget):
             w = QWidget()
             h = QHBoxLayout(w)
             h.setContentsMargins(2, 0, 2, 0)
-            _btn_style = "padding: 1px 4px; font-size: 11px; min-width: 22px;"
+            _btn_style = "padding: 0 4px; font-size: 11px; min-height: 0;"
+            fm = self.songs_table.fontMetrics()
             up_btn = QPushButton("\u2191")
             up_btn.setStyleSheet(_btn_style)
+            up_btn.setFixedWidth(fm.horizontalAdvance("\u2191") + 8)
+            up_btn.setFixedHeight(18)
             up_btn.clicked.connect(lambda checked=False, iid=r.item.id: self._move_song(iid, -1))
             down_btn = QPushButton("\u2193")
             down_btn.setStyleSheet(_btn_style)
+            down_btn.setFixedWidth(fm.horizontalAdvance("\u2193") + 8)
+            down_btn.setFixedHeight(18)
             down_btn.clicked.connect(lambda checked=False, iid=r.item.id: self._move_song(iid, 1))
             rem_btn = QPushButton("Remove")
             rem_btn.setStyleSheet(_btn_style)
+            rem_btn.setFixedWidth(fm.horizontalAdvance("Remove") + 12)
+            rem_btn.setFixedHeight(18)
             rem_btn.clicked.connect(lambda checked=False, it=r.item: self._remove_item(it))
             h.addWidget(up_btn)
             h.addWidget(down_btn)
@@ -668,6 +692,19 @@ class SetlistsView(QWidget):
         remove_setlist_item(self.app_state.conn, item.id)
         self._refresh_songs_table()
 
+    def _on_songs_header_section_resized(self, logical_index: int, old_size: int, new_size: int) -> None:
+        self._songs_header_save_timer.start(150)
+
+    def _save_songs_table_header_state(self) -> None:
+        hh = self.songs_table.horizontalHeader()
+        sizes = [hh.sectionSize(i) for i in range(hh.count())]
+        set_setlists_songs_table_header_state(sizes)
+
+    def _save_setlists_state(self) -> None:
+        """Persist splitter positions and table column widths. Called from main window on close."""
+        self._save_songs_table_header_state()
+        set_setlists_top_split_state(self.top_split.sizes())
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._refresh_setlist_names()
@@ -681,3 +718,16 @@ class SetlistsView(QWidget):
             saved = get_setlists_editor_splitter_state()
             if saved:
                 self.editor_splitter.setSizes(saved)
+        if not self._top_split_restored:
+            self._top_split_restored = True
+            saved = get_setlists_top_split_state()
+            if saved:
+                self.top_split.setSizes(saved)
+        if not self._songs_table_header_restored:
+            self._songs_table_header_restored = True
+            saved = get_setlists_songs_table_header_state()
+            if saved:
+                hh = self.songs_table.horizontalHeader()
+                for i, w in enumerate(saved):
+                    if i < hh.count():
+                        hh.resizeSection(i, w)

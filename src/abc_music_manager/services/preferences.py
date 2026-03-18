@@ -168,6 +168,42 @@ def set_setlists_editor_splitter_state(sizes: list[int]) -> None:
     save_preferences(prefs)
 
 
+def get_setlists_top_split_state() -> list[int] | None:
+    """Saved setlists top split (meta | songs)."""
+    prefs = load_preferences()
+    v = prefs.get("setlists_top_split_state")
+    if isinstance(v, list) and len(v) >= 2:
+        try:
+            return [int(v[0]), int(v[1])]
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_setlists_top_split_state(sizes: list[int]) -> None:
+    prefs = load_preferences()
+    prefs["setlists_top_split_state"] = sizes
+    save_preferences(prefs)
+
+
+def get_setlists_songs_table_header_state() -> list[int] | None:
+    """Saved setlists songs table column widths."""
+    prefs = load_preferences()
+    v = prefs.get("setlists_songs_table_header_state")
+    if isinstance(v, list):
+        try:
+            return [int(x) for x in v]
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_setlists_songs_table_header_state(sizes: list[int]) -> None:
+    prefs = load_preferences()
+    prefs["setlists_songs_table_header_state"] = sizes
+    save_preferences(prefs)
+
+
 def get_library_table_header_state() -> dict[str, Any] | str | None:
     """
     Saved library table header state. Returns dict with section_sizes, sort_column, sort_order

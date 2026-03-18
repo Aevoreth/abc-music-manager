@@ -166,6 +166,7 @@ class MainWindow(QMainWindow):
         set_bands_splitter_state(self.bands_view.bands_splitter.sizes())
         set_setlists_splitter_state(self.setlists_view.setlists_splitter.sizes())
         set_setlists_editor_splitter_state(self.setlists_view.editor_splitter.sizes())
+        self.setlists_view._save_setlists_state()
         self.library_view._save_library_table_header_state()
         super().closeEvent(event)
 
