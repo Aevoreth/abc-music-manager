@@ -31,8 +31,8 @@ from PySide6.QtWidgets import (
     QTimeEdit,
     QScrollArea,
 )
-from PySide6.QtCore import Qt, QDate, QTime, QTimer
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtCore import Qt, QDate, QTime, QTimer, QMimeData
+from PySide6.QtGui import QColor, QFont, QDrag
 
 from ..services.app_state import AppState
 from ..services.preferences import (
@@ -94,6 +94,100 @@ def _fmt_hhmmss(sec: int) -> str:
     else:
         out = str(s)
     return f"-{out}" if neg else out
+
+
+_MIME_ROW = "application/x-setlist-song-row"
+
+
+class SetlistSongsTable(QTableWidget):
+    """Table with vertical-only drag-drop. Rows move visually during drag."""
+
+    rowReordered = None  # Set by parent: callable() -> None, persists current order
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDragDropOverwriteMode(False)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDropIndicatorShown(True)
+        self._drag_row: int = -1
+
+    def startDrag(self, supportedActions) -> None:
+        row = self.currentRow()
+        if row < 0:
+            return
+        self._drag_row = row
+        mime = QMimeData()
+        mime.setData(_MIME_ROW, str(row).encode("utf-8"))
+        indexes = [self.model().index(row, c) for c in range(self.model().columnCount())]
+        model_mime = self.model().mimeData(indexes)
+        if model_mime:
+            model_mime.setData(_MIME_ROW, str(row).encode("utf-8"))
+            mime = model_mime
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.exec(Qt.DropAction.MoveAction)
+        self._drag_row = -1
+
+    def _move_row_visually(self, from_row: int, to_row: int) -> None:
+        """Move a row in the table, preserving the cell widget."""
+        if from_row == to_row or from_row < 0 or to_row < 0:
+            return
+        n = self.rowCount()
+        if from_row >= n or to_row > n:
+            return
+        w = self.cellWidget(from_row, 5)
+        if w:
+            w.setParent(None)
+        items = [self.takeItem(from_row, c) for c in range(self.columnCount())]
+        self.removeRow(from_row)
+        if to_row > from_row:
+            to_row -= 1
+        self.insertRow(to_row)
+        for c, it in enumerate(items):
+            self.setItem(to_row, c, it)
+        if w:
+            self.setCellWidget(to_row, 5, w)
+        self._drag_row = to_row
+        self.selectRow(to_row)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat(_MIME_ROW):
+            event.acceptProposedAction()
+            super().dragEnterEvent(event)
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if not event.mimeData().hasFormat(_MIME_ROW) or self._drag_row < 0:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        pos = event.position().toPoint()
+        idx = self.indexAt(pos)
+        row = idx.row()
+        if row >= 0:
+            rect = self.visualRect(idx)
+            if pos.y() > rect.center().y():
+                drop_row = row + 1
+            else:
+                drop_row = row
+        else:
+            drop_row = self.rowCount()
+        if drop_row != self._drag_row:
+            self._move_row_visually(self._drag_row, drop_row)
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        mime = event.mimeData()
+        if not mime.hasFormat(_MIME_ROW):
+            event.ignore()
+            return
+        event.accept()
+        if self.rowReordered:
+            self.rowReordered()
 
 
 class SetlistsView(QWidget):
@@ -229,14 +323,14 @@ class SetlistsView(QWidget):
         songs_col = QWidget()
         sv = QVBoxLayout(songs_col)
         sh = QHBoxLayout()
-        sh.addWidget(QLabel("Songs in set (↑↓ or drag vertical row headers to reorder):"))
+        sh.addWidget(QLabel("Songs in set (↑↓ or drag rows to reorder):"))
         sh.addStretch()
         add_song_btn = QPushButton("Add song")
         add_song_btn.clicked.connect(self._add_item)
         sh.addWidget(add_song_btn)
         sv.addLayout(sh)
 
-        self.songs_table = QTableWidget()
+        self.songs_table = SetlistSongsTable()
         self.songs_table.setColumnCount(6)
         self.songs_table.setHorizontalHeaderLabels(["", "Title", "Parts", "Duration", "Artist", "Actions"])
         self.songs_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -249,9 +343,9 @@ class SetlistsView(QWidget):
         row_height = fm.lineSpacing() + 8
         self.songs_table.verticalHeader().setDefaultSectionSize(row_height)
         self.songs_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
-        self.songs_table.verticalHeader().setSectionsMovable(True)
+        self.songs_table.verticalHeader().setSectionsMovable(False)
         self.songs_table.verticalHeader().setSectionsClickable(True)
-        self.songs_table.verticalHeader().sectionMoved.connect(self._on_song_row_moved)
+        self.songs_table.rowReordered = self._on_song_row_dragged
         self.songs_table.itemSelectionChanged.connect(self._on_song_selection_changed)
         self.songs_table.horizontalHeader().sectionResized.connect(self._on_songs_header_section_resized)
         songs_scroll = QScrollArea()
@@ -546,24 +640,19 @@ class SetlistsView(QWidget):
         reorder_setlist_items(self.app_state.conn, self._selected_setlist_id, ids)
         self._refresh_songs_table(select_item_id=item_id)
 
-    def _on_song_row_moved(self, _logical: int, _old_v: int, _new_v: int) -> None:
+    def _on_song_row_dragged(self) -> None:
+        """Persist current table order after drag-drop (rows already moved visually)."""
         if self._filling_songs or not self._selected_setlist_id:
             return
-        cr = self.songs_table.currentRow()
-        sel_id = None
-        if cr >= 0:
-            it = self.songs_table.item(cr, 1)
-            if it:
-                sel_id = it.data(Qt.ItemDataRole.UserRole)
-        vh = self.songs_table.verticalHeader()
-        ids: list[int] = []
-        for visual in range(self.songs_table.rowCount()):
-            logical_row = vh.logicalIndex(visual)
-            it = self.songs_table.item(logical_row, 1)
+        ids = []
+        for r in range(self.songs_table.rowCount()):
+            it = self.songs_table.item(r, 1)
             if it:
                 ids.append(it.data(Qt.ItemDataRole.UserRole))
         if len(ids) != self.songs_table.rowCount():
             return
+        cr = self.songs_table.currentRow()
+        sel_id = self.songs_table.item(cr, 1).data(Qt.ItemDataRole.UserRole) if cr >= 0 and self.songs_table.item(cr, 1) else None
         reorder_setlist_items(self.app_state.conn, self._selected_setlist_id, ids)
         self._refresh_songs_table(select_item_id=sel_id)
 

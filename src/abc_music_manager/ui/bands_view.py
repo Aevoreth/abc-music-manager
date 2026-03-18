@@ -27,10 +27,10 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPlainTextEdit,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 
 from ..services.app_state import AppState
-from ..services.preferences import get_bands_splitter_state
+from ..services.preferences import get_bands_splitter_state, set_bands_splitter_state
 from ..db.band_repo import (
     list_bands,
     add_band,
@@ -140,6 +140,14 @@ class BandsView(QWidget):
 
         self.bands_splitter.addWidget(self.band_editor)
         self.bands_splitter.setStretchFactor(1, 1)
+        self._bands_splitter_save_timer = QTimer(self)
+        self._bands_splitter_save_timer.setSingleShot(True)
+        self._bands_splitter_save_timer.timeout.connect(
+            lambda: set_bands_splitter_state(self.bands_splitter.sizes())
+        )
+        self.bands_splitter.splitterMoved.connect(
+            lambda: self._bands_splitter_save_timer.start(150)
+        )
         v.addWidget(self.bands_splitter)
 
         self.band_editor.setEnabled(False)
@@ -227,11 +235,28 @@ class BandsView(QWidget):
 
     def _refresh_band_list(self) -> None:
         bands = list_bands(self.app_state.conn)
+        cur_id = self._selected_band_id
+        self.band_list.blockSignals(True)
         self.band_list.clear()
         for b in bands:
-            self.band_list.addItem(QListWidgetItem(b.name))
-        if bands and self.band_list.currentRow() < 0:
+            it = QListWidgetItem(b.name)
+            it.setData(Qt.ItemDataRole.UserRole, b.id)
+            self.band_list.addItem(it)
+        need_load = False
+        if cur_id is not None and bands:
+            for i in range(self.band_list.count()):
+                if self.band_list.item(i).data(Qt.ItemDataRole.UserRole) == cur_id:
+                    self.band_list.setCurrentRow(i)
+                    break
+            else:
+                need_load = True
+        else:
+            need_load = True
+        if need_load and bands:
             self.band_list.setCurrentRow(0)
+        self.band_list.blockSignals(False)
+        if need_load:
+            self._on_band_selected(0 if bands else -1)
 
     def _on_band_selected(self, row: int) -> None:
         if row < 0:
@@ -241,10 +266,14 @@ class BandsView(QWidget):
             self._loaded_band_notes = ""
             self.band_editor.setEnabled(False)
             return
-        bands = list_bands(self.app_state.conn)
-        if row >= len(bands):
+        item = self.band_list.item(row)
+        if not item:
             return
-        band = bands[row]
+        band_id = item.data(Qt.ItemDataRole.UserRole)
+        bands = list_bands(self.app_state.conn)
+        band = next((b for b in bands if b.id == band_id), None)
+        if not band:
+            return
         self._selected_band_id = band.id
         self._loaded_band_name = band.name
         self._loaded_band_notes = band.notes or ""
@@ -471,10 +500,37 @@ class BandsView(QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        # Defer refresh to next event loop so layout is ready
+        QTimer.singleShot(0, self._on_show_deferred)
+        # Defer splitter restore further so layout has settled (avoids reset-to-right)
+        QTimer.singleShot(100, self._restore_bands_splitter)
+
+    def _on_show_deferred(self) -> None:
+        """Called after showEvent to ensure layout is ready before loading."""
         self._refresh_band_list()
         self._refresh_players()
-        if not self._bands_splitter_restored:
-            self._bands_splitter_restored = True
-            saved = get_bands_splitter_state()
-            if saved:
-                self.bands_splitter.setSizes(saved)
+
+    def _restore_bands_splitter(self) -> None:
+        """Restore bands splitter from preferences. Runs after 100ms delay so layout is ready."""
+        if self._bands_splitter_restored:
+            return
+        self._bands_splitter_restored = True
+        total_now = self.bands_splitter.width()
+        if total_now < 200:
+            return  # Splitter not ready yet
+        saved = get_bands_splitter_state()
+        if saved and len(saved) >= 2:
+            left_saved, right_saved = saved[0], saved[1]
+            total_saved = left_saved + right_saved
+            if total_saved > 0 and left_saved >= 120:
+                # Scale proportionally when window size differs
+                ratio = left_saved / total_saved
+                left_now = int(total_now * ratio)
+                left_now = max(120, min(300, left_now))  # Clamp to band_list min/max
+                right_now = total_now - left_now
+                self.bands_splitter.setSizes([left_now, right_now])
+                return
+        # Fallback: invalid or no saved state — use sensible default
+        left_default = min(200, total_now - 120)
+        left_default = max(120, min(300, left_default))
+        self.bands_splitter.setSizes([left_default, total_now - left_default])
