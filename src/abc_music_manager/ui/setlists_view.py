@@ -80,6 +80,22 @@ def _fmt_duration(sec: int | None) -> str:
     return f"{m}:{s:02d}"
 
 
+def _fmt_hhmmss(sec: int) -> str:
+    """Format seconds as H:mm:ss, m:ss, or s (no leading zeros). Handles negative values."""
+    sec = int(sec)
+    neg = sec < 0
+    sec = abs(sec)
+    h, r = divmod(sec, 3600)
+    m, s = divmod(r, 60)
+    if h > 0:
+        out = f"{h}:{m:02d}:{s:02d}"
+    elif m > 0:
+        out = f"{m}:{s:02d}"
+    else:
+        out = str(s)
+    return f"-{out}" if neg else out
+
+
 class SetlistsView(QWidget):
     def __init__(self, app_state: AppState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -167,14 +183,31 @@ class SetlistsView(QWidget):
         self.target_duration_edit = QTimeEdit()
         self.target_duration_edit.setDisplayFormat("H:mm")
         self.target_duration_edit.setTime(QTime(0, 0))
+        self.target_duration_edit.timeChanged.connect(self._update_duration_computed)
         dur_row.addWidget(self.target_duration_edit)
         dur_row.addWidget(QLabel("Song Switch Delay (s):"))
         self.default_duration_spin = QSpinBox()
         self.default_duration_spin.setRange(0, 300)
         self.default_duration_spin.setSpecialValueText("—")
+        self.default_duration_spin.valueChanged.connect(self._update_duration_computed)
         dur_row.addWidget(self.default_duration_spin)
         dur_row.addStretch()
         mv.addLayout(dur_row)
+
+        computed_row = QHBoxLayout()
+        self.set_duration_lbl = QLabel("Set Duration: —")
+        f = self.set_duration_lbl.font()
+        f.setWeight(QFont.Weight.Bold)
+        self.set_duration_lbl.setFont(f)
+        computed_row.addWidget(self.set_duration_lbl)
+        self.set_duration_with_switches_lbl = QLabel("With Part Switching: —")
+        self.set_duration_with_switches_lbl.setFont(f)
+        computed_row.addWidget(self.set_duration_with_switches_lbl)
+        computed_row.addStretch()
+        mv.addLayout(computed_row)
+        self.remaining_set_time_lbl = QLabel("Remaining: —")
+        self.remaining_set_time_lbl.setFont(f)
+        mv.addWidget(self.remaining_set_time_lbl)
 
         mv.addWidget(QLabel("Notes:"))
         self.notes_edit = QPlainTextEdit()
@@ -262,6 +295,9 @@ class SetlistsView(QWidget):
             self.locked_check,
             self.default_duration_spin,
             self.songs_table,
+            self.set_duration_lbl,
+            self.set_duration_with_switches_lbl,
+            self.remaining_set_time_lbl,
         ):
             w.setEnabled(on)
         if not on:
@@ -296,6 +332,7 @@ class SetlistsView(QWidget):
         if row < 0:
             self._selected_setlist_id = None
             self._set_editor_enabled(False)
+            self._update_duration_computed()
             return
         item = self.setlist_list.item(row)
         if not item:
@@ -436,6 +473,31 @@ class SetlistsView(QWidget):
             self._refresh_assignment_panel()
         else:
             self.assignment_panel.clear()
+        self._update_duration_computed()
+
+    def _update_duration_computed(self) -> None:
+        """Update Set Duration, With Part Switching, and Remaining labels."""
+        if not self._selected_setlist_id:
+            self.set_duration_lbl.setText("Set Duration: —")
+            self.set_duration_with_switches_lbl.setText("With Part Switching: —")
+            self.remaining_set_time_lbl.setText("Remaining: —")
+            return
+        rows = list_setlist_items_with_song_meta(self.app_state.conn, self._selected_setlist_id)
+        total_sec = sum(r.duration_seconds or 0 for r in rows)
+        n = len(rows)
+        delay = self.default_duration_spin.value() if self.default_duration_spin.value() >= 0 else 0
+        switch_sec = delay * (n - 1) if n > 1 else 0
+        total_with_switches = total_sec + switch_sec
+
+        self.set_duration_lbl.setText(f"Set Duration: {_fmt_hhmmss(total_sec)}")
+        self.set_duration_with_switches_lbl.setText(f"With Part Switching: {_fmt_hhmmss(total_with_switches)}")
+
+        set_length_sec = QTime(0, 0).secsTo(self.target_duration_edit.time())
+        if set_length_sec > 0:
+            remaining = set_length_sec - total_with_switches
+            self.remaining_set_time_lbl.setText(f"Remaining: {_fmt_hhmmss(remaining)}")
+        else:
+            self.remaining_set_time_lbl.setText("Remaining: —")
 
     def _song_has_error(
         self,
