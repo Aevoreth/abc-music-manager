@@ -21,7 +21,7 @@ from ..db.setlist_repo import (
     upsert_setlist_band_assignment,
     delete_setlist_band_assignment,
 )
-from ..db import get_instrument_name
+from ..db.instrument import get_instrument_name, get_instrument_ids_with_same_name_ci
 from .band_layout_grid import BandLayoutGridWidget, LayoutCard
 
 
@@ -229,7 +229,9 @@ class SetlistBandAssignmentPanel(QWidget):
                 pname = (meta.get("part_name") or "").strip() or f"Part {eff}"
                 iid = meta.get("instrument_id")
                 iname = get_instrument_name(conn, iid) if iid else "—"
-                has_inst = iid in inst_bulk.get(s.player_id, set())
+                # Match by ID or by same name (case-insensitive) for ABC duplicates
+                equiv_ids = get_instrument_ids_with_same_name_ci(conn, iid) if iid else frozenset()
+                has_inst = bool(equiv_ids and (inst_bulk.get(s.player_id, set()) & equiv_ids))
                 inst_warn = bool(iid and not has_inst)
             else:
                 pn = "###"

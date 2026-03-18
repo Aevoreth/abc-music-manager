@@ -52,6 +52,32 @@ def _rects_overlap(
     return not (x1 + w1 <= x2 or x2 + w2 <= x1 or y1 + h1 <= y2 or y2 + h2 <= y1)
 
 
+def _draw_text_fitting(
+    painter: QPainter,
+    rect: QRect,
+    alignment: Qt.AlignmentFlag,
+    text: str,
+    font: QFont,
+    min_point_size: int = 6,
+) -> None:
+    """Draw text centered in rect, shrinking font if needed to fit width."""
+    if not text:
+        return
+    f = QFont(font)
+    pt = f.pointSize()
+    while pt >= min_point_size:
+        f.setPointSize(pt)
+        fm = QFontMetrics(f)
+        if fm.horizontalAdvance(text) <= rect.width():
+            painter.setFont(f)
+            painter.drawText(rect, alignment, text)
+            return
+        pt -= 1
+    f.setPointSize(min_point_size)
+    painter.setFont(f)
+    painter.drawText(rect, alignment, text)
+
+
 class BandLayoutGridWidget(QWidget):
     """
     Custom widget: dotted grid background, draggable cards.
@@ -241,52 +267,49 @@ class BandLayoutGridWidget(QWidget):
             painter.setBrush(QColor(COLOR_SURFACE))
             painter.drawRoundedRect(rect, 4, 4)
 
-            # Card content - all text centered
+            # Card content - all text centered, shrink font if needed to fit
             dup_color = QColor("#ff4444") if getattr(card, "part_duplicate", False) else QColor(COLOR_ON_SURFACE)
             painter.setPen(dup_color)
-            margin = 4
+            margin = 2
             inner = rect.adjusted(margin, margin, -margin, -margin)
             center = Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop
 
             font = painter.font()
-            font.setPointSize(font.pointSize())
             fm_reg = QFontMetrics(font)
             y = inner.top()
 
             # Player name (never duplicated)
             painter.setPen(QColor(COLOR_ON_SURFACE))
-            painter.setFont(font)
             line_h = fm_reg.height()
-            painter.drawText(QRect(inner.left(), y, inner.width(), line_h), center, card.player_name)
+            _draw_text_fitting(painter, QRect(inner.left(), y, inner.width(), line_h), center, card.player_name, font)
             y += line_h + 2
 
             # Part number (large, bold)
             big_font = QFont(font)
             big_font.setPointSize(font.pointSize() + 14)
             big_font.setWeight(QFont.Weight.Bold)
-            painter.setFont(big_font)
             fm_big = QFontMetrics(big_font)
             line_h = fm_big.height()
             painter.setPen(dup_color)
-            painter.drawText(QRect(inner.left(), y, inner.width(), line_h), center, card.part_number)
+            _draw_text_fitting(painter, QRect(inner.left(), y, inner.width(), line_h), center, card.part_number, big_font)
             y += line_h + 2
 
             # Instrument / part name
-            painter.setFont(font)
-            line_h = fm_reg.height()
             if getattr(card, "part_duplicate", False):
                 painter.setPen(dup_color)
             elif getattr(card, "instrument_warning", False):
                 painter.setPen(QColor(COLOR_WARNING_ORANGE))
-            painter.drawText(QRect(inner.left(), y, inner.width(), line_h), center, card.instrument_name)
+            line_h = fm_reg.height()
+            _draw_text_fitting(painter, QRect(inner.left(), y, inner.width(), line_h), center, card.instrument_name, font)
             y += line_h + 2
 
             # Part name (slightly smaller)
             small_font = QFont(font)
             small_font.setPointSize(max(8, font.pointSize() - 1))
-            painter.setFont(small_font)
             painter.setPen(dup_color)
-            painter.drawText(QRect(inner.left(), y, inner.width(), inner.bottom() - y), center, card.part_name)
+            _draw_text_fitting(
+                painter, QRect(inner.left(), y, inner.width(), inner.bottom() - y), center, card.part_name, small_font
+            )
 
             painter.setPen(QColor(COLOR_ON_SURFACE))
 

@@ -66,6 +66,7 @@ from ..db.song_layout_repo import (
 )
 from ..db.band_repo import list_all_band_layouts, list_layout_slots, list_band_members
 from ..db.player_repo import list_player_instruments_bulk
+from ..db.instrument import get_instrument_ids_with_same_name_ci
 from .setlist_band_assignment_panel import SetlistBandAssignmentPanel
 from .theme import COLOR_ON_SURFACE
 
@@ -409,6 +410,7 @@ class SetlistsView(QWidget):
         row = self.setlist_list.currentRow()
         if row >= 0 and self.setlist_list.item(row):
             cur_id = self.setlist_list.item(row).data(Qt.ItemDataRole.UserRole)
+        self.setlist_list.blockSignals(True)
         self.setlist_list.clear()
         for s in list_setlists(self.app_state.conn):
             it = QListWidgetItem(s.name)
@@ -418,9 +420,14 @@ class SetlistsView(QWidget):
             for i in range(self.setlist_list.count()):
                 if self.setlist_list.item(i).data(Qt.ItemDataRole.UserRole) == cur_id:
                     self.setlist_list.setCurrentRow(i)
-                    return
-        if self.setlist_list.count() and self.setlist_list.currentRow() < 0:
+                    break
+            else:
+                cur_id = None
+        if cur_id is None and self.setlist_list.count():
             self.setlist_list.setCurrentRow(0)
+        self.setlist_list.blockSignals(False)
+        # Explicitly sync: signals may not fire after programmatic change
+        self._on_setlist_selected(self.setlist_list.currentRow())
 
     def _on_setlist_selected(self, row: int) -> None:
         if row < 0:
@@ -490,6 +497,7 @@ class SetlistsView(QWidget):
     def _refresh_songs_table(self, select_item_id: int | None = None) -> None:
         if not self._selected_setlist_id:
             self.songs_table.setRowCount(0)
+            self.songs_table.repaint()
             return
         self._filling_songs = True
         self.songs_table.verticalHeader().blockSignals(True)
@@ -567,6 +575,7 @@ class SetlistsView(QWidget):
             self._refresh_assignment_panel()
         else:
             self.assignment_panel.clear()
+            self.songs_table.repaint()
         self._update_duration_computed()
 
     def _update_duration_computed(self) -> None:
@@ -602,6 +611,7 @@ class SetlistsView(QWidget):
     ) -> bool:
         if not sl.band_layout_id:
             return False
+        # Warning: song has no band layout (song_layout) for the setlist's band
         if r.item.song_layout_id is None:
             return True
         overrides = get_setlist_band_assignments(self.app_state.conn, r.item.id)
@@ -611,16 +621,28 @@ class SetlistsView(QWidget):
         }
         parts = json.loads(r.parts_json) if r.parts_json else []
         pbn = {int(p["part_number"]): p for p in parts}
+        assigned_parts: set[int] = set()
         for s in slots:
             pid = s.player_id
             pn = overrides[pid] if pid in overrides else layout.get(pid)
             if pn is None:
                 continue
+            assigned_parts.add(pn)
             pm = pbn.get(pn)
             if not pm:
                 continue
             iid = pm.get("instrument_id")
-            if iid and iid not in bulk.get(pid, set()):
+            if iid:
+                equiv_ids = get_instrument_ids_with_same_name_ci(self.app_state.conn, iid)
+                if not (equiv_ids and (bulk.get(pid, set()) & equiv_ids)):
+                    return True
+        # Warning: song has band layout but has unassigned parts (other than none)
+        for p in parts:
+            try:
+                pnum = int(p.get("part_number"))
+            except (TypeError, ValueError):
+                continue
+            if pnum not in assigned_parts:
                 return True
         return False
 
