@@ -212,6 +212,10 @@ class SetlistsView(QWidget):
             self.songs_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
         self.songs_table.horizontalHeader().setMinimumSectionSize(20)
         self.songs_table.horizontalHeader().resizeSection(0, 24)
+        fm = self.songs_table.fontMetrics()
+        row_height = fm.lineSpacing() + 8
+        self.songs_table.verticalHeader().setDefaultSectionSize(row_height)
+        self.songs_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.songs_table.verticalHeader().setSectionsMovable(True)
         self.songs_table.verticalHeader().setSectionsClickable(True)
         self.songs_table.verticalHeader().sectionMoved.connect(self._on_song_row_moved)

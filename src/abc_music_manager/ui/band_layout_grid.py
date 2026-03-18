@@ -84,6 +84,13 @@ class BandLayoutGridWidget(QWidget):
         self._add_player_btn.move(8, 8)
         self._add_player_btn.raise_()
 
+        self._recenter_btn = QPushButton("Re-center", self)
+        self._recenter_btn.setFixedWidth(
+            self._recenter_btn.fontMetrics().horizontalAdvance("Re-center") + 24
+        )
+        self._recenter_btn.clicked.connect(self.fit_cards_to_view)
+        self._recenter_btn.move(8 + self._add_player_btn.width() + 4, 8)
+
     def set_cards(self, cards: list[LayoutCard]) -> None:
         """Replace the card list."""
         self._cards = list(cards)
@@ -168,9 +175,32 @@ class BandLayoutGridWidget(QWidget):
         y = max(Y_MIN, min(Y_MAX, y))
         return x, y
 
+    def fit_cards_to_view(self) -> None:
+        """Pan so the bounding box of all cards is centered and fits in view."""
+        if not self._cards:
+            self._pan_x = 0.0
+            self._pan_y = 0.0
+            self.update()
+            return
+        min_x = min(c.x for c in self._cards)
+        max_x = max(c.x + CARD_WIDTH for c in self._cards)
+        min_y = min(c.y for c in self._cards)
+        max_y = max(c.y + CARD_HEIGHT for c in self._cards)
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        self._pan_x = center_x
+        self._pan_y = center_y
+        self.update()
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        x = 8
+        if self._add_player_btn.isVisible():
+            self._add_player_btn.move(x, 8)
+            x += self._add_player_btn.width() + 4
+        self._recenter_btn.move(x, 8)
         self._add_player_btn.raise_()
+        self._recenter_btn.raise_()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
