@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from .setlist_folder_repo import SetlistFolderRow, list_folders
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -20,6 +22,8 @@ class SetlistRow:
     id: int
     name: str
     band_layout_id: int | None
+    folder_id: int | None
+    sort_order: int
     locked: bool
     default_change_duration_seconds: int | None
     notes: str | None
@@ -55,28 +59,54 @@ class SetlistItemSongMetaRow:
 
 
 def list_setlists(conn: sqlite3.Connection) -> list[SetlistRow]:
+    """Return all setlists. Order: folders by sort_order, then uncategorized; within each, by sort_order then name."""
     cur = conn.execute(
-        """SELECT id, name, band_layout_id, locked, default_change_duration_seconds,
-                  COALESCE(notes, ''), set_date, set_time, target_duration_seconds,
-                  created_at, updated_at
-           FROM Setlist ORDER BY name"""
+        """SELECT s.id, s.name, s.band_layout_id, s.folder_id, COALESCE(s.sort_order, 0),
+                  s.locked, s.default_change_duration_seconds,
+                  COALESCE(s.notes, ''), s.set_date, s.set_time, s.target_duration_seconds,
+                  s.created_at, s.updated_at
+           FROM Setlist s
+           LEFT JOIN SetlistFolder f ON s.folder_id = f.id
+           ORDER BY
+             CASE WHEN s.folder_id IS NULL THEN 1 ELSE 0 END,
+             COALESCE(f.sort_order, 999999),
+             COALESCE(s.sort_order, 999999),
+             s.name"""
     )
     return [
         SetlistRow(
             id=r[0],
             name=r[1],
             band_layout_id=r[2],
-            locked=bool(r[3]),
-            default_change_duration_seconds=r[4],
-            notes=r[5] if r[5] else None,
-            set_date=r[6] if r[6] else None,
-            set_time=r[7] if r[7] else None,
-            target_duration_seconds=r[8],
-            created_at=r[9],
-            updated_at=r[10],
+            folder_id=r[3],
+            sort_order=int(r[4] or 0),
+            locked=bool(r[5]),
+            default_change_duration_seconds=r[6],
+            notes=r[7] if r[7] else None,
+            set_date=r[8] if r[8] else None,
+            set_time=r[9] if r[9] else None,
+            target_duration_seconds=r[10],
+            created_at=r[11],
+            updated_at=r[12],
         )
         for r in cur.fetchall()
     ]
+
+
+def list_setlists_grouped_by_folder(
+    conn: sqlite3.Connection,
+) -> list[tuple[SetlistFolderRow | None, list[SetlistRow]]]:
+    """Return (folder or None for Uncategorized, setlists) for each group. Folders ordered by sort_order; Uncategorized last. Empty folders are included."""
+    folders = list_folders(conn)
+    all_setlists = list_setlists(conn)
+    result: list[tuple[SetlistFolderRow | None, list[SetlistRow]]] = []
+    for folder in folders:
+        group = [s for s in all_setlists if s.folder_id == folder.id]
+        result.append((folder, group))
+    uncategorized = [s for s in all_setlists if s.folder_id is None]
+    if uncategorized:
+        result.append((None, uncategorized))
+    return result
 
 
 def get_setlists_containing_song(conn: sqlite3.Connection, song_id: int) -> list[tuple[int, str]]:
@@ -90,16 +120,21 @@ def get_setlists_containing_song(conn: sqlite3.Connection, song_id: int) -> list
     return [(r[0], r[1]) for r in cur.fetchall()]
 
 
-def add_setlist(conn: sqlite3.Connection, name: str) -> int:
+def add_setlist(conn: sqlite3.Connection, name: str, folder_id: int | None = None) -> int:
     from datetime import date
     now = _now()
     today = date.today().isoformat()
     default_time = "19:00"
     cur = conn.execute(
-        """INSERT INTO Setlist (name, band_layout_id, locked, default_change_duration_seconds, notes,
+        """SELECT COALESCE(MAX(sort_order), -1) + 1 FROM Setlist WHERE folder_id IS ?""",
+        (folder_id,),
+    )
+    next_order = cur.fetchone()[0]
+    cur = conn.execute(
+        """INSERT INTO Setlist (name, band_layout_id, folder_id, sort_order, locked, default_change_duration_seconds, notes,
                   set_date, set_time, target_duration_seconds, created_at, updated_at)
-           VALUES (?, NULL, 0, NULL, NULL, ?, ?, NULL, ?, ?)""",
-        (name.strip(), today, default_time, now, now),
+           VALUES (?, NULL, ?, ?, 0, NULL, NULL, ?, ?, NULL, ?, ?)""",
+        (name.strip(), folder_id, next_order, today, default_time, now, now),
     )
     conn.commit()
     return cur.lastrowid
@@ -111,6 +146,8 @@ def update_setlist(
     *,
     name: str | None = None,
     band_layout_id: Any = _UNSET,
+    folder_id: Any = _UNSET,
+    sort_order: Any = _UNSET,
     locked: bool | None = None,
     default_change_duration_seconds: Any = _UNSET,
     notes: Any = _UNSET,
@@ -126,6 +163,12 @@ def update_setlist(
     if band_layout_id is not _UNSET:
         updates.append("band_layout_id = ?")
         args.append(band_layout_id)
+    if folder_id is not _UNSET:
+        updates.append("folder_id = ?")
+        args.append(folder_id)
+    if sort_order is not _UNSET:
+        updates.append("sort_order = ?")
+        args.append(sort_order)
     if locked is not None:
         updates.append("locked = ?")
         args.append(1 if locked else 0)
@@ -160,6 +203,47 @@ def delete_setlist(conn: sqlite3.Connection, setlist_id: int) -> None:
     )
     conn.execute("DELETE FROM SetlistItem WHERE setlist_id = ?", (setlist_id,))
     conn.execute("DELETE FROM Setlist WHERE id = ?", (setlist_id,))
+    conn.commit()
+
+
+def move_setlist_to_folder(
+    conn: sqlite3.Connection,
+    setlist_id: int,
+    folder_id: int | None,
+    sort_order: int,
+) -> None:
+    """Move setlist to folder (or None for Uncategorized) at given sort_order. Renumbers others in target folder."""
+    now = _now()
+    conn.execute(
+        "UPDATE Setlist SET folder_id = ?, sort_order = ?, updated_at = ? WHERE id = ?",
+        (folder_id, sort_order, now, setlist_id),
+    )
+    cur = conn.execute(
+        "SELECT id FROM Setlist WHERE folder_id IS ? AND id != ? ORDER BY sort_order, name",
+        (folder_id, setlist_id),
+    )
+    ids_in_order = [r[0] for r in cur.fetchall()]
+    ids_in_order.insert(sort_order, setlist_id)
+    for pos, sid in enumerate(ids_in_order):
+        conn.execute(
+            "UPDATE Setlist SET sort_order = ?, updated_at = ? WHERE id = ? AND folder_id IS ?",
+            (pos, now, sid, folder_id),
+        )
+    conn.commit()
+
+
+def reorder_setlists_in_folder(
+    conn: sqlite3.Connection,
+    folder_id: int | None,
+    setlist_ids_in_order: list[int],
+) -> None:
+    """Set sort_order 0, 1, 2, ... for the given setlist ids in the folder."""
+    now = _now()
+    for pos, sid in enumerate(setlist_ids_in_order):
+        conn.execute(
+            "UPDATE Setlist SET sort_order = ?, updated_at = ? WHERE id = ? AND folder_id IS ?",
+            (pos, now, sid, folder_id),
+        )
     conn.commit()
 
 

@@ -204,6 +204,25 @@ def set_setlists_songs_table_header_state(sizes: list[int]) -> None:
     save_preferences(prefs)
 
 
+def get_setlists_folder_expanded_state() -> list[int]:
+    """Folder ids that are expanded. Returns empty list if not set."""
+    prefs = load_preferences()
+    v = prefs.get("setlists_folder_expanded_state")
+    if isinstance(v, list):
+        try:
+            return [int(x) for x in v]
+        except (TypeError, ValueError):
+            pass
+    return []
+
+
+def set_setlists_folder_expanded_state(folder_ids: list[int]) -> None:
+    """Save folder ids that are expanded."""
+    prefs = load_preferences()
+    prefs["setlists_folder_expanded_state"] = folder_ids
+    save_preferences(prefs)
+
+
 def get_library_table_header_state() -> dict[str, Any] | str | None:
     """
     Saved library table header state. Returns dict with section_sizes, sort_column, sort_order

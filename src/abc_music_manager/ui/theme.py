@@ -408,6 +408,15 @@ def dark_stylesheet() -> str:
         QRangeSlider {{
             qproperty-barColor: {COLOR_OUTLINE_VARIANT};
         }}
+        /* Setlist tree: selection highlight (no focus-specific styling) */
+        QTreeWidget {{
+            background-color: {COLOR_SURFACE};
+            color: {COLOR_ON_SURFACE};
+        }}
+        QTreeWidget::item:selected, QTreeWidget::item:selected:focus {{
+            background-color: {COLOR_OUTLINE_VARIANT};
+            color: {COLOR_ON_SURFACE};
+        }}
     """
 
 

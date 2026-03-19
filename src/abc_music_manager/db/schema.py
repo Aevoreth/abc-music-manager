@@ -159,10 +159,21 @@ def create_schema(conn: sqlite3.Connection) -> None:
 
     # --- 3. Setlists ---
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS SetlistFolder (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS Setlist (
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             band_layout_id INTEGER REFERENCES BandLayout(id),
+            folder_id INTEGER REFERENCES SetlistFolder(id),
+            sort_order INTEGER NOT NULL DEFAULT 0,
             locked INTEGER NOT NULL DEFAULT 0,
             default_change_duration_seconds INTEGER,
             export_naming_rules TEXT,
@@ -348,6 +359,32 @@ def _migrate_setlist_date_time_target(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_setlist_folders(conn: sqlite3.Connection) -> None:
+    """Add SetlistFolder table and folder_id, sort_order to Setlist if missing."""
+    cur = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='SetlistFolder'"
+    )
+    if cur.fetchone() is None:
+        conn.execute("""
+            CREATE TABLE SetlistFolder (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.commit()
+    cur = conn.execute("PRAGMA table_info(Setlist)")
+    columns = [row[1] for row in cur.fetchall()]
+    if "folder_id" not in columns:
+        conn.execute("ALTER TABLE Setlist ADD COLUMN folder_id INTEGER REFERENCES SetlistFolder(id)")
+        conn.commit()
+    if "sort_order" not in columns:
+        conn.execute("ALTER TABLE Setlist ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+        conn.commit()
+
+
 # 24 LOTRO instruments for Players tab possession grid (user-specified order).
 # Exported for use by player_repo and bands_view.
 PLAYER_INSTRUMENTS = [
@@ -416,6 +453,7 @@ def init_database(db_path: Path | None = None) -> sqlite3.Connection:
     _migrate_band_notes(conn)
     _migrate_setlist_notes(conn)
     _migrate_setlist_date_time_target(conn)
+    _migrate_setlist_folders(conn)
     _migrate_player_level_class(conn)
     seed_defaults(conn)
     seed_player_instruments(conn)

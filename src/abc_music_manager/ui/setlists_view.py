@@ -22,17 +22,21 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QMessageBox,
     QInputDialog,
-    QListWidget,
-    QListWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QPlainTextEdit,
     QAbstractItemView,
     QHeaderView,
     QDateEdit,
     QTimeEdit,
     QScrollArea,
+    QMenu,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
+    QFrame,
 )
-from PySide6.QtCore import Qt, QDate, QTime, QTimer, QMimeData
-from PySide6.QtGui import QColor, QFont, QDrag
+from PySide6.QtCore import Qt, QDate, QTime, QTimer, QMimeData, QSize, QRect, QPoint
+from PySide6.QtGui import QColor, QFont, QDrag, QMouseEvent, QPixmap, QPainter
 
 from ..services.app_state import AppState
 from ..services.preferences import (
@@ -40,15 +44,19 @@ from ..services.preferences import (
     get_setlists_editor_splitter_state,
     get_setlists_top_split_state,
     get_setlists_songs_table_header_state,
+    get_setlists_folder_expanded_state,
     set_setlists_top_split_state,
     set_setlists_songs_table_header_state,
+    set_setlists_folder_expanded_state,
 )
 from ..db import list_library_songs
 from ..db.setlist_repo import (
     list_setlists,
+    list_setlists_grouped_by_folder,
     add_setlist,
     update_setlist,
     delete_setlist,
+    move_setlist_to_folder,
     list_setlist_items_with_song_meta,
     add_setlist_item,
     update_setlist_item,
@@ -65,10 +73,11 @@ from ..db.song_layout_repo import (
     get_song_layout_assignments,
 )
 from ..db.band_repo import list_all_band_layouts, list_layout_slots, list_band_members
+from ..db.setlist_folder_repo import add_folder, update_folder, delete_folder, list_folders, reorder_folders
 from ..db.player_repo import list_player_instruments_bulk
 from ..db.instrument import get_instrument_ids_with_same_name_ci
 from .setlist_band_assignment_panel import SetlistBandAssignmentPanel
-from .theme import COLOR_ON_SURFACE
+from .theme import COLOR_ON_SURFACE, COLOR_PRIMARY
 
 
 def _fmt_duration(sec: int | None) -> str:
@@ -79,6 +88,19 @@ def _fmt_duration(sec: int | None) -> str:
         h, m = divmod(m, 60)
         return f"{h}:{m:02d}:{s:02d}"
     return f"{m}:{s:02d}"
+
+
+def _fmt_setlist_display(s: SetlistRow) -> str:
+    """Format setlist for tree: line 1 = outdented bullet + name, line 2 = date/time aligned with name."""
+    indent = "    "  # Align name and date; bullet sits to the left
+    name_line = f"•{indent}{s.name}"
+    if s.set_date and s.set_time:
+        date_line = f"{indent}{s.set_date} {s.set_time}"
+    elif s.set_date:
+        date_line = f"{indent}{s.set_date} --:--"
+    else:
+        date_line = f"{indent}—"
+    return f"{name_line}\n{date_line}"
 
 
 def _fmt_hhmmss(sec: int) -> str:
@@ -98,6 +120,364 @@ def _fmt_hhmmss(sec: int) -> str:
 
 
 _MIME_ROW = "application/x-setlist-song-row"
+_MIME_SETLIST_ID = "application/x-setlist-id"
+_MIME_FOLDER_ID = "application/x-folder-id"
+_TYPE_ROLE = Qt.ItemDataRole.UserRole + 1
+_PLACEHOLDER_ROLE = Qt.ItemDataRole.UserRole + 2
+
+
+class SetlistTreeDelegate(QStyledItemDelegate):
+    """Delegate that gives setlist/folder items enough height for two lines."""
+
+    def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
+        size = super().sizeHint(option, index)
+        fm = option.fontMetrics
+        line_height = fm.lineSpacing()
+        min_height = line_height * 2 + 6
+        if size.height() < min_height:
+            size.setHeight(min_height)
+        return size
+
+
+class SetlistTreeWidget(QTreeWidget):
+    """Tree of folders and setlists. Supports drag-drop to move setlists and folders."""
+
+    setlistMoved = None  # Set by parent: callable(setlist_id, target_folder_id, target_sort_order) -> None
+    folderMoved = None  # Set by parent: callable(folder_ids_in_order: list[int], dragged_id: int, dragged_folder_expanded: bool | None) -> None
+    onFolderDragStart = None  # Set by parent: callable() -> None, called before folder is removed (to save expanded state)
+    onDragEnded = None  # Set by parent: callable() -> None, called when drag ends (for refresh on cancel)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._drag_item: QTreeWidgetItem | None = None
+        self._drag_type: str = ""  # "setlist" or "folder"
+        self._dragged_folder_expanded: bool | None = None
+        self._placeholder_item: QTreeWidgetItem | None = None
+        self._placeholder_folder: QTreeWidgetItem | None = None
+        self._placeholder_index: int = 0
+        self._placeholder_top_level_index: int = -1  # For folder drag (top-level placeholder)
+        self._drop_line = QFrame(self.viewport())
+        self._drop_line.setFixedHeight(3)
+        self._drop_line.setStyleSheet(f"background-color: {COLOR_PRIMARY}; border: none;")
+        self._drop_line.hide()
+        self._folder_pressed: QTreeWidgetItem | None = None
+        self._did_drag = False
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        item = self.itemAt(event.position().toPoint())
+        if item and item.data(0, _TYPE_ROLE) == "folder":
+            self._folder_pressed = item
+            self._did_drag = False
+            super().mousePressEvent(event)
+            return
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._folder_pressed and not self._did_drag:
+            item = self.itemAt(event.position().toPoint())
+            if item is self._folder_pressed:
+                self._folder_pressed.setExpanded(not self._folder_pressed.isExpanded())
+        self._folder_pressed = None
+        self._did_drag = False
+        super().mouseReleaseEvent(event)
+
+    def startDrag(self, supportedActions) -> None:
+        self._did_drag = True
+
+    def _make_drag_pixmap(self, item: QTreeWidgetItem) -> QPixmap:
+        """Create a 75% opacity pixmap of the item for the drag preview."""
+        index = self.indexFromItem(item, 0)
+        rect = self.visualRect(index)
+        if rect.width() <= 0 or rect.height() <= 0:
+            rect = QRect(0, 0, 200, 40)
+        pixmap = self.viewport().grab(rect)
+        if pixmap.isNull():
+            pixmap = QPixmap(max(200, rect.width()), max(40, rect.height()))
+            pixmap.fill(Qt.GlobalColor.transparent)
+        result = QPixmap(pixmap.size())
+        result.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(result)
+        painter.setOpacity(0.75)
+        painter.drawPixmap(0, 0, pixmap)
+        painter.end()
+        return result
+
+    def startDrag(self, supportedActions) -> None:
+        item = self.currentItem()
+        if not item:
+            return
+        typ = item.data(0, _TYPE_ROLE)
+        if typ == "setlist":
+            self._start_drag_setlist(item)
+        elif typ == "folder" and item.parent() is None:
+            folder_id = item.data(0, Qt.ItemDataRole.UserRole)
+            if folder_id is not None:
+                self._start_drag_folder(item)
+        else:
+            return
+
+    def _start_drag_setlist(self, item: QTreeWidgetItem) -> None:
+        setlist_id = item.data(0, Qt.ItemDataRole.UserRole)
+        pixmap = self._make_drag_pixmap(item)
+        index = self.indexFromItem(item, 0)
+        initial_line_y = self.visualRect(index).top()
+        self._drag_item = item
+        self._drag_type = "setlist"
+        parent = item.parent()
+        if not parent:
+            return
+        origin_index = parent.indexOfChild(item)
+        parent.takeChild(origin_index)
+        self._placeholder_folder = parent
+        self._placeholder_index = origin_index
+        self._placeholder_top_level_index = -1
+        self._placeholder_item = QTreeWidgetItem(parent, [" "])
+        self._placeholder_item.setData(0, _PLACEHOLDER_ROLE, True)
+        self._placeholder_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        parent.insertChild(origin_index, self._placeholder_item)
+        self._update_drop_line(y=initial_line_y)
+        mime = QMimeData()
+        mime.setData(_MIME_SETLIST_ID, str(setlist_id).encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        if not pixmap.isNull():
+            drag.setPixmap(pixmap)
+            drag.setHotSpot(pixmap.rect().center())
+        drag.exec(Qt.DropAction.MoveAction)
+        self._cleanup_after_drag()
+
+    def _start_drag_folder(self, item: QTreeWidgetItem) -> None:
+        if self.onFolderDragStart:
+            self.onFolderDragStart()
+        folder_id = item.data(0, Qt.ItemDataRole.UserRole)
+        self._dragged_folder_expanded = item.isExpanded()
+        pixmap = self._make_drag_pixmap(item)
+        index = self.indexFromItem(item, 0)
+        initial_line_y = self.visualRect(index).top()
+        self._drag_item = item
+        self._drag_type = "folder"
+        origin_index = self.indexOfTopLevelItem(item)
+        self.takeTopLevelItem(origin_index)
+        self._placeholder_folder = None
+        self._placeholder_index = 0
+        self._placeholder_top_level_index = origin_index
+        self._placeholder_item = QTreeWidgetItem(self, [" "])
+        self._placeholder_item.setData(0, _PLACEHOLDER_ROLE, True)
+        self._placeholder_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        self.insertTopLevelItem(origin_index, self._placeholder_item)
+        self._update_drop_line(y=initial_line_y)
+        mime = QMimeData()
+        mime.setData(_MIME_FOLDER_ID, str(folder_id).encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        if not pixmap.isNull():
+            drag.setPixmap(pixmap)
+            drag.setHotSpot(pixmap.rect().center())
+        drag.exec(Qt.DropAction.MoveAction)
+        self._cleanup_after_drag()
+
+    def _cleanup_after_drag(self) -> None:
+        if self._placeholder_item:
+            p = self._placeholder_item.parent()
+            if p:
+                p.removeChild(self._placeholder_item)
+            else:
+                idx = self.indexOfTopLevelItem(self._placeholder_item)
+                if idx >= 0:
+                    self.takeTopLevelItem(idx)
+            self._placeholder_item = None
+        self._drag_item = None
+        self._drag_type = ""
+        self._dragged_folder_expanded = None
+        self._folder_pressed = None
+        self._did_drag = False
+        self._placeholder_folder = None
+        self._placeholder_top_level_index = -1
+        if self.onDragEnded:
+            self.onDragEnded()
+
+    def _remove_placeholder(self) -> None:
+        if self._placeholder_item:
+            p = self._placeholder_item.parent()
+            if p:
+                p.removeChild(self._placeholder_item)
+            else:
+                idx = self.indexOfTopLevelItem(self._placeholder_item)
+                if idx >= 0:
+                    self.takeTopLevelItem(idx)
+            self._placeholder_item = None
+        self._drop_line.hide()
+
+    def _update_drop_line(self, y: int | None = None) -> None:
+        """Position and show the drop indicator line. If y is given, use it; else use placeholder's rect."""
+        if y is not None:
+            self._drop_line.setGeometry(0, y, self.viewport().width(), 3)
+            self._drop_line.show()
+            self._drop_line.raise_()
+            return
+        if not self._placeholder_item:
+            self._drop_line.hide()
+            return
+        index = self.indexFromItem(self._placeholder_item, 0)
+        rect = self.visualRect(index)
+        self._drop_line.setGeometry(0, rect.top(), self.viewport().width(), 3)
+        self._drop_line.show()
+        self._drop_line.raise_()
+
+    def dragEnterEvent(self, event) -> None:
+        mime = event.mimeData()
+        if mime.hasFormat(_MIME_SETLIST_ID) or mime.hasFormat(_MIME_FOLDER_ID):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        mime = event.mimeData()
+        has_setlist = mime.hasFormat(_MIME_SETLIST_ID)
+        has_folder = mime.hasFormat(_MIME_FOLDER_ID)
+        if (not has_setlist and not has_folder) or not self._drag_item:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        pos = self.viewport().mapFrom(self, event.position().toPoint())
+        item = self.itemAt(pos)
+        if has_folder and self._drag_type == "folder":
+            if item and item.data(0, _PLACEHOLDER_ROLE):
+                return
+            self._drag_move_folder(item, pos)
+        else:
+            if not item:
+                self._drop_line.hide()
+                return
+            if item.data(0, _PLACEHOLDER_ROLE):
+                return
+            self._drag_move_setlist(item, pos)
+
+    def _drag_move_folder(self, item: QTreeWidgetItem | None, pos: QPoint) -> None:
+        if item is not None and item.parent() is not None:
+            item = item.parent()
+        if item is None:
+            n = self.topLevelItemCount()
+            target_index = max(0, n - 1) if n else 0
+            if n > 0:
+                last = self.topLevelItem(n - 1)
+                idx = self.indexFromItem(last, 0)
+                rect = self.visualRect(idx)
+                line_y = rect.bottom()
+            else:
+                line_y = 0
+        else:
+            idx = self.indexOfTopLevelItem(item)
+            index = self.indexFromItem(item, 0)
+            rect = self.visualRect(index)
+            if item.data(0, Qt.ItemDataRole.UserRole) is None:
+                target_index = idx
+                line_y = rect.top()
+            elif pos.y() > rect.center().y():
+                target_index = idx + 1
+                line_y = rect.bottom()
+            else:
+                target_index = idx
+                line_y = rect.top()
+        self._update_drop_line(y=line_y)
+        if target_index == self._placeholder_top_level_index:
+            return
+        self._remove_placeholder()
+        self._placeholder_item = QTreeWidgetItem(self, [" "])
+        self._placeholder_item.setData(0, _PLACEHOLDER_ROLE, True)
+        self._placeholder_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        self.insertTopLevelItem(target_index, self._placeholder_item)
+        self._placeholder_folder = None
+        self._placeholder_index = 0
+        self._placeholder_top_level_index = target_index
+
+    def _drag_move_setlist(self, item: QTreeWidgetItem, pos: QPoint) -> None:
+        target_folder: QTreeWidgetItem
+        target_index: int
+        line_y: int
+        if item.data(0, _TYPE_ROLE) == "folder":
+            target_folder = item
+            target_index = item.childCount()
+            index = self.indexFromItem(item, 0)
+            rect = self.visualRect(index)
+            line_y = rect.bottom()
+        else:
+            parent = item.parent()
+            if not parent:
+                return
+            index = self.indexFromItem(item, 0)
+            rect = self.visualRect(index)
+            if pos.y() > rect.center().y():
+                target_index = parent.indexOfChild(item) + 1
+                line_y = rect.bottom()
+            else:
+                target_index = parent.indexOfChild(item)
+                line_y = rect.top()
+            target_folder = parent
+        self._update_drop_line(y=line_y)
+        if target_folder == self._placeholder_folder and target_index == self._placeholder_index:
+            return
+        self._remove_placeholder()
+        self._placeholder_item = QTreeWidgetItem(target_folder, [" "])
+        self._placeholder_item.setData(0, _PLACEHOLDER_ROLE, True)
+        self._placeholder_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        target_folder.insertChild(target_index, self._placeholder_item)
+        self._placeholder_folder = target_folder
+        self._placeholder_index = target_index
+
+    def dropEvent(self, event) -> None:
+        mime = event.mimeData()
+        if mime.hasFormat(_MIME_FOLDER_ID):
+            self._drop_folder(event)
+        elif mime.hasFormat(_MIME_SETLIST_ID):
+            self._drop_setlist(event)
+        else:
+            event.ignore()
+
+    def _drop_folder(self, event) -> None:
+        mime = event.mimeData()
+        try:
+            dragged_id = int(mime.data(_MIME_FOLDER_ID).data().decode("utf-8"))
+        except (ValueError, AttributeError):
+            event.ignore()
+            return
+        event.accept()
+        if not self.folderMoved:
+            self._remove_placeholder()
+            return
+        ids_without_dragged: list[int] = []
+        for i in range(self.topLevelItemCount()):
+            top = self.topLevelItem(i)
+            if top.data(0, _PLACEHOLDER_ROLE):
+                continue
+            fid = top.data(0, Qt.ItemDataRole.UserRole)
+            if fid is not None and fid != dragged_id:
+                ids_without_dragged.append(fid)
+        self._remove_placeholder()
+        drop_index = self._placeholder_top_level_index
+        if drop_index >= 0 and drop_index <= len(ids_without_dragged):
+            ids = ids_without_dragged[:drop_index] + [dragged_id] + ids_without_dragged[drop_index:]
+        else:
+            ids = ids_without_dragged + [dragged_id]
+        if ids:
+            self.folderMoved(ids, dragged_id, self._dragged_folder_expanded)
+
+    def _drop_setlist(self, event) -> None:
+        mime = event.mimeData()
+        try:
+            setlist_id = int(mime.data(_MIME_SETLIST_ID).data().decode("utf-8"))
+        except (ValueError, AttributeError):
+            event.ignore()
+            return
+        event.accept()
+        target_folder_id: int | None = None
+        target_sort_order = 0
+        if self._placeholder_item and self._placeholder_folder is not None:
+            target_folder_id = self._placeholder_folder.data(0, Qt.ItemDataRole.UserRole)
+            target_sort_order = self._placeholder_index
+        self._remove_placeholder()
+        if self.setlistMoved:
+            self.setlistMoved(setlist_id, target_folder_id, target_sort_order)
 
 
 class SetlistSongsTable(QTableWidget):
@@ -218,19 +598,46 @@ class SetlistsView(QWidget):
 
         root = QVBoxLayout(self)
 
-        add_btn = QPushButton("Add setlist")
-        add_btn.clicked.connect(self._add_setlist)
-        fm = add_btn.fontMetrics()
-        add_btn.setFixedWidth(fm.horizontalAdvance("Add setlist") + 24)
-        root.addWidget(add_btn)
+        btn_row = QHBoxLayout()
+        add_setlist_btn = QPushButton("Add setlist")
+        add_setlist_btn.clicked.connect(self._add_setlist)
+        fm = add_setlist_btn.fontMetrics()
+        add_setlist_btn.setFixedWidth(fm.horizontalAdvance("Add setlist") + 24)
+        btn_row.addWidget(add_setlist_btn)
+        add_folder_btn = QPushButton("Add folder")
+        add_folder_btn.clicked.connect(self._add_folder)
+        add_folder_btn.setFixedWidth(fm.horizontalAdvance("Add folder") + 24)
+        btn_row.addWidget(add_folder_btn)
+        btn_row.addStretch()
+        root.addLayout(btn_row)
 
         self.setlists_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self.setlist_list = QListWidget()
-        self.setlist_list.setWordWrap(True)
-        self.setlist_list.setMinimumWidth(120)
-        self.setlist_list.setMaximumWidth(320)
-        self.setlist_list.currentRowChanged.connect(self._on_setlist_selected)
-        self.setlists_splitter.addWidget(self.setlist_list)
+        self.setlist_tree = SetlistTreeWidget()
+        self.setlist_tree.setColumnCount(1)
+        self.setlist_tree.setHeaderHidden(True)
+        self.setlist_tree.setWordWrap(True)
+        self.setlist_tree.setMinimumWidth(120)
+        self.setlist_tree.setMaximumWidth(320)
+        tree_font = self.setlist_tree.font()
+        tree_font.setPointSize(tree_font.pointSize() + 2)
+        self.setlist_tree.setFont(tree_font)
+        self.setlist_tree.setItemDelegate(SetlistTreeDelegate(self.setlist_tree))
+        self.setlist_tree.setUniformRowHeights(False)
+        self.setlist_tree.setDragEnabled(True)
+        self.setlist_tree.setAcceptDrops(True)
+        self.setlist_tree.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setlist_tree.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setlist_tree.setDropIndicatorShown(True)
+        self.setlist_tree.setlistMoved = self._on_setlist_moved
+        self.setlist_tree.folderMoved = self._on_folder_moved
+        self.setlist_tree.onFolderDragStart = self._save_folder_expanded_state
+        self.setlist_tree.onDragEnded = self._refresh_setlist_tree
+        self.setlist_tree.currentItemChanged.connect(self._on_setlist_selected)
+        self.setlist_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.setlist_tree.customContextMenuRequested.connect(self._on_setlist_tree_context_menu)
+        self.setlist_tree.itemExpanded.connect(self._save_folder_expanded_state)
+        self.setlist_tree.itemCollapsed.connect(self._save_folder_expanded_state)
+        self.setlists_splitter.addWidget(self.setlist_tree)
 
         editor = QWidget()
         editor_layout = QVBoxLayout(editor)
@@ -399,46 +806,130 @@ class SetlistsView(QWidget):
             self.assignment_panel.clear()
 
     def select_setlist_by_id(self, setlist_id: int) -> None:
-        self._refresh_setlist_names()
-        for i in range(self.setlist_list.count()):
-            if self.setlist_list.item(i).data(Qt.ItemDataRole.UserRole) == setlist_id:
-                self.setlist_list.setCurrentRow(i)
-                return
+        self._refresh_setlist_tree()
+        item = self._find_setlist_item(setlist_id)
+        if item:
+            parent = item.parent()
+            if parent:
+                parent.setExpanded(True)
+            self.setlist_tree.setCurrentItem(item)
+            self.setlist_tree.scrollToItem(item)
 
-    def _refresh_setlist_names(self) -> None:
+    def _save_folder_expanded_state(self) -> None:
+        expanded = []
+        for i in range(self.setlist_tree.topLevelItemCount()):
+            top = self.setlist_tree.topLevelItem(i)
+            if top.isExpanded():
+                fid = top.data(0, Qt.ItemDataRole.UserRole)
+                if fid is not None:
+                    expanded.append(fid)
+        set_setlists_folder_expanded_state(expanded)
+
+    def _on_setlist_moved(self, setlist_id: int, target_folder_id: int | None, target_sort_order: int) -> None:
+        """Handle drag-drop: move setlist to folder at position."""
+        move_setlist_to_folder(self.app_state.conn, setlist_id, target_folder_id, target_sort_order)
+        self.select_setlist_by_id(setlist_id)
+
+    def _on_folder_moved(
+        self,
+        folder_ids_in_order: list[int],
+        dragged_id: int,
+        dragged_folder_expanded: bool | None,
+    ) -> None:
+        """Handle drag-drop: reorder folders."""
+        if dragged_folder_expanded is not None:
+            expanded = list(get_setlists_folder_expanded_state())
+            if dragged_folder_expanded:
+                if dragged_id not in expanded:
+                    expanded.append(dragged_id)
+            else:
+                expanded = [x for x in expanded if x != dragged_id]
+            set_setlists_folder_expanded_state(expanded)
+        reorder_folders(self.app_state.conn, folder_ids_in_order)
+
+    def _find_setlist_item(self, setlist_id: int) -> QTreeWidgetItem | None:
+        """Find tree item for setlist by id. Returns None if not found."""
+        root = self.setlist_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            folder_item = root.child(i)
+            for j in range(folder_item.childCount()):
+                child = folder_item.child(j)
+                if child.data(0, _TYPE_ROLE) == "setlist" and child.data(0, Qt.ItemDataRole.UserRole) == setlist_id:
+                    return child
+        return None
+
+    def _find_first_setlist_item(self) -> QTreeWidgetItem | None:
+        """Find first setlist item in tree order. Returns None if no setlists."""
+        root = self.setlist_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            folder_item = root.child(i)
+            for j in range(folder_item.childCount()):
+                child = folder_item.child(j)
+                if child.data(0, _TYPE_ROLE) == "setlist":
+                    return child
+        return None
+
+    def _refresh_setlist_tree(self) -> None:
         cur_id = None
-        row = self.setlist_list.currentRow()
-        if row >= 0 and self.setlist_list.item(row):
-            cur_id = self.setlist_list.item(row).data(Qt.ItemDataRole.UserRole)
-        self.setlist_list.blockSignals(True)
-        self.setlist_list.clear()
-        for s in list_setlists(self.app_state.conn):
-            it = QListWidgetItem(s.name)
-            it.setData(Qt.ItemDataRole.UserRole, s.id)
-            self.setlist_list.addItem(it)
+        cur = self.setlist_tree.currentItem()
+        if cur and cur.data(0, _TYPE_ROLE) == "setlist":
+            cur_id = cur.data(0, Qt.ItemDataRole.UserRole)
+        self.setlist_tree.blockSignals(True)
+        self.setlist_tree.clear()
+        grouped = list_setlists_grouped_by_folder(self.app_state.conn)
+        for folder_or_none, setlists in grouped:
+            if folder_or_none:
+                folder_item = QTreeWidgetItem(self.setlist_tree, [folder_or_none.name])
+                folder_item.setData(0, Qt.ItemDataRole.UserRole, folder_or_none.id)
+                folder_item.setData(0, _TYPE_ROLE, "folder")
+                for s in setlists:
+                    child = QTreeWidgetItem(folder_item, [_fmt_setlist_display(s)])
+                    child.setData(0, Qt.ItemDataRole.UserRole, s.id)
+                    child.setData(0, _TYPE_ROLE, "setlist")
+            else:
+                folder_item = QTreeWidgetItem(self.setlist_tree, ["Uncategorized"])
+                folder_item.setData(0, Qt.ItemDataRole.UserRole, None)
+                folder_item.setData(0, _TYPE_ROLE, "folder")
+                for s in setlists:
+                    child = QTreeWidgetItem(folder_item, [_fmt_setlist_display(s)])
+                    child.setData(0, Qt.ItemDataRole.UserRole, s.id)
+                    child.setData(0, _TYPE_ROLE, "setlist")
         if cur_id is not None:
-            for i in range(self.setlist_list.count()):
-                if self.setlist_list.item(i).data(Qt.ItemDataRole.UserRole) == cur_id:
-                    self.setlist_list.setCurrentRow(i)
-                    break
+            item = self._find_setlist_item(cur_id)
+            if item:
+                self.setlist_tree.setCurrentItem(item)
+                parent = item.parent()
+                if parent:
+                    parent.setExpanded(True)
             else:
                 cur_id = None
-        if cur_id is None and self.setlist_list.count():
-            self.setlist_list.setCurrentRow(0)
-        self.setlist_list.blockSignals(False)
-        # Explicitly sync: signals may not fire after programmatic change
-        self._on_setlist_selected(self.setlist_list.currentRow())
+        if cur_id is None:
+            first_setlist = self._find_first_setlist_item()
+            if first_setlist:
+                parent = first_setlist.parent()
+                if parent:
+                    parent.setExpanded(True)
+                self.setlist_tree.setCurrentItem(first_setlist)
+        expanded_ids = get_setlists_folder_expanded_state()
+        for i in range(self.setlist_tree.topLevelItemCount()):
+            top = self.setlist_tree.topLevelItem(i)
+            fid = top.data(0, Qt.ItemDataRole.UserRole)
+            if fid is not None and fid in expanded_ids:
+                top.setExpanded(True)
+            elif fid is None:
+                top.setExpanded(True)
+            else:
+                top.setExpanded(False)
+        self.setlist_tree.blockSignals(False)
+        self._on_setlist_selected(self.setlist_tree.currentItem(), None)
 
-    def _on_setlist_selected(self, row: int) -> None:
-        if row < 0:
+    def _on_setlist_selected(self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None) -> None:
+        if current is None or current.data(0, _TYPE_ROLE) != "setlist":
             self._selected_setlist_id = None
             self._set_editor_enabled(False)
             self._update_duration_computed()
             return
-        item = self.setlist_list.item(row)
-        if not item:
-            return
-        sid = item.data(Qt.ItemDataRole.UserRole)
+        sid = current.data(0, Qt.ItemDataRole.UserRole)
         self._selected_setlist_id = sid
         s = next(x for x in list_setlists(self.app_state.conn) if x.id == sid)
         self._set_editor_enabled(True)
@@ -751,15 +1242,64 @@ class SetlistsView(QWidget):
         return layout_id
 
     def _add_setlist(self) -> None:
+        folder_id: int | None = None
+        cur = self.setlist_tree.currentItem()
+        if cur:
+            if cur.data(0, _TYPE_ROLE) == "folder":
+                folder_id = cur.data(0, Qt.ItemDataRole.UserRole)
+            elif cur.data(0, _TYPE_ROLE) == "setlist":
+                parent = cur.parent()
+                folder_id = parent.data(0, Qt.ItemDataRole.UserRole) if parent else None
         bands = list_setlists(self.app_state.conn)
         n = sum(1 for b in bands if b.name.startswith("New setlist"))
         name = f"New setlist {n + 1}"
-        add_setlist(self.app_state.conn, name)
-        self._refresh_setlist_names()
-        for i in range(self.setlist_list.count()):
-            if self.setlist_list.item(i).text() == name:
-                self.setlist_list.setCurrentRow(i)
-                break
+        new_id = add_setlist(self.app_state.conn, name, folder_id=folder_id)
+        self.select_setlist_by_id(new_id)
+
+    def _add_folder(self) -> None:
+        name, ok = QInputDialog.getText(self, "Add folder", "Folder name:")
+        if not ok or not name.strip():
+            return
+        add_folder(self.app_state.conn, name.strip())
+        self._refresh_setlist_tree()
+
+    def _on_setlist_tree_context_menu(self, pos) -> None:
+        item = self.setlist_tree.itemAt(pos)
+        menu = QMenu(self)
+        if item:
+            if item.data(0, _TYPE_ROLE) == "folder":
+                folder_id = item.data(0, Qt.ItemDataRole.UserRole)
+                if folder_id is not None:
+                    menu.addAction("Rename folder").triggered.connect(
+                        lambda: self._rename_folder(folder_id)
+                    )
+                    menu.addAction("Delete folder").triggered.connect(
+                        lambda: self._delete_folder(folder_id)
+                    )
+            elif item.data(0, _TYPE_ROLE) == "setlist":
+                pass
+        menu.addAction("Add folder").triggered.connect(self._add_folder)
+        if menu.actions():
+            menu.exec(self.setlist_tree.viewport().mapToGlobal(pos))
+
+    def _rename_folder(self, folder_id: int) -> None:
+        folders = {f.id: f for f in list_folders(self.app_state.conn)}
+        folder = folders.get(folder_id)
+        if not folder:
+            return
+        name, ok = QInputDialog.getText(self, "Rename folder", "Folder name:", text=folder.name)
+        if not ok or not name.strip():
+            return
+        update_folder(self.app_state.conn, folder_id, name=name.strip())
+        self._refresh_setlist_tree()
+
+    def _delete_folder(self, folder_id: int) -> None:
+        try:
+            delete_folder(self.app_state.conn, folder_id)
+        except ValueError as e:
+            QMessageBox.warning(self, "Cannot delete", str(e))
+            return
+        self._refresh_setlist_tree()
 
     def _save_setlist(self) -> None:
         if not self._selected_setlist_id:
@@ -796,7 +1336,7 @@ class SetlistsView(QWidget):
         self._loaded_set_date = set_date
         self._loaded_set_time = set_time
         self._loaded_target_dur = target_dur
-        self._refresh_setlist_names()
+        self._refresh_setlist_tree()
 
     def has_unsaved_changes(self) -> bool:
         if not self._editor_enabled or self._selected_setlist_id is None:
@@ -839,7 +1379,7 @@ class SetlistsView(QWidget):
         ):
             delete_setlist(self.app_state.conn, s.id)
             self._selected_setlist_id = None
-            self._refresh_setlist_names()
+            self._refresh_setlist_tree()
             self._set_editor_enabled(False)
 
     def _add_item(self) -> None:
@@ -884,7 +1424,7 @@ class SetlistsView(QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        self._refresh_setlist_names()
+        self._refresh_setlist_tree()
         if not self._splitter_restored:
             self._splitter_restored = True
             saved = get_setlists_splitter_state()
