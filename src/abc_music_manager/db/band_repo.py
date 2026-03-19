@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -173,3 +174,49 @@ def set_layout_slot(
 def remove_layout_slot(conn: sqlite3.Connection, band_layout_id: int, player_id: int) -> None:
     conn.execute("DELETE FROM BandLayoutSlot WHERE band_layout_id = ? AND player_id = ?", (band_layout_id, player_id))
     conn.commit()
+
+
+def get_export_column_order(conn: sqlite3.Connection, band_layout_id: int) -> list[int]:
+    """Return list of player_ids in CSV export column order. Empty if not set (use default row-major)."""
+    cur = conn.execute(
+        "SELECT export_column_order FROM BandLayout WHERE id = ?",
+        (band_layout_id,),
+    )
+    row = cur.fetchone()
+    if not row or not row[0]:
+        return []
+    try:
+        return json.loads(row[0])
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def set_export_column_order(conn: sqlite3.Connection, band_layout_id: int, player_ids: list[int]) -> None:
+    """Set CSV export column order for this band layout."""
+    now = _now()
+    conn.execute(
+        "UPDATE BandLayout SET export_column_order = ?, updated_at = ? WHERE id = ?",
+        (json.dumps(player_ids), now, band_layout_id),
+    )
+    conn.commit()
+
+
+def list_layout_slots_for_export(conn: sqlite3.Connection, band_layout_id: int) -> list[BandLayoutSlotRow]:
+    """
+    Return layout slots ordered for CSV export: by export_column_order if set,
+    else by (y, x) row-major. Omits players no longer in layout; appends new players not in saved order.
+    """
+    slots = list_layout_slots(conn, band_layout_id)
+    slot_by_player: dict[int, BandLayoutSlotRow] = {s.player_id: s for s in slots}
+    saved_order = get_export_column_order(conn, band_layout_id)
+
+    result: list[BandLayoutSlotRow] = []
+    seen: set[int] = set()
+    for pid in saved_order:
+        if pid in slot_by_player and pid not in seen:
+            result.append(slot_by_player[pid])
+            seen.add(pid)
+    for s in slots:
+        if s.player_id not in seen:
+            result.append(s)
+    return result

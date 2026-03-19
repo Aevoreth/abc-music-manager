@@ -473,6 +473,43 @@ def set_set_export_dir(path: str) -> None:
     save_preferences(prefs)
 
 
+def get_set_export_prefs() -> dict[str, Any]:
+    """Load set export preferences. Returns dict with defaults for missing keys."""
+    prefs = load_preferences()
+    se = prefs.get("set_export") or {}
+    defaults = {
+        "output_directory": "",
+        "rename_abc_files": True,
+        "export_as_folder": True,
+        "export_as_zip": False,
+        "filename_pattern": "$SongIndex_$FileName",
+        "whitespace_replace": " ",
+        "export_csv_part_sheet": False,
+        "include_composer_in_csv": True,
+        "csv_use_visible_columns": True,
+        "csv_columns_enabled": {
+            "Title": True,
+            "Part Count": True,
+            "Duration": True,
+            "Composers": True,
+            "Transcriber": True,
+        },
+        "csv_part_columns": "part",
+    }
+    result = dict(defaults)
+    for k, v in se.items():
+        if k in result:
+            result[k] = v
+    return result
+
+
+def save_set_export_prefs(prefs: dict[str, Any]) -> None:
+    """Save set export preferences."""
+    all_prefs = load_preferences()
+    all_prefs["set_export"] = prefs
+    save_preferences(all_prefs)
+
+
 def to_music_relative(path: str) -> str:
     """
     If path is under the Music folder, return it as relative to Music (e.g. for exclude rules).

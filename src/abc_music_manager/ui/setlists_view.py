@@ -79,6 +79,7 @@ from ..db.setlist_folder_repo import add_folder, update_folder, delete_folder, l
 from ..db.player_repo import list_player_instruments_bulk
 from ..db.instrument import get_instrument_ids_with_same_name_ci
 from .setlist_band_assignment_panel import SetlistBandAssignmentPanel
+from .set_export_dialog import SetExportDialog
 from .theme import COLOR_ON_SURFACE, COLOR_PRIMARY
 
 
@@ -669,8 +670,12 @@ class SetlistsView(QWidget):
         self.delete_btn = QPushButton("Delete")
         self.delete_btn.setFixedWidth(self.delete_btn.fontMetrics().horizontalAdvance("Delete") + 24)
         self.delete_btn.clicked.connect(self._delete_selected_setlist)
+        self.export_btn = QPushButton("Export")
+        self.export_btn.setFixedWidth(self.export_btn.fontMetrics().horizontalAdvance("Export") + 24)
+        self.export_btn.clicked.connect(self._export_set)
         btn_row.addWidget(self.save_btn)
         btn_row.addWidget(self.delete_btn)
+        btn_row.addWidget(self.export_btn)
         btn_row.addStretch()
         mv.addLayout(btn_row)
 
@@ -818,6 +823,7 @@ class SetlistsView(QWidget):
         for w in (
             self.save_btn,
             self.delete_btn,
+            self.export_btn,
             self.name_edit,
             self.band_layout_combo,
             self.set_date_edit,
@@ -1023,6 +1029,7 @@ class SetlistsView(QWidget):
         if not self._selected_setlist_id:
             self.songs_table.setRowCount(0)
             self.songs_table.repaint()
+            self.export_btn.setEnabled(False)
             return
         self._filling_songs = True
         self.songs_table.verticalHeader().blockSignals(True)
@@ -1101,6 +1108,7 @@ class SetlistsView(QWidget):
         else:
             self.assignment_panel.clear()
             self.songs_table.repaint()
+        self.export_btn.setEnabled(len(rows) > 0)
         self._update_duration_computed()
 
     def _update_duration_computed(self) -> None:
@@ -1305,6 +1313,35 @@ class SetlistsView(QWidget):
         new_id = add_setlist(self.app_state.conn, name, folder_id=folder_id)
         self.select_setlist_by_id(new_id)
 
+    def _export_set(self) -> None:
+        """Export the currently selected setlist (toolbar button)."""
+        if not self._selected_setlist_id:
+            return
+        self._open_export_dialog(self._selected_setlist_id)
+
+    def _open_export_dialog(self, setlist_id: int) -> None:
+        """Open the set export dialog for the given setlist."""
+        setlists = {s.id: s for s in list_setlists(self.app_state.conn)}
+        s = setlists.get(setlist_id)
+        if not s:
+            return
+        items = list_setlist_items_with_song_meta(self.app_state.conn, setlist_id)
+        if not items:
+            QMessageBox.warning(
+                self,
+                "Export Set",
+                "This setlist has no songs to export.",
+            )
+            return
+        dlg = SetExportDialog(
+            self.app_state,
+            setlist_id,
+            s.name,
+            s.band_layout_id,
+            self,
+        )
+        dlg.exec()
+
     def _delete_setlist_by_id(self, setlist_id: int) -> None:
         """Delete a setlist by id. Used from context menu."""
         sets_list = list_setlists(self.app_state.conn)
@@ -1347,6 +1384,9 @@ class SetlistsView(QWidget):
                 if setlist_id is not None:
                     parent = item.parent()
                     target_folder_id = parent.data(0, Qt.ItemDataRole.UserRole) if parent else None
+                    menu.addAction("Export set...").triggered.connect(
+                        lambda: self._open_export_dialog(setlist_id)
+                    )
                     menu.addAction("Delete set").triggered.connect(
                         lambda: self._delete_setlist_by_id(setlist_id)
                     )

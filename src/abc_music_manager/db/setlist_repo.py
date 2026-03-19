@@ -48,7 +48,7 @@ class SetlistItemRow:
 
 @dataclass
 class SetlistItemSongMetaRow:
-    """SetlistItem joined with Song fields for the setlist editor table."""
+    """SetlistItem joined with Song fields for the setlist editor table and set export."""
 
     item: SetlistItemRow
     title: str
@@ -56,6 +56,9 @@ class SetlistItemSongMetaRow:
     duration_seconds: int | None
     part_count: int
     parts_json: str | None
+    transcriber: str | None = None
+    notes: str | None = None
+    status_name: str | None = None
 
 
 def list_setlists(conn: sqlite3.Connection) -> list[SetlistRow]:
@@ -274,13 +277,16 @@ def list_setlist_items(conn: sqlite3.Connection, setlist_id: int) -> list[tuple[
 
 
 def list_setlist_items_with_song_meta(conn: sqlite3.Connection, setlist_id: int) -> list[SetlistItemSongMetaRow]:
-    """Setlist items with song title, composers, duration, part count, parts JSON."""
+    """Setlist items with song title, composers, duration, part count, parts JSON, transcriber, notes, status."""
     cur = conn.execute(
         """SELECT si.id, si.setlist_id, si.song_id, si.position, si.override_change_duration_seconds,
                   si.song_layout_id, si.created_at, si.updated_at,
                   s.title, s.composers, s.duration_seconds,
-                  json_array_length(COALESCE(s.parts, '[]')), s.parts
-           FROM SetlistItem si JOIN Song s ON s.id = si.song_id
+                  json_array_length(COALESCE(s.parts, '[]')), s.parts,
+                  s.transcriber, s.notes, st.name
+           FROM SetlistItem si
+           JOIN Song s ON s.id = si.song_id
+           LEFT JOIN Status st ON st.id = s.status_id
            WHERE si.setlist_id = ? ORDER BY si.position""",
         (setlist_id,),
     )
@@ -304,6 +310,9 @@ def list_setlist_items_with_song_meta(conn: sqlite3.Connection, setlist_id: int)
                 duration_seconds=r[10],
                 part_count=int(r[11] or 0),
                 parts_json=r[12],
+                transcriber=r[13] if r[13] else None,
+                notes=r[14] if r[14] else None,
+                status_name=r[15] if r[15] else None,
             )
         )
     return rows

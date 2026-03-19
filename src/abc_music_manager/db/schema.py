@@ -117,6 +117,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY,
             band_id INTEGER NOT NULL REFERENCES Band(id),
             name TEXT NOT NULL,
+            export_column_order TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         )
@@ -414,6 +415,16 @@ PLAYER_INSTRUMENTS = [
 ]
 
 
+def _migrate_band_layout_export_column_order(conn: sqlite3.Connection) -> None:
+    """Add export_column_order column to BandLayout if missing (JSON array of player_ids for CSV column order)."""
+    cur = conn.execute("PRAGMA table_info(BandLayout)")
+    columns = [row[1] for row in cur.fetchall()]
+    if "export_column_order" in columns:
+        return
+    conn.execute("ALTER TABLE BandLayout ADD COLUMN export_column_order TEXT")
+    conn.commit()
+
+
 def _migrate_player_level_class(conn: sqlite3.Connection) -> None:
     """Add level and class columns to Player table if missing."""
     cur = conn.execute("PRAGMA table_info(Player)")
@@ -454,6 +465,7 @@ def init_database(db_path: Path | None = None) -> sqlite3.Connection:
     _migrate_setlist_notes(conn)
     _migrate_setlist_date_time_target(conn)
     _migrate_setlist_folders(conn)
+    _migrate_band_layout_export_column_order(conn)
     _migrate_player_level_class(conn)
     seed_defaults(conn)
     seed_player_instruments(conn)

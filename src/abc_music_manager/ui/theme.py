@@ -249,6 +249,26 @@ def dark_stylesheet() -> str:
         QCheckBox::indicator:hover {{
             border-color: {COLOR_PRIMARY};
         }}
+        QRadioButton {{
+            color: {COLOR_ON_SURFACE};
+        }}
+        QRadioButton::indicator {{
+            width: 16px;
+            height: 16px;
+            border: 2px solid {COLOR_OUTLINE};
+            background-color: {COLOR_SURFACE};
+            border-radius: 8px;
+        }}
+        QRadioButton::indicator:checked {{
+            border: 2px solid {COLOR_PRIMARY};
+            background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+                stop:0 {COLOR_PRIMARY}, stop:0.2 {COLOR_PRIMARY},
+                stop:0.25 {COLOR_SURFACE}, stop:1 {COLOR_SURFACE});
+            border-radius: 8px;
+        }}
+        QRadioButton::indicator:hover {{
+            border-color: {COLOR_PRIMARY};
+        }}
         QListWidget {{
             background-color: {COLOR_TITLE_BAR};
             color: {COLOR_ON_SURFACE};
@@ -278,6 +298,18 @@ def dark_stylesheet() -> str:
             color: {COLOR_TEXT_HEADER};
             font-weight: bold;
             border-color: {COLOR_OUTLINE};
+        }}
+        /* Player column order: table-like compact list */
+        QListWidget#player_order_list {{
+            padding: 0;
+        }}
+        QListWidget#player_order_list::item {{
+            padding: 1px 6px;
+            margin: 0;
+            min-height: 0;
+            border-radius: 0;
+            border: none;
+            border-bottom: 1px solid {COLOR_OUTLINE};
         }}
         /* Status filter: dropdown-style trigger button */
         QPushButton#status_filter_btn {{

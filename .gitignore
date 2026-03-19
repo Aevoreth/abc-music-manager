@@ -34,3 +34,6 @@ preferences*.json
 
 # Unused skin/cache artifacts
 skin_cache/
+
+# Maestro reference (Java source for export feature reference)
+files/Project Source/maestro-java24dist/
