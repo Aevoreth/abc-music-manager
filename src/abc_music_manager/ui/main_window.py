@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
 )
-from PySide6.QtCore import Qt, QByteArray, QRect
+from PySide6.QtCore import Qt, QByteArray, QRect, QTimer, QEvent
 from PySide6.QtGui import QColor, QFontMetrics, QPalette
 
 from ..services.app_state import AppState
@@ -138,6 +138,29 @@ class MainWindow(QMainWindow):
         self._splitter.setStretchFactor(1, 1)
         main_layout.addWidget(self._splitter)
         self._splitter_initial_sizes_set = False
+
+        self._geometry_save_timer = QTimer(self)
+        self._geometry_save_timer.setSingleShot(True)
+        self._geometry_save_timer.timeout.connect(lambda: _save_window_geometry(self))
+        self._splitter_save_timer = QTimer(self)
+        self._splitter_save_timer.setSingleShot(True)
+        self._splitter_save_timer.timeout.connect(lambda: set_splitter_state(self._splitter.sizes()))
+        self._splitter.splitterMoved.connect(lambda: self._splitter_save_timer.start(150))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "_geometry_save_timer"):
+            self._geometry_save_timer.start(150)
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        if hasattr(self, "_geometry_save_timer"):
+            self._geometry_save_timer.start(150)
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "_geometry_save_timer"):
+            self._geometry_save_timer.start(150)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

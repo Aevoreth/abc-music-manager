@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QSplitter,
+    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
     QPushButton,
@@ -32,7 +33,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QMenu,
     QStyledItemDelegate,
-    QStyleOptionViewItem,
     QFrame,
 )
 from PySide6.QtCore import Qt, QDate, QTime, QTimer, QMimeData, QSize, QRect, QPoint
@@ -45,6 +45,8 @@ from ..services.preferences import (
     get_setlists_top_split_state,
     get_setlists_songs_table_header_state,
     get_setlists_folder_expanded_state,
+    set_setlists_splitter_state,
+    set_setlists_editor_splitter_state,
     set_setlists_top_split_state,
     set_setlists_songs_table_header_state,
     set_setlists_folder_expanded_state,
@@ -161,25 +163,39 @@ class SetlistTreeWidget(QTreeWidget):
         self._drop_line.setStyleSheet(f"background-color: {COLOR_PRIMARY}; border: none;")
         self._drop_line.hide()
         self._folder_pressed: QTreeWidgetItem | None = None
+        self._folder_expanded_at_press: bool | None = None
         self._did_drag = False
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
         item = self.itemAt(event.position().toPoint())
         if item and item.data(0, _TYPE_ROLE) == "folder":
             self._folder_pressed = item
+            self._folder_expanded_at_press = item.isExpanded()  # Before Qt processes
             self._did_drag = False
             super().mousePressEvent(event)
             return
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if self._folder_pressed and not self._did_drag:
-            item = self.itemAt(event.position().toPoint())
-            if item is self._folder_pressed:
-                self._folder_pressed.setExpanded(not self._folder_pressed.isExpanded())
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mouseReleaseEvent(event)
+            return
+        folder = self._folder_pressed
+        did_drag = self._did_drag
+        expanded_at_press = self._folder_expanded_at_press
         self._folder_pressed = None
+        self._folder_expanded_at_press = None
         self._did_drag = False
         super().mouseReleaseEvent(event)
+        # If user clicked folder label (not arrow): Qt didn't toggle, so we do.
+        # Arrow clicks toggle on press; label clicks need our toggle on release.
+        if folder and not did_drag and expanded_at_press is not None:
+            item = self.itemAt(event.position().toPoint())
+            if item is folder and folder.isExpanded() == expanded_at_press:
+                folder.setExpanded(not expanded_at_press)
 
     def startDrag(self, supportedActions) -> None:
         self._did_drag = True
@@ -780,8 +796,22 @@ class SetlistsView(QWidget):
         self.setlists_splitter.setStretchFactor(1, 1)
         root.addWidget(self.setlists_splitter)
 
+        self._setlists_splitter_save_timer = QTimer(self)
+        self._setlists_splitter_save_timer.setSingleShot(True)
+        self._setlists_splitter_save_timer.timeout.connect(
+            lambda: set_setlists_splitter_state(self.setlists_splitter.sizes())
+        )
+        self.setlists_splitter.splitterMoved.connect(lambda: self._setlists_splitter_save_timer.start(150))
+        self._editor_splitter_save_timer = QTimer(self)
+        self._editor_splitter_save_timer.setSingleShot(True)
+        self._editor_splitter_save_timer.timeout.connect(
+            lambda: set_setlists_editor_splitter_state(self.editor_splitter.sizes())
+        )
+        self.editor_splitter.splitterMoved.connect(lambda: self._editor_splitter_save_timer.start(150))
+
         self._editor_enabled = False
         self._set_editor_enabled(False)
+        self._pending_select_setlist_id: int | None = None
 
     def _set_editor_enabled(self, on: bool) -> None:
         self._editor_enabled = on
@@ -806,6 +836,10 @@ class SetlistsView(QWidget):
             self.assignment_panel.clear()
 
     def select_setlist_by_id(self, setlist_id: int) -> None:
+        if not self._splitter_restored:
+            # Defer until after splitters are restored (avoids wrong layout)
+            self._pending_select_setlist_id = setlist_id
+            return
         self._refresh_setlist_tree()
         item = self._find_setlist_item(setlist_id)
         if item:
@@ -1263,13 +1297,45 @@ class SetlistsView(QWidget):
         add_folder(self.app_state.conn, name.strip())
         self._refresh_setlist_tree()
 
+    def _add_setlist_in_folder(self, folder_id: int | None) -> None:
+        """Create a new set in the given folder (or uncategorized if None)."""
+        bands = list_setlists(self.app_state.conn)
+        n = sum(1 for b in bands if b.name.startswith("New setlist"))
+        name = f"New setlist {n + 1}"
+        new_id = add_setlist(self.app_state.conn, name, folder_id=folder_id)
+        self.select_setlist_by_id(new_id)
+
+    def _delete_setlist_by_id(self, setlist_id: int) -> None:
+        """Delete a setlist by id. Used from context menu."""
+        sets_list = list_setlists(self.app_state.conn)
+        s = next((x for x in sets_list if x.id == setlist_id), None)
+        if not s:
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Confirm",
+                f"Delete setlist '{s.name}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
+            delete_setlist(self.app_state.conn, setlist_id)
+            if self._selected_setlist_id == setlist_id:
+                self._selected_setlist_id = None
+                self._set_editor_enabled(False)
+            self._refresh_setlist_tree()
+
     def _on_setlist_tree_context_menu(self, pos) -> None:
         item = self.setlist_tree.itemAt(pos)
         menu = QMenu(self)
+        target_folder_id: int | None = None
         if item:
             if item.data(0, _TYPE_ROLE) == "folder":
                 folder_id = item.data(0, Qt.ItemDataRole.UserRole)
                 if folder_id is not None:
+                    target_folder_id = folder_id
                     menu.addAction("Rename folder").triggered.connect(
                         lambda: self._rename_folder(folder_id)
                     )
@@ -1277,10 +1343,18 @@ class SetlistsView(QWidget):
                         lambda: self._delete_folder(folder_id)
                     )
             elif item.data(0, _TYPE_ROLE) == "setlist":
-                pass
+                setlist_id = item.data(0, Qt.ItemDataRole.UserRole)
+                if setlist_id is not None:
+                    parent = item.parent()
+                    target_folder_id = parent.data(0, Qt.ItemDataRole.UserRole) if parent else None
+                    menu.addAction("Delete set").triggered.connect(
+                        lambda: self._delete_setlist_by_id(setlist_id)
+                    )
+        menu.addAction("New set").triggered.connect(
+            lambda: self._add_setlist_in_folder(target_folder_id)
+        )
         menu.addAction("Add folder").triggered.connect(self._add_folder)
-        if menu.actions():
-            menu.exec(self.setlist_tree.viewport().mapToGlobal(pos))
+        menu.exec(self.setlist_tree.viewport().mapToGlobal(pos))
 
     def _rename_folder(self, folder_id: int) -> None:
         folders = {f.id: f for f in list_folders(self.app_state.conn)}
@@ -1422,23 +1496,37 @@ class SetlistsView(QWidget):
         self._save_songs_table_header_state()
         set_setlists_top_split_state(self.top_split.sizes())
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._refresh_setlist_tree()
+    def _restore_setlists_splitters(self) -> None:
+        """Restore splitter positions from preferences. Runs deferred so layout is ready."""
+        total = self.setlists_splitter.width()
+        if total < 200:
+            return  # Splitter not ready yet
         if not self._splitter_restored:
             self._splitter_restored = True
             saved = get_setlists_splitter_state()
-            if saved:
-                self.setlists_splitter.setSizes(saved)
+            if saved and len(saved) >= 2:
+                left_saved, right_saved = saved[0], saved[1]
+                total_saved = left_saved + right_saved
+                if total_saved > 0 and left_saved >= 120:
+                    ratio = left_saved / total_saved
+                    left_now = int(total * ratio)
+                    left_now = max(120, min(320, left_now))  # Clamp to tree min/max
+                    self.setlists_splitter.setSizes([left_now, total - left_now])
+                else:
+                    self.setlists_splitter.setSizes(saved)
+            else:
+                left_default = min(200, total - 120)
+                left_default = max(120, min(320, left_default))
+                self.setlists_splitter.setSizes([left_default, total - left_default])
         if not self._editor_splitter_restored:
             self._editor_splitter_restored = True
             saved = get_setlists_editor_splitter_state()
-            if saved:
+            if saved and len(saved) >= 2:
                 self.editor_splitter.setSizes(saved)
         if not self._top_split_restored:
             self._top_split_restored = True
             saved = get_setlists_top_split_state()
-            if saved:
+            if saved and len(saved) >= 2:
                 self.top_split.setSizes(saved)
         if not self._songs_table_header_restored:
             self._songs_table_header_restored = True
@@ -1448,3 +1536,24 @@ class SetlistsView(QWidget):
                 for i, w in enumerate(saved):
                     if i < hh.count():
                         hh.resizeSection(i, w)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # Restore splitters first (deferred so layout is ready), then load data.
+        # This prevents the folder/sets list from taking the entire screen.
+        QTimer.singleShot(100, self._restore_setlists_splitters)
+        QTimer.singleShot(150, self._on_show_deferred)
+
+    def _on_show_deferred(self) -> None:
+        """Called after showEvent so settings are restored before loading data."""
+        self._refresh_setlist_tree()
+        if self._pending_select_setlist_id is not None:
+            sid = self._pending_select_setlist_id
+            self._pending_select_setlist_id = None
+            item = self._find_setlist_item(sid)
+            if item:
+                parent = item.parent()
+                if parent:
+                    parent.setExpanded(True)
+                self.setlist_tree.setCurrentItem(item)
+                self.setlist_tree.scrollToItem(item)
