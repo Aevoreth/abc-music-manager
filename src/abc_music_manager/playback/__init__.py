@@ -1,5 +1,5 @@
 """
-ABC playback: ABC to MIDI conversion, FluidSynth playback, part mute/solo, pan.
+ABC playback: ABC to MIDI conversion, TinySoundFont playback, part mute/solo, pan.
 """
 
 from .abc_to_midi import abc_to_midi

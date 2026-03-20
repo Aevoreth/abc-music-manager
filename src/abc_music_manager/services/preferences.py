@@ -532,19 +532,6 @@ def to_music_relative(path: str) -> str:
 # --- Playback preferences ---
 
 
-def get_playback_fluidsynth_bin_path() -> str:
-    """FluidSynth bin directory (contains libfluidsynth DLL). Empty = use default C:\\tools\\fluidsynth\\bin."""
-    prefs = load_preferences()
-    return (prefs.get("playback_fluidsynth_bin_path") or "").strip()
-
-
-def set_playback_fluidsynth_bin_path(path: str) -> None:
-    """Set FluidSynth bin directory."""
-    prefs = load_preferences()
-    prefs["playback_fluidsynth_bin_path"] = (path or "").strip()
-    save_preferences(prefs)
-
-
 def get_playback_soundfont_path() -> str:
     """User-configured soundfont path. Empty = use default lookup."""
     prefs = load_preferences()

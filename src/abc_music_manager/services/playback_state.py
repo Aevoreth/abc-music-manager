@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import multiprocessing
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtCore import QObject, Signal, QTimer, QThread
@@ -124,8 +125,8 @@ class PlaybackState(QObject):
         except Exception as e:
             self.playback_failed.emit(
                 f"Could not initialize audio: {e}\n\n"
-                "On Windows, FluidSynth requires the FluidSynth library (DLL) to be installed. "
-                "Download from https://github.com/FluidSynth/fluidsynth/releases and ensure it is on PATH."
+                "Ensure TinySoundFont and PyAudio are installed. "
+                "Run: pip install tinysoundfont pyaudio"
             )
             return None
 
@@ -144,6 +145,10 @@ class PlaybackState(QObject):
     @property
     def is_playing(self) -> bool:
         return self._player is not None and self._player.is_playing()
+
+    @property
+    def is_paused(self) -> bool:
+        return self._player is not None and self._player.is_paused()
 
     @property
     def position_sec(self) -> float:
@@ -275,6 +280,11 @@ class PlaybackState(QObject):
         player = self._ensure_player()
         if player is None:
             return False
+        if self._player and self._player.is_paused():
+            self._player.resume()
+            self._position_timer.start()
+            self.state_changed.emit()
+            return True
         if self._conversion_worker is not None and self._conversion_worker.isRunning():
             return True  # Already converting
         self._conversion_cancelled = False
@@ -292,12 +302,16 @@ class PlaybackState(QObject):
         self._conversion_worker = None
         if self._conversion_cancelled or not self._player or not self._playlist or self._current_index < 0:
             return
-        ok, err = self._player.play(midi_bytes)
+        ok, err = self._player.play(
+            midi_bytes,
+            part_mutes=self._part_mutes,
+            tempo_factor=self._tempo_factor,
+        )
         if ok:
             self._position_timer.start()
         else:
             self.playback_failed.emit(
-                f"Playback failed: {err}" if err else "FluidSynth could not start. Check soundfont in Settings."
+                f"Playback failed: {err}" if err else "TinySoundFont could not start. Check soundfont in Settings."
             )
         self.state_changed.emit()
 
@@ -323,6 +337,20 @@ class PlaybackState(QObject):
             self._player.stop()
         self.state_changed.emit()
 
+    def pause(self) -> None:
+        """Pause playback."""
+        self._position_timer.stop()
+        if self._player:
+            self._player.pause()
+        self.state_changed.emit()
+
+    def resume(self) -> None:
+        """Resume playback."""
+        if self._player and self._player.is_paused():
+            self._player.resume()
+            self._position_timer.start()
+        self.state_changed.emit()
+
     def panic(self) -> None:
         """MIDI panic then stop. Cancels conversion worker like stop() to avoid QThread crash."""
         self._position_timer.stop()
@@ -344,7 +372,7 @@ class PlaybackState(QObject):
         self.state_changed.emit()
 
     def _on_position_tick(self) -> None:
-        if self._player and not self._player.is_playing():
+        if self._player and not self._player.is_playing() and not self._player.is_paused():
             self._position_timer.stop()
             self._advance_to_next()
             return
@@ -360,9 +388,10 @@ class PlaybackState(QObject):
             self.state_changed.emit()
 
     def seek(self, position_sec: float) -> None:
-        """Seek to position. Not yet implemented (FluidSynth seek requires low-level API)."""
-        # TODO: implement when we have seek support
-        pass
+        """Seek to position."""
+        if self._player:
+            self._player.seek(position_sec)
+            self.position_changed.emit(self.position_sec)
 
     def close(self) -> None:
         """Release resources."""

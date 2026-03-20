@@ -215,8 +215,9 @@ class PlaybackToolbar(QToolBar):
 
     def _on_play(self) -> None:
         if self._state.is_playing:
-            return  # TODO: pause when implemented
-        self._state.play()
+            self._state.pause()
+        else:
+            self._state.play()
 
     def _on_stop_clicked(self) -> None:
         """Single-click: defer stop so double-click can cancel it and do panic instead."""
@@ -259,7 +260,13 @@ class PlaybackToolbar(QToolBar):
 
     def _update_ui(self) -> None:
         playing = self._state.is_playing
-        self._play_btn.setText(_icon_char("⏸") + " Pause" if playing else _icon_char("▶") + " Play")
+        paused = self._state.is_paused
+        if playing:
+            self._play_btn.setText(_icon_char("⏸") + " Pause")
+        elif paused:
+            self._play_btn.setText(_icon_char("▶") + " Resume")
+        else:
+            self._play_btn.setText(_icon_char("▶") + " Play")
         self._vol_slider.blockSignals(True)
         self._vol_slider.setValue(int(self._state.volume))
         self._vol_slider.blockSignals(False)

@@ -49,8 +49,6 @@ from ..services.preferences import (
     get_default_lotro_root,
     get_music_root,
     get_set_export_dir,
-    get_playback_fluidsynth_bin_path,
-    set_playback_fluidsynth_bin_path,
     get_playback_soundfont_path,
     set_playback_soundfont_path,
     get_playback_volume,
@@ -1043,23 +1041,6 @@ class SettingsView(QWidget):
     def _build_playback_tab(self) -> QWidget:
         w = QWidget()
         v = QVBoxLayout(w)
-        v.addWidget(QLabel("FluidSynth bin directory (Windows):"))
-        fs_row = QHBoxLayout()
-        self.playback_fluidsynth_bin_edit = QLineEdit()
-        self.playback_fluidsynth_bin_edit.setPlaceholderText("e.g. C:\\tools\\fluidsynth\\bin — folder with libfluidsynth DLL")
-        self.playback_fluidsynth_bin_edit.setText(get_playback_fluidsynth_bin_path())
-        self.playback_fluidsynth_bin_edit.textChanged.connect(
-            lambda: set_playback_fluidsynth_bin_path(self.playback_fluidsynth_bin_edit.text())
-        )
-        self.playback_fluidsynth_bin_edit.setToolTip(
-            "Folder containing libfluidsynth DLL. Required on Windows if FluidSynth is not at C:\\tools\\fluidsynth\\bin. "
-            "Download from https://github.com/FluidSynth/fluidsynth/releases"
-        )
-        fs_row.addWidget(self.playback_fluidsynth_bin_edit)
-        fs_browse_btn = QPushButton("Browse...")
-        fs_browse_btn.clicked.connect(self._on_browse_fluidsynth_bin)
-        fs_row.addWidget(fs_browse_btn)
-        v.addLayout(fs_row)
         v.addWidget(QLabel("Soundfont path (empty = use default lookup):"))
         sf_row = QHBoxLayout()
         self.playback_soundfont_edit = QLineEdit()
@@ -1112,13 +1093,6 @@ class SettingsView(QWidget):
         v.addLayout(stereo_row)
         v.addStretch()
         return w
-
-    def _on_browse_fluidsynth_bin(self) -> None:
-        path = QFileDialog.getExistingDirectory(
-            self, "Select FluidSynth bin folder (contains libfluidsynth DLL)", ""
-        )
-        if path:
-            self.playback_fluidsynth_bin_edit.setText(path)
 
     def _on_browse_soundfont(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

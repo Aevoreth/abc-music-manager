@@ -1,5 +1,5 @@
 """
-Standalone ABC-to-MIDI conversion for subprocess. Minimal imports to avoid loading Qt/FluidSynth.
+Standalone ABC-to-MIDI conversion for subprocess. Minimal imports to avoid loading Qt.
 """
 
 from __future__ import annotations
