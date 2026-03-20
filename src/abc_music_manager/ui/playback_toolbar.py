@@ -21,6 +21,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QCheckBox,
     QComboBox,
+    QInputDialog,
+    QMessageBox,
     QSizePolicy,
     QStyle,
     QStyleOptionSlider,
@@ -188,7 +190,7 @@ class PlaylistTable(QTableWidget):
         self.viewport().setAcceptDrops(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDragDropOverwriteMode(False)
-        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
         self.setDropIndicatorShown(True)
         self._drag_row: int = -1
 
@@ -206,7 +208,8 @@ class PlaylistTable(QTableWidget):
             mime = model_mime
         drag = QDrag(self)
         drag.setMimeData(mime)
-        drag.exec(Qt.DropAction.MoveAction)
+        # Use CopyAction so Qt does not remove source rows; we move them ourselves in dragMoveEvent.
+        drag.exec(Qt.DropAction.CopyAction)
         self._drag_row = -1
 
     def _move_row_visually(self, from_row: int, to_row: int) -> None:
@@ -258,8 +261,10 @@ class PlaylistTable(QTableWidget):
             event.ignore()
             return
         event.acceptProposedAction()
+        event.setDropAction(Qt.DropAction.CopyAction)
+        # Apply reorder synchronously while table state is correct.
         if self.rowReordered:
-            QTimer.singleShot(0, self.rowReordered)
+            self.rowReordered()
 
 
 class ClickableScrubSlider(QSlider):
@@ -327,6 +332,8 @@ class PlaybackToolbar(QToolBar):
     Persistent playback toolbar.
     Order: Prev | Play | Stop | Next | Vol | Tempo | Dropdown (parts+playlist) | Meter | Scrub | Stereo slider | Stereo format
     """
+
+    playlistExportedAsSet = Signal(int)  # setlist_id
 
     def __init__(
         self,
@@ -454,6 +461,9 @@ class PlaybackToolbar(QToolBar):
     def _build_dropdown_panel(self) -> None:
         """Build dropdown: two columns - Parts (mute) | Playlist table. Resizable, geometry saved."""
         self._parts_playlist_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._parts_playlist_save_timer = QTimer(self)
+        self._parts_playlist_save_timer.setSingleShot(True)
+        self._parts_playlist_save_timer.timeout.connect(self._save_parts_playlist_state)
 
         # Left: Parts
         parts_w = QWidget()
@@ -492,6 +502,10 @@ class PlaybackToolbar(QToolBar):
         self._playlist_table.horizontalHeader().sectionResized.connect(self._on_playlist_header_resized)
         playlist_w = QWidget()
         pl_layout = QVBoxLayout(playlist_w)
+        self._export_playlist_btn = QPushButton("Export playlist as set")
+        self._export_playlist_btn.setToolTip("Create a new setlist from the current playlist order")
+        self._export_playlist_btn.clicked.connect(self._on_export_playlist_as_set)
+        pl_layout.addWidget(self._export_playlist_btn)
         pl_layout.addWidget(self._playlist_table)
         self._parts_playlist_splitter.addWidget(playlist_w)
 
@@ -544,9 +558,6 @@ class PlaybackToolbar(QToolBar):
         self._refresh_dropdown()
 
         self._dropdown_popup = popup
-        self._parts_playlist_save_timer = QTimer(self)
-        self._parts_playlist_save_timer.setSingleShot(True)
-        self._parts_playlist_save_timer.timeout.connect(self._save_parts_playlist_state)
 
     def _save_parts_playlist_state(self) -> None:
         """Save popup geometry, splitter sizes, table column widths to preferences."""
@@ -564,11 +575,14 @@ class PlaybackToolbar(QToolBar):
         self._parts_playlist_save_timer.start(200)
 
     def _on_playlist_header_resized(self) -> None:
-        self._parts_playlist_save_timer.start(200)
+        if hasattr(self, "_parts_playlist_save_timer") and self._parts_playlist_save_timer:
+            self._parts_playlist_save_timer.start(200)
 
     def _refresh_dropdown(self) -> None:
         self._refresh_parts_display()
         self._refresh_playlist_list()
+        if hasattr(self, "_export_playlist_btn"):
+            self._export_playlist_btn.setEnabled(bool(self._state.playlist))
 
     def _refresh_parts_display(self) -> None:
         if not hasattr(self, "_parts_inner"):
@@ -634,9 +648,9 @@ class PlaybackToolbar(QToolBar):
                 play_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 play_item.setFlags(play_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self._playlist_table.setItem(i, 0, play_item)
-                # Col 1: title
+                # Col 1: title (UserRole: original index for reorder mapping)
                 t = QTableWidgetItem(entry.title)
-                t.setData(Qt.ItemDataRole.UserRole, i)
+                t.setData(Qt.ItemDataRole.UserRole, (sid, i) if sid else i)
                 t.setFlags(t.flags() & ~Qt.ItemFlag.ItemIsEditable)
                 self._playlist_table.setItem(i, 1, t)
                 # Cols 2-4
@@ -662,8 +676,13 @@ class PlaybackToolbar(QToolBar):
         for row in range(self._playlist_table.rowCount()):
             it = self._playlist_table.item(row, 1)
             if it:
-                old = it.data(Qt.ItemDataRole.UserRole)
-                indices.append(old if old is not None else row)
+                val = it.data(Qt.ItemDataRole.UserRole)
+                if isinstance(val, tuple):
+                    indices.append(val[1])
+                elif val is not None:
+                    indices.append(val)
+                else:
+                    indices.append(row)
         if len(indices) == len(self._state.playlist):
             self._state.reorder_playlist(indices)
 
@@ -671,6 +690,54 @@ class PlaybackToolbar(QToolBar):
         """Double-click on song in queue: jump to that song and start playing."""
         if 0 <= row < len(self._state.playlist):
             self._state.go_to_index(row)
+
+    def _on_export_playlist_as_set(self) -> None:
+        """Create a new setlist from the current playlist and switch to Setlists view."""
+        if not self._app_state or not self._state.playlist:
+            QMessageBox.information(
+                self,
+                "Export playlist as set",
+                "Playlist is empty. Add songs first.",
+            )
+            return
+        # Hide dropdown first: it has WindowStaysOnTopHint so dialogs would appear behind it
+        if hasattr(self, "_dropdown_popup") and self._dropdown_popup and self._dropdown_popup.isVisible():
+            self._dropdown_popup.hide()
+        from ..db.library_query import get_song_id_for_file_path
+        from ..db.setlist_repo import add_setlist, add_setlist_item
+
+        name, ok = QInputDialog.getText(
+            self,
+            "Export playlist as set",
+            "Setlist name:",
+            text=f"Playlist {len(self._state.playlist)} songs",
+        )
+        if not ok or not name.strip():
+            return
+        song_ids: list[int] = []
+        for entry in self._state.playlist:
+            sid = entry.song_id or (
+                get_song_id_for_file_path(self._app_state.conn, entry.file_path) if entry.file_path else None
+            )
+            if sid:
+                song_ids.append(sid)
+
+        if not song_ids:
+            QMessageBox.warning(
+                self,
+                "Export playlist as set",
+                "No playlist songs found in library. Scan your library first.",
+            )
+            return
+        setlist_id = add_setlist(self._app_state.conn, name.strip())
+        for pos, song_id in enumerate(song_ids):
+            add_setlist_item(self._app_state.conn, setlist_id, song_id, position=pos)
+        skipped = len(self._state.playlist) - len(song_ids)
+        self.playlistExportedAsSet.emit(setlist_id)
+        msg = f"Created setlist '{name.strip()}' with {len(song_ids)} song(s)."
+        if skipped:
+            msg += f" ({skipped} not in library, skipped.)"
+        QMessageBox.information(self, "Export playlist as set", msg)
 
     def _on_playlist_context_menu(self, pos: QPoint) -> None:
         if not hasattr(self, "_playlist_table"):

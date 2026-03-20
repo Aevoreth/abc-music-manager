@@ -121,6 +121,7 @@ class MainWindow(QMainWindow):
         self.stacked.addWidget(SetPlaybackView(app_state, self.playback_state))
         self.stacked.addWidget(SettingsView(app_state))
         self.library_view.navigateToSetlist.connect(self._on_navigate_to_setlist)
+        self._playback_toolbar.playlistExportedAsSet.connect(self._on_navigate_to_setlist)
 
         self.nav_list = QListWidget()
         self.nav_list.setObjectName("nav_list")
