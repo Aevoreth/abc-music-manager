@@ -54,6 +54,16 @@ def list_song_layouts_for_song_and_band(conn: sqlite3.Connection, song_id: int, 
     return [SongLayoutRow(id=r[0], song_id=r[1], band_layout_id=r[2], name=r[3], created_at=r[4], updated_at=r[5]) for r in cur.fetchall()]
 
 
+def get_or_create_song_layout_for_band(
+    conn: sqlite3.Connection, song_id: int, band_layout_id: int
+) -> int:
+    """Return song_layout_id for (song_id, band_layout_id). Creates blank layout if none exists."""
+    layouts = list_song_layouts_for_song_and_band(conn, song_id, band_layout_id)
+    if layouts:
+        return layouts[0].id
+    return add_song_layout(conn, song_id, band_layout_id, name=None)
+
+
 def add_song_layout(conn: sqlite3.Connection, song_id: int, band_layout_id: int, name: str | None = None) -> int:
     now = _now()
     cur = conn.execute(

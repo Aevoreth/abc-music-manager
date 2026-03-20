@@ -6,6 +6,7 @@ REQUIREMENTS §6.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget,
@@ -34,6 +35,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QStyledItemDelegate,
     QFrame,
+    QFileDialog,
 )
 from PySide6.QtCore import Qt, QDate, QTime, QTimer, QMimeData, QSize, QRect, QPoint
 from PySide6.QtGui import QColor, QFont, QDrag, QMouseEvent, QPixmap, QPainter
@@ -59,11 +61,13 @@ from ..db.setlist_repo import (
     update_setlist,
     delete_setlist,
     move_setlist_to_folder,
+    list_setlist_items,
     list_setlist_items_with_song_meta,
     add_setlist_item,
     update_setlist_item,
     remove_setlist_item,
     reorder_setlist_items,
+    merge_setlist_into,
     get_setlist_band_assignments,
     SetlistRow,
     SetlistItemSongMetaRow,
@@ -74,10 +78,13 @@ from ..db.song_layout_repo import (
     set_song_layout_assignment,
     get_song_layout_assignments,
 )
-from ..db.band_repo import list_all_band_layouts, list_layout_slots, list_band_members
+from ..db.band_repo import list_all_band_layouts, list_layout_slots, list_band_members, get_band_layout_display_name
 from ..db.setlist_folder_repo import add_folder, update_folder, delete_folder, list_folders, reorder_folders
 from ..db.player_repo import list_player_instruments_bulk
 from ..db.instrument import get_instrument_ids_with_same_name_ci
+from ..db.library_query import get_primary_file_path_for_song, get_song_id_for_file_path
+from ..services.abcp_service import parse_abcp, write_abcp
+from ..services.preferences import get_set_export_dir
 from .setlist_band_assignment_panel import SetlistBandAssignmentPanel
 from .set_export_dialog import SetExportDialog
 from .theme import COLOR_ON_SURFACE, COLOR_PRIMARY
@@ -625,6 +632,10 @@ class SetlistsView(QWidget):
         add_folder_btn.clicked.connect(self._add_folder)
         add_folder_btn.setFixedWidth(fm.horizontalAdvance("Add folder") + 24)
         btn_row.addWidget(add_folder_btn)
+        import_abcp_btn = QPushButton("Import ABCP")
+        import_abcp_btn.clicked.connect(self._import_abcp)
+        import_abcp_btn.setFixedWidth(fm.horizontalAdvance("Import ABCP") + 24)
+        btn_row.addWidget(import_abcp_btn)
         btn_row.addStretch()
         root.addLayout(btn_row)
 
@@ -963,7 +974,23 @@ class SetlistsView(QWidget):
         self.setlist_tree.blockSignals(False)
         self._on_setlist_selected(self.setlist_tree.currentItem(), None)
 
-    def _on_setlist_selected(self, current: QTreeWidgetItem | None, _previous: QTreeWidgetItem | None) -> None:
+    def _on_setlist_selected(self, current: QTreeWidgetItem | None, previous: QTreeWidgetItem | None) -> None:
+        # When switching away from a setlist with unsaved changes, confirm first
+        if previous is not None and previous.data(0, _TYPE_ROLE) == "setlist":
+            is_switching = current is None or current.data(0, _TYPE_ROLE) != "setlist" or current.data(0, Qt.ItemDataRole.UserRole) != previous.data(0, Qt.ItemDataRole.UserRole)
+            if is_switching and self.has_unsaved_changes():
+                reply = QMessageBox.question(
+                    self,
+                    "Unsaved changes",
+                    "You have unsaved changes. Are you sure you want to leave?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if reply != QMessageBox.StandardButton.Yes:
+                    self.setlist_tree.blockSignals(True)
+                    self.setlist_tree.setCurrentItem(previous)
+                    self.setlist_tree.blockSignals(False)
+                    return
         if current is None or current.data(0, _TYPE_ROLE) != "setlist":
             self._selected_setlist_id = None
             self._set_editor_enabled(False)
@@ -1319,6 +1346,233 @@ class SetlistsView(QWidget):
             return
         self._open_export_dialog(self._selected_setlist_id)
 
+    def _import_abcp(self) -> None:
+        """Import an ABCP file as a new setlist."""
+        start = get_set_export_dir() or str(Path.home())
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Import ABCP",
+            start,
+            "ABCP Playlist (*.abcp);;All Files (*)",
+        )
+        if not path:
+            return
+        path_obj = Path(path)
+        try:
+            track_paths = parse_abcp(path_obj)
+        except ValueError as e:
+            QMessageBox.critical(
+                self,
+                "Import ABCP",
+                f"Could not read ABCP file:\n{e}",
+            )
+            return
+        if not track_paths:
+            QMessageBox.information(
+                self,
+                "Import ABCP",
+                "The file contains no tracks.",
+            )
+            return
+        conn = self.app_state.conn
+        matched: list[tuple[int, int]] = []  # (position, song_id)
+        unmatched: list[str] = []
+        for pos, file_path in enumerate(track_paths):
+            song_id = get_song_id_for_file_path(conn, file_path)
+            if song_id is not None:
+                matched.append((pos, song_id))
+            else:
+                unmatched.append(file_path)
+        if not matched:
+            QMessageBox.warning(
+                self,
+                "Import ABCP",
+                "None of the tracks in the file were found in your library. "
+                "Paths must match exactly.",
+            )
+            return
+        if unmatched:
+            reply = QMessageBox.question(
+                self,
+                "Import ABCP",
+                f"{len(matched)} of {len(track_paths)} tracks matched. "
+                f"{len(unmatched)} path(s) not found in library.\n\n"
+                "Import the matched tracks only?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+        setlist_name = path_obj.stem
+        setlist_id = add_setlist(self.app_state.conn, setlist_name)
+        for pos, song_id in matched:
+            add_setlist_item(
+                self.app_state.conn,
+                setlist_id,
+                song_id,
+                position=pos,
+            )
+        self._refresh_setlist_tree()
+        self.select_setlist_by_id(setlist_id)
+        QMessageBox.information(
+            self,
+            "Import ABCP",
+            f"Imported {len(matched)} tracks into setlist '{setlist_name}'.",
+        )
+
+    def _export_to_abcp(self, setlist_id: int) -> None:
+        """Export setlist to ABCP file."""
+        setlists = {s.id: s for s in list_setlists(self.app_state.conn)}
+        s = setlists.get(setlist_id)
+        if not s:
+            return
+        items = list_setlist_items_with_song_meta(self.app_state.conn, setlist_id)
+        if not items:
+            QMessageBox.warning(
+                self,
+                "Export to ABCP",
+                "This setlist has no songs to export.",
+            )
+            return
+        reply = QMessageBox.question(
+            self,
+            "Export to ABCP",
+            "ABCP files contain only track paths and song order. Band layout, "
+            "part assignments, notes, timing, and other metadata will not be included. "
+            "Exported files remain compatible with ABC Player.\n\nContinue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        conn = self.app_state.conn
+        track_paths: list[str] = []
+        skipped = 0
+        for row in items:
+            fp = get_primary_file_path_for_song(conn, row.item.song_id)
+            if fp:
+                track_paths.append(fp)
+            else:
+                skipped += 1
+        if not track_paths:
+            QMessageBox.warning(
+                self,
+                "Export to ABCP",
+                "No songs have file paths; nothing to export.",
+            )
+            return
+        start = get_set_export_dir() or str(Path.home())
+        default_name = f"{s.name}.abcp"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export to ABCP",
+            str(Path(start) / default_name),
+            "ABCP Playlist (*.abcp);;All Files (*)",
+        )
+        if not path:
+            return
+        if not path.lower().endswith(".abcp"):
+            path = path + ".abcp"
+        try:
+            write_abcp(Path(path), track_paths)
+        except OSError as e:
+            QMessageBox.critical(
+                self,
+                "Export to ABCP",
+                f"Could not write file:\n{e}",
+            )
+            return
+        msg = f"Exported {len(track_paths)} tracks to {Path(path).name}."
+        if skipped:
+            msg += f"\n\n{skipped} song(s) had no file path and were omitted."
+        QMessageBox.information(self, "Export to ABCP", msg)
+
+    def _merge_setlist_into(self, target_setlist_id: int, prepend: bool) -> None:
+        """Prepend or append another setlist into the target setlist."""
+        all_setlists = list_setlists(self.app_state.conn)
+        target = next((s for s in all_setlists if s.id == target_setlist_id), None)
+        if not target:
+            return
+        others = [(s, len(list_setlist_items(self.app_state.conn, s.id))) for s in all_setlists if s.id != target_setlist_id]
+        if not others:
+            QMessageBox.information(
+                self,
+                "Merge setlist",
+                "No other setlists to merge. Create another setlist first.",
+            )
+            return
+        titles = [f"{s.name} ({n} songs)" for s, n in others]
+        title, ok = QInputDialog.getItem(
+            self,
+            "Prepend setlist" if prepend else "Append setlist",
+            "Select setlist to merge:",
+            titles,
+            0,
+            False,
+        )
+        if not ok or not title:
+            return
+        idx = titles.index(title)
+        source_setlist_id = others[idx][0].id
+        source_items_count = others[idx][1]
+        if source_items_count == 0:
+            QMessageBox.information(
+                self,
+                "Merge setlist",
+                "The selected setlist has no songs.",
+            )
+            return
+        source_setlist = others[idx][0]
+        keep_band_layout_id: int | None = None
+        target_bl = target.band_layout_id
+        source_bl = source_setlist.band_layout_id
+        if target_bl != source_bl:
+            if target_bl is None:
+                keep_band_layout_id = source_bl
+            elif source_bl is None:
+                keep_band_layout_id = target_bl
+            else:
+                target_display = get_band_layout_display_name(self.app_state.conn, target_bl)
+                source_display = get_band_layout_display_name(self.app_state.conn, source_bl)
+                msg_box = QMessageBox(self)
+                msg_box.setWindowTitle("Choose band layout")
+                msg_box.setText("Target and source use different band layouts. Which should the merged setlist use?")
+                msg_box.setInformativeText(f"Target: {target_display}\nSource: {source_display}\n\nSongs using the discarded layout will switch to their setup from the kept layout, or get a blank one if none exists.")
+                btn_target = msg_box.addButton("Keep target's layout", QMessageBox.ButtonRole.ActionRole)
+                btn_source = msg_box.addButton("Keep source's layout", QMessageBox.ButtonRole.ActionRole)
+                msg_box.addButton(QMessageBox.StandardButton.Cancel)
+                msg_box.exec()
+                if msg_box.clickedButton() == btn_target:
+                    keep_band_layout_id = target_bl
+                elif msg_box.clickedButton() == btn_source:
+                    keep_band_layout_id = source_bl
+                else:
+                    return
+        try:
+            added = merge_setlist_into(
+                self.app_state.conn,
+                target_setlist_id,
+                source_setlist_id,
+                prepend=prepend,
+                keep_band_layout_id=keep_band_layout_id,
+            )
+        except ValueError as e:
+            QMessageBox.critical(self, "Merge setlist", str(e))
+            return
+        self._refresh_setlist_tree()
+        if self._selected_setlist_id == target_setlist_id:
+            cur = self.setlist_tree.currentItem()
+            if cur:
+                self._on_setlist_selected(cur, None)
+            else:
+                self._refresh_songs_table()
+        action = "Prepended" if prepend else "Appended"
+        QMessageBox.information(
+            self,
+            "Merge setlist",
+            f"{action} {added} song(s) from '{source_setlist.name}' into '{target.name}'.",
+        )
+
     def _open_export_dialog(self, setlist_id: int) -> None:
         """Open the set export dialog for the given setlist."""
         setlists = {s.id: s for s in list_setlists(self.app_state.conn)}
@@ -1386,6 +1640,15 @@ class SetlistsView(QWidget):
                     target_folder_id = parent.data(0, Qt.ItemDataRole.UserRole) if parent else None
                     menu.addAction("Export set...").triggered.connect(
                         lambda: self._open_export_dialog(setlist_id)
+                    )
+                    menu.addAction("Export to ABCP...").triggered.connect(
+                        lambda: self._export_to_abcp(setlist_id)
+                    )
+                    menu.addAction("Prepend setlist...").triggered.connect(
+                        lambda: self._merge_setlist_into(setlist_id, prepend=True)
+                    )
+                    menu.addAction("Append setlist...").triggered.connect(
+                        lambda: self._merge_setlist_into(setlist_id, prepend=False)
                     )
                     menu.addAction("Delete set").triggered.connect(
                         lambda: self._delete_setlist_by_id(setlist_id)

@@ -107,6 +107,16 @@ def list_all_band_layouts(conn: sqlite3.Connection) -> list[tuple[int, str, str]
     return [(r[0], r[1], r[2]) for r in cur.fetchall()]
 
 
+def get_band_layout_display_name(conn: sqlite3.Connection, band_layout_id: int | None) -> str:
+    """Return display string for band layout (e.g. 'Band Name — Layout Name'). Returns '(draft)' if None."""
+    if band_layout_id is None:
+        return "(draft)"
+    for lid, layout_name, band_name in list_all_band_layouts(conn):
+        if lid == band_layout_id:
+            return f"{band_name} — {layout_name}"
+    return "(unknown)"
+
+
 def list_band_layouts(conn: sqlite3.Connection, band_id: int) -> list[BandLayoutRow]:
     cur = conn.execute(
         "SELECT id, band_id, name, created_at, updated_at FROM BandLayout WHERE band_id = ? ORDER BY name",

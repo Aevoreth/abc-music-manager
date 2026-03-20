@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .setlist_folder_repo import SetlistFolderRow, list_folders
+from .song_layout_repo import get_or_create_song_layout_for_band
 
 
 def _now() -> str:
@@ -380,6 +381,80 @@ def reorder_setlist_items(conn: sqlite3.Connection, setlist_id: int, item_ids_in
             (pos, now, item_id, setlist_id),
         )
     conn.commit()
+
+
+def merge_setlist_into(
+    conn: sqlite3.Connection,
+    target_setlist_id: int,
+    source_setlist_id: int,
+    prepend: bool,
+    keep_band_layout_id: int | None = None,
+) -> int:
+    """
+    Merge source setlist into target. Copies items (song, layout, overrides, band assignments).
+    prepend=True: source items before target items.
+    prepend=False: source items after target items.
+    When target and source have different band layouts, keep_band_layout_id must be provided.
+    Songs using the discarded layout switch to their setup from the kept layout, or get a blank one.
+    Returns number of items added.
+    """
+    all_setlists = {s.id: s for s in list_setlists(conn)}
+    target_setlist = all_setlists.get(target_setlist_id)
+    source_setlist = all_setlists.get(source_setlist_id)
+    if not target_setlist or not source_setlist:
+        return 0
+
+    target_bl = target_setlist.band_layout_id
+    source_bl = source_setlist.band_layout_id
+    layouts_differ = target_bl != source_bl
+
+    if layouts_differ and keep_band_layout_id is None:
+        raise ValueError("Target and source have different band layouts; keep_band_layout_id required")
+
+    target_items = list_setlist_items(conn, target_setlist_id)
+    source_items = list_setlist_items(conn, source_setlist_id)
+    if not source_items:
+        return 0
+
+    kept_bl = keep_band_layout_id if layouts_differ else target_bl
+
+    if layouts_differ and kept_bl == source_bl:
+        update_setlist(conn, target_setlist_id, band_layout_id=source_bl)
+        for item_row, _ in target_items:
+            new_layout_id = get_or_create_song_layout_for_band(conn, item_row.song_id, source_bl)
+            update_setlist_item(conn, item_row.id, song_layout_id=new_layout_id)
+
+    target_item_ids = [item[0].id for item in target_items]
+    new_item_ids: list[int] = []
+    base_pos = 0 if prepend else len(target_item_ids)
+
+    for i, (item_row, _) in enumerate(source_items):
+        if layouts_differ and kept_bl == target_bl:
+            song_layout_id = get_or_create_song_layout_for_band(conn, item_row.song_id, target_bl)
+            copy_assignments = False
+        else:
+            song_layout_id = item_row.song_layout_id
+            copy_assignments = True
+
+        new_id = add_setlist_item(
+            conn,
+            target_setlist_id,
+            item_row.song_id,
+            position=base_pos + i,
+            song_layout_id=song_layout_id,
+            override_change_duration_seconds=item_row.override_change_duration_seconds,
+        )
+        new_item_ids.append(new_id)
+        if copy_assignments:
+            for player_id, part_number in get_setlist_band_assignments(conn, item_row.id).items():
+                upsert_setlist_band_assignment(conn, new_id, player_id, part_number)
+
+    if prepend:
+        all_ids = new_item_ids + target_item_ids
+    else:
+        all_ids = target_item_ids + new_item_ids
+    reorder_setlist_items(conn, target_setlist_id, all_ids)
+    return len(new_item_ids)
 
 
 # --- SetlistBandAssignment (per-setlist-item player -> part overrides) ---

@@ -257,6 +257,16 @@ def get_primary_file_path_for_song(conn: sqlite3.Connection, song_id: int) -> Op
     return row[0] if row else None
 
 
+def get_song_id_for_file_path(conn: sqlite3.Connection, file_path: str) -> Optional[int]:
+    """Return song_id for a file path if it exists in SongFile, else None."""
+    cur = conn.execute(
+        "SELECT song_id FROM SongFile WHERE file_path = ? LIMIT 1",
+        (file_path,),
+    )
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
 def get_title_composers_for_file_path(conn: sqlite3.Connection, file_path: str) -> Optional[tuple[str, str]]:
     """Return (title, composers) for a file path if it exists in SongFile, else None."""
     cur = conn.execute(
