@@ -514,6 +514,7 @@ class SetlistSongsTable(QTableWidget):
         super().__init__(parent)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDragDropOverwriteMode(False)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
@@ -591,9 +592,9 @@ class SetlistSongsTable(QTableWidget):
         if not mime.hasFormat(_MIME_ROW):
             event.ignore()
             return
-        event.accept()
+        event.acceptProposedAction()
         if self.rowReordered:
-            self.rowReordered()
+            QTimer.singleShot(0, self.rowReordered)
 
 
 class SetlistsView(QWidget):
@@ -1261,11 +1262,13 @@ class SetlistsView(QWidget):
         """Persist current table order after drag-drop (rows already moved visually)."""
         if self._filling_songs or not self._selected_setlist_id:
             return
-        ids = []
+        ids: list[int] = []
         for r in range(self.songs_table.rowCount()):
             it = self.songs_table.item(r, 2)
             if it:
-                ids.append(it.data(Qt.ItemDataRole.UserRole))
+                val = it.data(Qt.ItemDataRole.UserRole)
+                if val is not None and isinstance(val, int):
+                    ids.append(val)
         if len(ids) != self.songs_table.rowCount():
             return
         cr = self.songs_table.currentRow()
