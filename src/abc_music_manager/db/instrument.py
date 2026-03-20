@@ -13,6 +13,12 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+# Spelling variants: ABC/LOTRO may use different spellings. Maps lowercase variant -> canonical name.
+_INSTRUMENT_SPELLING_VARIANTS: dict[str, str] = {
+    "traveller's trusty fiddle": "Traveler's Trusty Fiddle",
+}
+
+
 def resolve_instrument_id(conn: sqlite3.Connection, name: str) -> int:
     """
     Resolve instrument by name or alternative_names (comma-separated).
@@ -24,11 +30,23 @@ def resolve_instrument_id(conn: sqlite3.Connection, name: str) -> int:
 
 
 def _get_or_create_by_name(conn: sqlite3.Connection, name: str) -> int:
-    """Find by name (exact) or by alternative_names; else insert new."""
+    """Find by name (exact, then case-insensitive) or by alternative_names; else insert new."""
     cur = conn.execute("SELECT id FROM Instrument WHERE name = ?", (name,))
     row = cur.fetchone()
     if row:
         return row[0]
+    # Case-insensitive match (e.g. ABC "Jaunty Hand-knells" vs schema "Jaunty Hand-Knells")
+    cur = conn.execute("SELECT id FROM Instrument WHERE LOWER(name) = LOWER(?)", (name,))
+    row = cur.fetchone()
+    if row:
+        return row[0]
+    # Spelling variant (e.g. "Traveller's Trusty Fiddle" vs "Traveler's Trusty Fiddle")
+    canonical = _INSTRUMENT_SPELLING_VARIANTS.get(name.lower())
+    if canonical:
+        cur = conn.execute("SELECT id FROM Instrument WHERE LOWER(name) = LOWER(?)", (canonical,))
+        row = cur.fetchone()
+        if row:
+            return row[0]
     cur = conn.execute("SELECT id, alternative_names FROM Instrument")
     for row in cur.fetchall():
         aid, alts = row[0], row[1]
@@ -50,6 +68,32 @@ def get_instrument_name(conn: sqlite3.Connection, instrument_id: int) -> str | N
     cur = conn.execute("SELECT name FROM Instrument WHERE id = ?", (instrument_id,))
     row = cur.fetchone()
     return row[0] if row else None
+
+
+def get_instrument_ids_with_same_name_ci(
+    conn: sqlite3.Connection, instrument_id: int
+) -> frozenset[int]:
+    """
+    Return all instrument IDs with the same name (case-insensitive) or spelling variant.
+    Used when comparing part requirements to player instruments, since ABC parsing may have
+    created duplicates (e.g. "Jaunty Hand-knells" vs "Jaunty Hand-Knells", "Traveller's" vs "Traveler's").
+    """
+    name = get_instrument_name(conn, instrument_id)
+    if not name:
+        return frozenset([instrument_id])
+    # Collect equivalent names: this name + variants that map to/from it
+    equiv_lower = {name.lower()}
+    canonical = _INSTRUMENT_SPELLING_VARIANTS.get(name.lower(), name)
+    equiv_lower.add(canonical.lower())
+    for var, can in _INSTRUMENT_SPELLING_VARIANTS.items():
+        if can.lower() == canonical.lower():
+            equiv_lower.add(var)
+    placeholders = ",".join("?" * len(equiv_lower))
+    cur = conn.execute(
+        f"SELECT id FROM Instrument WHERE LOWER(name) IN ({placeholders})",
+        list(equiv_lower),
+    )
+    return frozenset(row[0] for row in cur.fetchall())
 
 
 def list_instruments(conn: sqlite3.Connection) -> list[tuple[int, str]]:

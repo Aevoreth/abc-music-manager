@@ -16,6 +16,7 @@ from .theme import (
     COLOR_OUTLINE,
     COLOR_ON_SURFACE,
     COLOR_ERROR,
+    COLOR_WARNING_ORANGE,
 )
 
 # Grid and card specs
@@ -39,6 +40,8 @@ class LayoutCard:
     part_number: str = "###"
     part_name: str = "(Part Name)"
     instrument_name: str = "(Made for Instrument)"
+    instrument_warning: bool = False
+    part_duplicate: bool = False  # Part assigned to multiple players
 
 
 def _rects_overlap(
@@ -47,6 +50,32 @@ def _rects_overlap(
 ) -> bool:
     """Check if two axis-aligned rectangles overlap."""
     return not (x1 + w1 <= x2 or x2 + w2 <= x1 or y1 + h1 <= y2 or y2 + h2 <= y1)
+
+
+def _draw_text_fitting(
+    painter: QPainter,
+    rect: QRect,
+    alignment: Qt.AlignmentFlag,
+    text: str,
+    font: QFont,
+    min_point_size: int = 6,
+) -> None:
+    """Draw text centered in rect, shrinking font if needed to fit width."""
+    if not text:
+        return
+    f = QFont(font)
+    pt = f.pointSize()
+    while pt >= min_point_size:
+        f.setPointSize(pt)
+        fm = QFontMetrics(f)
+        if fm.horizontalAdvance(text) <= rect.width():
+            painter.setFont(f)
+            painter.drawText(rect, alignment, text)
+            return
+        pt -= 1
+    f.setPointSize(min_point_size)
+    painter.setFont(f)
+    painter.drawText(rect, alignment, text)
 
 
 class BandLayoutGridWidget(QWidget):
@@ -81,6 +110,13 @@ class BandLayoutGridWidget(QWidget):
         self._add_player_btn.move(8, 8)
         self._add_player_btn.raise_()
 
+        self._recenter_btn = QPushButton("Re-center", self)
+        self._recenter_btn.setFixedWidth(
+            self._recenter_btn.fontMetrics().horizontalAdvance("Re-center") + 24
+        )
+        self._recenter_btn.clicked.connect(self.fit_cards_to_view)
+        self._recenter_btn.move(8 + self._add_player_btn.width() + 4, 8)
+
     def set_cards(self, cards: list[LayoutCard]) -> None:
         """Replace the card list."""
         self._cards = list(cards)
@@ -96,6 +132,8 @@ class BandLayoutGridWidget(QWidget):
             part_number=c.part_number,
             part_name=c.part_name,
             instrument_name=c.instrument_name,
+            instrument_warning=getattr(c, "instrument_warning", False),
+            part_duplicate=getattr(c, "part_duplicate", False),
         ) for c in self._cards]
 
     def add_card(self, card: LayoutCard) -> bool:
@@ -163,9 +201,32 @@ class BandLayoutGridWidget(QWidget):
         y = max(Y_MIN, min(Y_MAX, y))
         return x, y
 
+    def fit_cards_to_view(self) -> None:
+        """Pan so the bounding box of all cards is centered and fits in view."""
+        if not self._cards:
+            self._pan_x = 0.0
+            self._pan_y = 0.0
+            self.update()
+            return
+        min_x = min(c.x for c in self._cards)
+        max_x = max(c.x + CARD_WIDTH for c in self._cards)
+        min_y = min(c.y for c in self._cards)
+        max_y = max(c.y + CARD_HEIGHT for c in self._cards)
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        self._pan_x = center_x
+        self._pan_y = center_y
+        self.update()
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        x = 8
+        if self._add_player_btn.isVisible():
+            self._add_player_btn.move(x, 8)
+            x += self._add_player_btn.width() + 4
+        self._recenter_btn.move(x, 8)
         self._add_player_btn.raise_()
+        self._recenter_btn.raise_()
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -206,44 +267,51 @@ class BandLayoutGridWidget(QWidget):
             painter.setBrush(QColor(COLOR_SURFACE))
             painter.drawRoundedRect(rect, 4, 4)
 
-            # Card content - all text centered
-            painter.setPen(QColor(COLOR_ON_SURFACE))
-            margin = 4
+            # Card content - all text centered, shrink font if needed to fit
+            dup_color = QColor("#ff4444") if getattr(card, "part_duplicate", False) else QColor(COLOR_ON_SURFACE)
+            painter.setPen(dup_color)
+            margin = 2
             inner = rect.adjusted(margin, margin, -margin, -margin)
             center = Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop
 
             font = painter.font()
-            font.setPointSize(font.pointSize())
             fm_reg = QFontMetrics(font)
             y = inner.top()
 
-            # Player name
-            painter.setFont(font)
+            # Player name (never duplicated)
+            painter.setPen(QColor(COLOR_ON_SURFACE))
             line_h = fm_reg.height()
-            painter.drawText(QRect(inner.left(), y, inner.width(), line_h), center, card.player_name)
+            _draw_text_fitting(painter, QRect(inner.left(), y, inner.width(), line_h), center, card.player_name, font)
             y += line_h + 2
 
             # Part number (large, bold)
             big_font = QFont(font)
             big_font.setPointSize(font.pointSize() + 14)
             big_font.setWeight(QFont.Weight.Bold)
-            painter.setFont(big_font)
             fm_big = QFontMetrics(big_font)
             line_h = fm_big.height()
-            painter.drawText(QRect(inner.left(), y, inner.width(), line_h), center, card.part_number)
+            painter.setPen(dup_color)
+            _draw_text_fitting(painter, QRect(inner.left(), y, inner.width(), line_h), center, card.part_number, big_font)
             y += line_h + 2
 
             # Instrument / part name
-            painter.setFont(font)
+            if getattr(card, "part_duplicate", False):
+                painter.setPen(dup_color)
+            elif getattr(card, "instrument_warning", False):
+                painter.setPen(QColor(COLOR_WARNING_ORANGE))
             line_h = fm_reg.height()
-            painter.drawText(QRect(inner.left(), y, inner.width(), line_h), center, card.instrument_name)
+            _draw_text_fitting(painter, QRect(inner.left(), y, inner.width(), line_h), center, card.instrument_name, font)
             y += line_h + 2
 
             # Part name (slightly smaller)
             small_font = QFont(font)
             small_font.setPointSize(max(8, font.pointSize() - 1))
-            painter.setFont(small_font)
-            painter.drawText(QRect(inner.left(), y, inner.width(), inner.bottom() - y), center, card.part_name)
+            painter.setPen(dup_color)
+            _draw_text_fitting(
+                painter, QRect(inner.left(), y, inner.width(), inner.bottom() - y), center, card.part_name, small_font
+            )
+
+            painter.setPen(QColor(COLOR_ON_SURFACE))
 
         self._add_player_btn.raise_()
 

@@ -167,6 +167,7 @@ As a band leader, I want to build and edit setlists so I can run live events smo
 - Per-set configuration:
   - A set uses a single band layout for the entire set. When a set has no band layout selected (draft), the UI requires selection before play (DECISIONS 023). Song layouts in the set are based on that band layout.
   - Each song can have zero or more song layouts (band layout + mapping of player→part). Setlist items must have a song layout selected; when none is selected, the UI indicates that a selection is required.
+  - Per-setlist per-song part overrides (SetlistBandAssignment) merge over the song layout in Set Playback (DECISIONS 027).
   - Default part assignments are null (player has no part). In song layout edit mode, a dropdown lists all available parts plus a “None” option for players who don’t have a part in that song (e.g. fewer parts than band members).
 
 ---

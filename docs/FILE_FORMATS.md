@@ -23,6 +23,39 @@ Within each block:
 
 Part count = total number of `X:` occurrences. Parts are stored on the song as a JSON array: `{ part_number, part_name, instrument_id }`.
 
+## ABCP Playlist Format (ABC Player)
+
+Compatibility target: ABC Player by Aifel/Elemond (DECISIONS 022).
+
+ABCP files are XML playlists containing only ordered track paths. No metadata (band layout, part assignments, notes, timing) is stored.
+
+### Structure
+
+- Root: `<playlist fileVersion="3.4.0.300">`
+- Child: `<trackList>` containing `<track>` elements
+- Each track: `<track><location>absolute_path_to.abc</location></track>`
+- Encoding: UTF-8
+
+### Example
+
+```xml
+<?xml version="1.1" encoding="UTF-8" standalone="no"?>
+<playlist fileVersion="3.4.0.300">
+    <trackList>
+        <track>
+            <location>C:\path\to\song.abc</location>
+        </track>
+    </trackList>
+</playlist>
+```
+
+### Import/Export notes
+
+- **Import:** Paths must match library SongFile paths (exact match). Unmatched paths are skipped; user is informed.
+- **Export:** Uses primary file path per song. Band layout, part assignments, notes, timing, and other metadata are not included.
+
+---
+
 ## Storage rules
 - Musical note bodies from ABC are not stored in the database.
 - The `.abc` file remains the source of truth for song content and tag-derived metadata.

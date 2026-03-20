@@ -18,12 +18,18 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
 )
-from PySide6.QtCore import Qt, QByteArray, QRect
+from PySide6.QtCore import Qt, QByteArray, QRect, QTimer, QEvent
 from PySide6.QtGui import QColor, QFontMetrics, QPalette
 
 from ..services.app_state import AppState
 from ..services import preferences
-from ..services.preferences import get_splitter_state, set_splitter_state, set_bands_splitter_state
+from ..services.preferences import (
+    get_splitter_state,
+    set_splitter_state,
+    set_bands_splitter_state,
+    set_setlists_splitter_state,
+    set_setlists_editor_splitter_state,
+)
 
 
 def _restore_window_geometry(window: QMainWindow) -> None:
@@ -133,6 +139,29 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self._splitter)
         self._splitter_initial_sizes_set = False
 
+        self._geometry_save_timer = QTimer(self)
+        self._geometry_save_timer.setSingleShot(True)
+        self._geometry_save_timer.timeout.connect(lambda: _save_window_geometry(self))
+        self._splitter_save_timer = QTimer(self)
+        self._splitter_save_timer.setSingleShot(True)
+        self._splitter_save_timer.timeout.connect(lambda: set_splitter_state(self._splitter.sizes()))
+        self._splitter.splitterMoved.connect(lambda: self._splitter_save_timer.start(150))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "_geometry_save_timer"):
+            self._geometry_save_timer.start(150)
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        if hasattr(self, "_geometry_save_timer"):
+            self._geometry_save_timer.start(150)
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "_geometry_save_timer"):
+            self._geometry_save_timer.start(150)
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if not getattr(self, "_splitter_initial_sizes_set", True):
@@ -158,6 +187,9 @@ class MainWindow(QMainWindow):
         _save_window_geometry(self)
         set_splitter_state(self._splitter.sizes())
         set_bands_splitter_state(self.bands_view.bands_splitter.sizes())
+        set_setlists_splitter_state(self.setlists_view.setlists_splitter.sizes())
+        set_setlists_editor_splitter_state(self.setlists_view.editor_splitter.sizes())
+        self.setlists_view._save_setlists_state()
         self.library_view._save_library_table_header_state()
         super().closeEvent(event)
 

@@ -150,14 +150,32 @@ Notes:
 
 A setlist is played using a **single band layout** for the entire set. Song layouts used in the set are based on that set’s band layout.
 
+### SetlistFolder
+Categories for organizing setlists. Folders are collapsible in the UI; setlists can be moved between folders via drag-drop.
+
+Fields:
+- id (INTEGER PK)
+- name (TEXT NOT NULL)
+- sort_order (INTEGER NOT NULL DEFAULT 0) — display order of folders
+- created_at (DATETIME)
+- updated_at (DATETIME)
+
+---
+
 ### Setlist
 Fields:
 - id (INTEGER PK)
 - name (TEXT)
 - band_layout_id (INTEGER FK → BandLayout.id, NULL) — band layout for the entire set; when NULL, set is draft—UI requires selection before play (DECISIONS 023)
+- folder_id (INTEGER FK → SetlistFolder.id, NULL) — when NULL, setlist appears under "Uncategorized"
+- sort_order (INTEGER NOT NULL DEFAULT 0) — position within folder
 - locked (BOOLEAN NOT NULL DEFAULT 0)
 - default_change_duration_seconds (INTEGER NULL)
 - export_naming_rules (TEXT NULL) — JSON/text blob
+- notes (TEXT NULL)
+- set_date (TEXT NULL) — ISO date YYYY-MM-DD when the set is scheduled
+- set_time (TEXT NULL) — Time HH:MM when the set starts
+- target_duration_seconds (INTEGER NULL) — Target total duration for the set
 - created_at (DATETIME)
 - updated_at (DATETIME)
 

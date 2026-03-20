@@ -132,6 +132,97 @@ def set_bands_splitter_state(sizes: list[int]) -> None:
     save_preferences(prefs)
 
 
+def get_setlists_splitter_state() -> list[int] | None:
+    """Saved setlists tab splitter (setlist list | editor)."""
+    prefs = load_preferences()
+    v = prefs.get("setlists_splitter_state")
+    if isinstance(v, list) and len(v) >= 2:
+        try:
+            return [int(v[0]), int(v[1])]
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_setlists_splitter_state(sizes: list[int]) -> None:
+    prefs = load_preferences()
+    prefs["setlists_splitter_state"] = sizes
+    save_preferences(prefs)
+
+
+def get_setlists_editor_splitter_state() -> list[int] | None:
+    """Saved setlists editor splitter (options+songs | band layout)."""
+    prefs = load_preferences()
+    v = prefs.get("setlists_editor_splitter_state")
+    if isinstance(v, list) and len(v) >= 2:
+        try:
+            return [int(v[0]), int(v[1])]
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_setlists_editor_splitter_state(sizes: list[int]) -> None:
+    prefs = load_preferences()
+    prefs["setlists_editor_splitter_state"] = sizes
+    save_preferences(prefs)
+
+
+def get_setlists_top_split_state() -> list[int] | None:
+    """Saved setlists top split (meta | songs)."""
+    prefs = load_preferences()
+    v = prefs.get("setlists_top_split_state")
+    if isinstance(v, list) and len(v) >= 2:
+        try:
+            return [int(v[0]), int(v[1])]
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_setlists_top_split_state(sizes: list[int]) -> None:
+    prefs = load_preferences()
+    prefs["setlists_top_split_state"] = sizes
+    save_preferences(prefs)
+
+
+def get_setlists_songs_table_header_state() -> list[int] | None:
+    """Saved setlists songs table column widths."""
+    prefs = load_preferences()
+    v = prefs.get("setlists_songs_table_header_state")
+    if isinstance(v, list):
+        try:
+            return [int(x) for x in v]
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_setlists_songs_table_header_state(sizes: list[int]) -> None:
+    prefs = load_preferences()
+    prefs["setlists_songs_table_header_state"] = sizes
+    save_preferences(prefs)
+
+
+def get_setlists_folder_expanded_state() -> list[int]:
+    """Folder ids that are expanded. Returns empty list if not set."""
+    prefs = load_preferences()
+    v = prefs.get("setlists_folder_expanded_state")
+    if isinstance(v, list):
+        try:
+            return [int(x) for x in v]
+        except (TypeError, ValueError):
+            pass
+    return []
+
+
+def set_setlists_folder_expanded_state(folder_ids: list[int]) -> None:
+    """Save folder ids that are expanded."""
+    prefs = load_preferences()
+    prefs["setlists_folder_expanded_state"] = folder_ids
+    save_preferences(prefs)
+
+
 def get_library_table_header_state() -> dict[str, Any] | str | None:
     """
     Saved library table header state. Returns dict with section_sizes, sort_column, sort_order
@@ -380,6 +471,43 @@ def set_set_export_dir(path: str) -> None:
         pass
     prefs["set_export_dir"] = path
     save_preferences(prefs)
+
+
+def get_set_export_prefs() -> dict[str, Any]:
+    """Load set export preferences. Returns dict with defaults for missing keys."""
+    prefs = load_preferences()
+    se = prefs.get("set_export") or {}
+    defaults = {
+        "output_directory": "",
+        "rename_abc_files": True,
+        "export_as_folder": True,
+        "export_as_zip": False,
+        "filename_pattern": "$SongIndex_$FileName",
+        "whitespace_replace": " ",
+        "export_csv_part_sheet": False,
+        "include_composer_in_csv": True,
+        "csv_use_visible_columns": True,
+        "csv_columns_enabled": {
+            "Title": True,
+            "Part Count": True,
+            "Duration": True,
+            "Composers": True,
+            "Transcriber": True,
+        },
+        "csv_part_columns": "part",
+    }
+    result = dict(defaults)
+    for k, v in se.items():
+        if k in result:
+            result[k] = v
+    return result
+
+
+def save_set_export_prefs(prefs: dict[str, Any]) -> None:
+    """Save set export preferences."""
+    all_prefs = load_preferences()
+    all_prefs["set_export"] = prefs
+    save_preferences(all_prefs)
 
 
 def to_music_relative(path: str) -> str:

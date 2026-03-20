@@ -197,6 +197,9 @@
 - **Decision:** Use **PySide6 (Qt for Python)** for the desktop UI instead of Flet.
 - **Rationale:** Flet did not provide the level of theming and visual customization desired (e.g. dark LOTR/LOTRO-inspired scheme). PySide6 offers full Qt theming (QSS, style sheets, palette), native look-and-feel, and broad platform support. The app will be redesigned and rebuilt with Qt; previous Flet-based code is preserved under `/old/` for reference.
 
+## 027 — Setlist part overrides in Set Playback
+- **SetlistBandAssignment** rows override **SongLayoutAssignment** per setlist item and player: if a row exists for `(setlist_item_id, player_id)`, use its `part_number` (NULL means no part for that player on this set); otherwise use the song layout’s assignment for that player. Set Playback and the setlist editor use this merge.
+
 ---
 
 ## Resolved open decisions

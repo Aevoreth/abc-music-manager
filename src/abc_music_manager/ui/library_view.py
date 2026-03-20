@@ -1541,7 +1541,6 @@ class LibraryView(QWidget):
             if layouts:
                 song_layout_id = layouts[0].id
         add_setlist_item(self.app_state.conn, setlist_id, song_id, position, song_layout_id=song_layout_id)
-        QMessageBox.information(self, "Added", "Song added to setlist.")
 
     def _open_song_detail(self, song_id: int) -> None:
         from .song_detail import SongDetailDialog
