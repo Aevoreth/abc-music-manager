@@ -96,7 +96,9 @@ class MainWindow(QMainWindow):
 
         self._build_menu_bar()
         from .playback_toolbar import PlaybackToolbar
-        self._playback_toolbar = PlaybackToolbar(self.playback_state, self)
+        self._playback_toolbar = PlaybackToolbar(
+            self.playback_state, self, app_state=app_state
+        )
         self.addToolBar(self._playback_toolbar)
         central = QWidget()
         self.setCentralWidget(central)

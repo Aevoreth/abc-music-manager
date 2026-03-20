@@ -1,8 +1,13 @@
 """
-Playback toolbar: play/pause/stop, scrub, volume, tempo, stereo, dropdown toggle.
+Playback toolbar: prev/play/stop/next, volume, tempo, parts+playlist dropdown,
+elapsed/total meter, scrub, stereo effect, stereo format.
 """
 
 from __future__ import annotations
+
+import math as _math
+import time
+from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import (
     QToolBar,
@@ -16,16 +21,24 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QSizePolicy,
-    QMenu,
     QStyle,
     QStyleOptionSlider,
+    QApplication,
+    QAbstractItemView,
+    QMenu,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QSplitter,
 )
-from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QObject, QEvent
-from PySide6.QtGui import QAction, QIcon, QMouseEvent
+from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QObject, QEvent, QRect, QMimeData
+from PySide6.QtGui import QMouseEvent, QDrag
 
 from ..services.playback_state import PlaybackState, PlaylistEntry
+
+if TYPE_CHECKING:
+    from ..services.app_state import AppState
 
 
 class _PopupCloseFilter(QObject):
@@ -46,6 +59,205 @@ class _PopupCloseFilter(QObject):
 def _icon_char(c: str) -> str:
     """Use Unicode symbols as fallback when no icon theme."""
     return c
+
+
+# Tempo: 0.25-4.0, 1.0 at center (snapping point). Log scale so center = 1x
+_TEMPO_MIN = 0.25
+_TEMPO_MAX = 4.0
+_TEMPO_SNAP = 1.0
+_TEMPO_LOG_MIN = _math.log(_TEMPO_MIN)
+_TEMPO_LOG_MAX = _math.log(_TEMPO_MAX)
+
+
+def _tempo_slider_to_value(slider_val: int) -> float:
+    t = slider_val / 400.0
+    log_val = _TEMPO_LOG_MIN + t * (_TEMPO_LOG_MAX - _TEMPO_LOG_MIN)
+    v = _math.exp(log_val)
+    if abs(v - _TEMPO_SNAP) < 0.08:
+        return _TEMPO_SNAP
+    return round(v * 20) / 20
+
+
+def _tempo_value_to_slider(val: float) -> int:
+    log_val = _math.log(max(_TEMPO_MIN, min(_TEMPO_MAX, val)))
+    t = (log_val - _TEMPO_LOG_MIN) / (_TEMPO_LOG_MAX - _TEMPO_LOG_MIN)
+    return int(400 * t)
+
+
+class TempoButtonWithPopup(QPushButton):
+    """Button showing current tempo; click opens vertical slider under button. Second click closes."""
+
+    def __init__(self, playback_state: PlaybackState, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._state = playback_state
+        self._popup: QWidget | None = None
+        self._slider: QSlider | None = None
+        self._update_text()
+        self.setToolTip("Tempo (click for slider: 0.25×–4×)")
+        self.clicked.connect(self._on_clicked)
+
+    def _update_text(self) -> None:
+        self.setText(f"{self._state.tempo_factor:.2f}×")
+
+    def _on_clicked(self) -> None:
+        if self._popup and self._popup.isVisible():
+            self._popup.hide()
+            return
+        self._show_popup()
+
+    def _show_popup(self) -> None:
+        popup = QFrame()
+        popup.setFrameShape(QFrame.Shape.StyledPanel)
+        popup.setWindowFlags(
+            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+        )
+        layout = QVBoxLayout(popup)
+        layout.setContentsMargins(12, 12, 12, 12)
+        lbl = QLabel("1×")
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(lbl)
+        slider = QSlider(Qt.Orientation.Vertical)
+        slider.setRange(0, 400)
+        slider.setValue(_tempo_value_to_slider(self._state.tempo_factor))
+        slider.setFixedHeight(120)
+        slider.setInvertedAppearance(True)
+
+        def on_slide(val: int) -> None:
+            v = _tempo_slider_to_value(val)
+            self._state.tempo_factor = v
+            self._update_text()
+
+        slider.valueChanged.connect(on_slide)
+
+        def update_label(val: int) -> None:
+            v = _tempo_slider_to_value(val)
+            lbl.setText(f"{v:.2f}×")
+
+        slider.valueChanged.connect(update_label)
+        update_label(slider.value())
+        layout.addWidget(slider)
+
+        self._popup = popup
+        self._slider = slider
+        # Explicit size so popup is never zero-sized
+        popup.setMinimumSize(80, 160)
+        popup.adjustSize()
+        # Position upper-left just under button's bottom-left
+        QApplication.processEvents()
+        btn_bottom_left = self.mapToGlobal(self.rect().bottomLeft())
+        popup.move(btn_bottom_left.x(), btn_bottom_left.y() + 4)
+        # Ensure popup fits on the screen that contains the button
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen:
+            gr = screen.availableGeometry()
+            x, y = popup.x(), popup.y()
+            if y + popup.height() > gr.bottom():
+                y = max(gr.top(), gr.bottom() - popup.height() - 20)
+            if x + popup.width() > gr.right():
+                x = max(gr.left(), gr.right() - popup.width() - 20)
+            if x < gr.left():
+                x = gr.left() + 20
+            popup.move(x, y)
+        popup.show()
+        popup.raise_()
+        popup.activateWindow()
+
+
+_MIME_PLAYLIST_ROW = "application/x-playback-playlist-row"
+
+
+def _fmt_duration(sec: float | None) -> str:
+    if sec is None or sec < 0:
+        return "—"
+    m = int(sec // 60)
+    s = int(sec % 60)
+    return f"{m}:{s:02d}" if m > 0 else f"0:{s:02d}"
+
+
+class PlaylistTable(QTableWidget):
+    """Table with drag-drop row reorder, like setlist songs table."""
+
+    rowReordered = None  # Set by parent: callable() -> None
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDragDropOverwriteMode(False)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDropIndicatorShown(True)
+        self._drag_row: int = -1
+
+    def startDrag(self, supportedActions) -> None:
+        row = self.currentRow()
+        if row < 0:
+            return
+        self._drag_row = row
+        mime = QMimeData()
+        mime.setData(_MIME_PLAYLIST_ROW, str(row).encode("utf-8"))
+        indexes = [self.model().index(row, c) for c in range(self.model().columnCount())]
+        model_mime = self.model().mimeData(indexes)
+        if model_mime:
+            model_mime.setData(_MIME_PLAYLIST_ROW, str(row).encode("utf-8"))
+            mime = model_mime
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.exec(Qt.DropAction.MoveAction)
+        self._drag_row = -1
+
+    def _move_row_visually(self, from_row: int, to_row: int) -> None:
+        if from_row == to_row or from_row < 0 or to_row < 0:
+            return
+        n = self.rowCount()
+        if from_row >= n or to_row > n:
+            return
+        items = [self.takeItem(from_row, c) for c in range(self.columnCount())]
+        self.removeRow(from_row)
+        if to_row > from_row:
+            to_row -= 1
+        self.insertRow(to_row)
+        for c, it in enumerate(items):
+            self.setItem(to_row, c, it)
+        self._drag_row = to_row
+        self.selectRow(to_row)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat(_MIME_PLAYLIST_ROW):
+            event.acceptProposedAction()
+            super().dragEnterEvent(event)
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if not event.mimeData().hasFormat(_MIME_PLAYLIST_ROW) or self._drag_row < 0:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        pos = event.position().toPoint()
+        idx = self.indexAt(pos)
+        row = idx.row()
+        if row >= 0:
+            rect = self.visualRect(idx)
+            if pos.y() > rect.center().y():
+                drop_row = row + 1
+            else:
+                drop_row = row
+        else:
+            drop_row = self.rowCount()
+        if drop_row != self._drag_row:
+            self._move_row_visually(self._drag_row, drop_row)
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        mime = event.mimeData()
+        if not mime.hasFormat(_MIME_PLAYLIST_ROW):
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        if self.rowReordered:
+            QTimer.singleShot(0, self.rowReordered)
 
 
 class ClickableScrubSlider(QSlider):
@@ -110,16 +322,28 @@ class ClickableScrubSlider(QSlider):
 
 class PlaybackToolbar(QToolBar):
     """
-    Persistent playback toolbar below menu bar.
-    Play, Stop (double-click = panic), scrub, volume, tempo, stereo, dropdown.
+    Persistent playback toolbar.
+    Order: Prev | Play | Stop | Next | Vol | Tempo | Dropdown (parts+playlist) | Meter | Scrub | Stereo slider | Stereo format
     """
 
-    def __init__(self, playback_state: PlaybackState, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        playback_state: PlaybackState,
+        parent: QWidget | None = None,
+        *,
+        app_state: "AppState | None" = None,
+    ) -> None:
         super().__init__(parent)
         self._state = playback_state
+        self._app_state = app_state
+        self._last_prev_click_time = 0.0
         self.setObjectName("playback_toolbar")
         self.setMovable(False)
         self.setFloatable(False)
+
+        self._prev_btn = QPushButton(_icon_char("⏮"))
+        self._prev_btn.setToolTip("Previous (rewind to start; click again within 1s for prev song)")
+        self._prev_btn.clicked.connect(self._on_prev)
 
         self._play_btn = QPushButton(_icon_char("▶") + " Play")
         self._play_btn.setToolTip("Play")
@@ -133,14 +357,15 @@ class PlaybackToolbar(QToolBar):
         self._stop_btn.clicked.connect(self._on_stop_clicked)
         self._stop_single_click_timer: QTimer | None = None
 
-        self._scrub_slider = ClickableScrubSlider()
-        self._scrub_slider.setRange(0, 1000)
-        self._scrub_slider.setValue(0)
-        self._scrub_slider.setToolTip("Position (click or drag to seek)")
-        self._scrub_slider.valueChanged.connect(self._on_scrub_moved)
+        self._next_btn = QPushButton(_icon_char("⏭"))
+        self._next_btn.setToolTip("Next track")
+        self._next_btn.clicked.connect(self._on_next)
 
-        self._pos_label = QLabel("0:00 / 0:00")
-        self._pos_label.setMinimumWidth(80)
+        self.addWidget(self._prev_btn)
+        self.addWidget(self._play_btn)
+        self.addWidget(self._stop_btn)
+        self.addWidget(self._next_btn)
+        self.addSeparator()
 
         self._vol_slider = QSlider(Qt.Orientation.Horizontal)
         self._vol_slider.setRange(0, 100)
@@ -148,43 +373,48 @@ class PlaybackToolbar(QToolBar):
         self._vol_slider.setMaximumWidth(80)
         self._vol_slider.setToolTip("Volume")
         self._vol_slider.valueChanged.connect(self._on_volume_changed)
+        self.addWidget(QLabel("Vol"))
+        self.addWidget(self._vol_slider)
+        self.addSeparator()
 
-        self._tempo_spin = QDoubleSpinBox()
-        self._tempo_spin.setRange(0.5, 2.0)
-        self._tempo_spin.setSingleStep(0.1)
-        self._tempo_spin.setValue(playback_state.tempo_factor)
-        self._tempo_spin.setSuffix("×")
-        self._tempo_spin.setToolTip("Tempo")
-        self._tempo_spin.setMaximumWidth(70)
-        self._tempo_spin.valueChanged.connect(self._on_tempo_changed)
+        self._tempo_btn = TempoButtonWithPopup(playback_state)
+        self.addWidget(self._tempo_btn)
+        self.addSeparator()
+
+        self._dropdown_btn = QPushButton(_icon_char("▼") + " Parts & Playlist")
+        self._dropdown_btn.setToolTip("Instruments (mute) & Playlist (reorder, remove)")
+        self._dropdown_btn.setCheckable(True)
+        self._dropdown_btn.toggled.connect(self._on_dropdown_toggled)
+        self.addWidget(self._dropdown_btn)
+        self.addSeparator()
+
+        self._pos_label = QLabel("0:00 / 0:00")
+        self._pos_label.setMinimumWidth(80)
+        self._scrub_slider = ClickableScrubSlider()
+        self._scrub_slider.setRange(0, 1000)
+        self._scrub_slider.setValue(0)
+        self._scrub_slider.setToolTip("Position (click or drag to seek)")
+        self._scrub_slider.valueChanged.connect(self._on_scrub_moved)
+        self.addWidget(self._pos_label)
+        self.addWidget(self._scrub_slider)
+        self.addSeparator()
+
+        self._stereo_slider = QSlider(Qt.Orientation.Horizontal)
+        self._stereo_slider.setRange(0, 100)
+        self._stereo_slider.setValue(playback_state.stereo_slider)
+        self._stereo_slider.setMaximumWidth(80)
+        self._stereo_slider.setToolTip("Distance from band (0=close L/R, 100=equal)")
+        self._stereo_slider.valueChanged.connect(self._on_stereo_slider_changed)
+        self.addWidget(QLabel("Stereo"))
+        self.addWidget(self._stereo_slider)
+        self.addSeparator()
 
         self._stereo_combo = QComboBox()
         self._stereo_combo.addItems(["Maestro", "Band layout"])
         self._stereo_combo.setCurrentIndex(0 if playback_state.stereo_mode == "maestro" else 1)
-        self._stereo_combo.setToolTip("Stereo mode")
+        self._stereo_combo.setToolTip("Stereo format")
         self._stereo_combo.currentIndexChanged.connect(self._on_stereo_changed)
-
-        self._dropdown_btn = QPushButton(_icon_char("▼"))
-        self._dropdown_btn.setToolTip("Show parts & playlist")
-        self._dropdown_btn.setCheckable(True)
-        self._dropdown_btn.toggled.connect(self._on_dropdown_toggled)
-
-        self.addWidget(self._play_btn)
-        self.addWidget(self._stop_btn)
-        self.addSeparator()
-        self.addWidget(self._scrub_slider)
-        self.addWidget(self._pos_label)
-        self.addSeparator()
-        self.addWidget(QLabel("Vol"))
-        self.addWidget(self._vol_slider)
-        self.addSeparator()
-        self.addWidget(QLabel("Tempo"))
-        self.addWidget(self._tempo_spin)
-        self.addSeparator()
-        self.addWidget(QLabel("Stereo"))
         self.addWidget(self._stereo_combo)
-        self.addSeparator()
-        self.addWidget(self._dropdown_btn)
 
         self._dropdown_panel: QWidget | None = None
         self._dropdown_popup: QWidget | None = None
@@ -220,69 +450,186 @@ class PlaybackToolbar(QToolBar):
             self._stop_single_click_timer = None
 
     def _build_dropdown_panel(self) -> None:
-        """Build the dropdown panel (parts mute, playlist, band layout) as popup."""
+        """Build dropdown: two columns - Parts (mute) | Playlist table. Opens under button."""
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left: Parts
+        parts_w = QWidget()
+        parts_layout = QVBoxLayout(parts_w)
+        parts_layout.addWidget(QLabel("Parts"))
+        self._parts_container = QWidget()
+        self._parts_inner = QVBoxLayout(self._parts_container)
+        self._parts_inner.addWidget(QLabel("(No song loaded)"))
+        parts_scroll = QScrollArea()
+        parts_scroll.setWidget(self._parts_container)
+        parts_scroll.setWidgetResizable(True)
+        parts_scroll.setMaximumWidth(160)
+        parts_scroll.setMinimumWidth(120)
+        parts_layout.addWidget(parts_scroll)
+        splitter.addWidget(parts_w)
+
+        # Right: Playlist table
+        playlist_layout = QVBoxLayout()
+        playlist_layout.addWidget(QLabel("Playlist"))
+        self._playlist_table = PlaylistTable()
+        self._playlist_table.setColumnCount(4)
+        self._playlist_table.setHorizontalHeaderLabels(["Title", "Parts", "Duration", "Composer"])
+        self._playlist_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._playlist_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._playlist_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._playlist_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self._playlist_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._playlist_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._playlist_table.setMaximumHeight(220)
+        self._playlist_table.rowReordered = self._on_playlist_reordered
+        self._playlist_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._playlist_table.customContextMenuRequested.connect(self._on_playlist_context_menu)
+        playlist_w = QWidget()
+        pl_layout = QVBoxLayout(playlist_w)
+        pl_layout.addWidget(self._playlist_table)
+        splitter.addWidget(playlist_w)
+
+        splitter.setSizes([140, 260])
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+
         panel = QFrame()
         panel.setFrameStyle(QFrame.Shape.StyledPanel)
-        layout = QVBoxLayout(panel)
-        layout.addWidget(QLabel("Parts"))
-        self._parts_container = QWidget()
-        parts_layout = QVBoxLayout(self._parts_container)
-        parts_layout.addWidget(QLabel("(No song loaded)"))
-        layout.addWidget(self._parts_container)
-        layout.addWidget(QLabel("Playlist"))
-        self._playlist_container = QWidget()
-        playlist_layout = QVBoxLayout(self._playlist_container)
-        playlist_layout.addWidget(QLabel("(Empty)"))
-        layout.addWidget(self._playlist_container)
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.addWidget(splitter)
+
         scroll = QScrollArea()
         scroll.setWidget(panel)
         scroll.setWidgetResizable(True)
-        scroll.setMaximumHeight(200)
+        scroll.setMaximumHeight(280)
         self._dropdown_panel = scroll
-        popup = QWidget()
-        popup.setWindowFlags(Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        popup = QWidget(self.window())
+        popup.setWindowFlags(
+            Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
+        )
         popup_layout = QVBoxLayout(popup)
         popup_layout.setContentsMargins(2, 2, 2, 2)
         popup_layout.addWidget(scroll)
-        popup.setFixedWidth(280)
-        popup.setFixedHeight(220)
-        self._dropdown_popup = popup
+        popup.setFixedWidth(420)
 
-        def on_popup_hidden():
+        def on_popup_hidden() -> None:
             self._dropdown_btn.blockSignals(True)
             self._dropdown_btn.setChecked(False)
             self._dropdown_btn.blockSignals(False)
 
         popup.installEventFilter(_PopupCloseFilter(popup, on_popup_hidden, self._dropdown_btn, self))
-        self._state.playlist_changed.connect(self._refresh_playlist_display)
-        self._refresh_playlist_display()
+        self._state.playlist_changed.connect(self._refresh_dropdown)
+        self._state.state_changed.connect(self._refresh_dropdown)
+        self._refresh_dropdown()
 
-    def _refresh_playlist_display(self) -> None:
-        if not hasattr(self, "_playlist_container"):
+        self._dropdown_popup = popup
+
+    def _refresh_dropdown(self) -> None:
+        self._refresh_parts_display()
+        self._refresh_playlist_list()
+
+    def _refresh_parts_display(self) -> None:
+        if not hasattr(self, "_parts_inner"):
             return
-        # Clear and repopulate
-        layout = self._playlist_container.layout()
-        if layout:
-            while layout.count() > 0:
-                item = layout.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
-        if not hasattr(self, "_playlist_container"):
+        layout = self._parts_inner
+        while layout.count() > 0:
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        song_id = self._state.current_song_id
+        if not self._app_state or not song_id:
+            layout.addWidget(QLabel("(No song loaded)"))
             return
-        layout = self._playlist_container.layout()
-        if not layout:
+        try:
+            from ..db.library_query import get_song_for_detail
+            detail = get_song_for_detail(self._app_state.conn, song_id)
+        except Exception:
+            layout.addWidget(QLabel("(No song loaded)"))
             return
-        for i, entry in enumerate(self._state.playlist):
-            lbl = QLabel(f"{i + 1}. {entry.title}")
-            layout.addWidget(lbl)
-        if not self._state.playlist:
-            layout.addWidget(QLabel("(Empty)"))
+        if not detail or not detail.get("parts"):
+            layout.addWidget(QLabel("(No parts)"))
+            return
+        mutes = self._state.part_mutes
+        for p in detail["parts"]:
+            pnum = int(p.get("part_number", 0))
+            name = p.get("part_name") or p.get("instrument_name") or f"Part {pnum}"
+            cb = QCheckBox(name)
+            cb.setChecked(not mutes.get(pnum, False))
+
+            def make_handler(pn: int):
+                def handler(checked: int) -> None:
+                    self._state.set_part_muted(pn, checked != Qt.CheckState.Checked.value)
+                return handler
+
+            cb.stateChanged.connect(make_handler(pnum))
+            layout.addWidget(cb)
+
+    def _refresh_playlist_list(self) -> None:
+        if not hasattr(self, "_playlist_table"):
+            return
+        self._playlist_table.blockSignals(True)
+        self._playlist_table.setRowCount(0)
+        if not self._app_state:
+            self._playlist_table.blockSignals(False)
+            return
+        try:
+            from ..db.library_query import get_song_for_detail, get_song_id_for_file_path
+            for i, entry in enumerate(self._state.playlist):
+                sid = entry.song_id or get_song_id_for_file_path(self._app_state.conn, entry.file_path)
+                detail = get_song_for_detail(self._app_state.conn, sid) if sid else None
+                part_count = detail.get("part_count", 0) if detail else 0
+                duration_sec = detail.get("duration_seconds") if detail else None
+                composers = (detail.get("composers") or "—") if detail else "—"
+                self._playlist_table.insertRow(i)
+                t = QTableWidgetItem(entry.title)
+                t.setData(Qt.ItemDataRole.UserRole, i)
+                t.setFlags(t.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self._playlist_table.setItem(i, 0, t)
+                for col, val in enumerate((str(part_count), _fmt_duration(duration_sec), composers), 1):
+                    it = QTableWidgetItem(val)
+                    it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    self._playlist_table.setItem(i, col, it)
+        except Exception:
+            pass
+        self._playlist_table.blockSignals(False)
+
+    def _on_playlist_reordered(self) -> None:
+        if not hasattr(self, "_playlist_table"):
+            return
+        indices = []
+        for row in range(self._playlist_table.rowCount()):
+            it = self._playlist_table.item(row, 0)
+            if it:
+                old = it.data(Qt.ItemDataRole.UserRole)
+                indices.append(old if old is not None else row)
+        if len(indices) == len(self._state.playlist):
+            self._state.reorder_playlist(indices)
+
+    def _on_playlist_context_menu(self, pos: QPoint) -> None:
+        if not hasattr(self, "_playlist_table"):
+            return
+        idx = self._playlist_table.indexAt(pos)
+        row = idx.row()
+        if row < 0 or row >= len(self._state.playlist):
+            return
+        menu = QMenu(self)
+        menu.addAction("Remove from queue", lambda r=row: self._state.remove_from_playlist(r))
+        menu.exec(self._playlist_table.mapToGlobal(pos))
+
+    def _on_prev(self) -> None:
+        now = time.monotonic()
+        seconds_since = now - self._last_prev_click_time
+        self._state.previous_track_or_rewind(seconds_since)
+        self._last_prev_click_time = now
 
     def _on_play(self) -> None:
         if self._state.is_playing:
             self._state.pause()
         else:
             self._state.play()
+
+    def _on_next(self) -> None:
+        self._state.next_track()
 
     def _on_stop_clicked(self) -> None:
         """Single-click: defer stop so double-click can cancel it and do panic instead."""
@@ -309,8 +656,8 @@ class PlaybackToolbar(QToolBar):
     def _on_volume_changed(self, value: int) -> None:
         self._state.volume = value
 
-    def _on_tempo_changed(self, value: float) -> None:
-        self._state.tempo_factor = value
+    def _on_stereo_slider_changed(self, value: int) -> None:
+        self._state.stereo_slider = value
 
     def _on_stereo_changed(self, index: int) -> None:
         self._state.stereo_mode = "maestro" if index == 0 else "band_layout"
@@ -335,9 +682,10 @@ class PlaybackToolbar(QToolBar):
         self._vol_slider.blockSignals(True)
         self._vol_slider.setValue(int(self._state.volume))
         self._vol_slider.blockSignals(False)
-        self._tempo_spin.blockSignals(True)
-        self._tempo_spin.setValue(self._state.tempo_factor)
-        self._tempo_spin.blockSignals(False)
+        self._tempo_btn._update_text()
+        self._stereo_slider.blockSignals(True)
+        self._stereo_slider.setValue(self._state.stereo_slider)
+        self._stereo_slider.blockSignals(False)
         self._stereo_combo.blockSignals(True)
         self._stereo_combo.setCurrentIndex(0 if self._state.stereo_mode == "maestro" else 1)
         self._stereo_combo.blockSignals(False)
@@ -347,8 +695,25 @@ class PlaybackToolbar(QToolBar):
             if self._dropdown_panel is None:
                 self._build_dropdown_panel()
             if self._dropdown_popup:
-                pos = self._dropdown_btn.mapToGlobal(QPoint(0, self._dropdown_btn.height()))
-                self._dropdown_popup.move(pos)
+                self._dropdown_popup.adjustSize()
+                # Position upper-left just under button's bottom-left (same screen as button)
+                btn_bottom_left = self._dropdown_btn.mapToGlobal(self._dropdown_btn.rect().bottomLeft())
+                self._dropdown_popup.move(btn_bottom_left.x(), btn_bottom_left.y() + 4)
+                # Ensure popup fits on the screen that contains the button
+                screen = self._dropdown_btn.screen() or QApplication.primaryScreen()
+                if screen:
+                    gr = screen.availableGeometry()
+                    pw, ph = self._dropdown_popup.width(), self._dropdown_popup.height()
+                    x, y = self._dropdown_popup.x(), self._dropdown_popup.y()
+                    if x + pw > gr.right():
+                        x = gr.right() - pw - 20
+                    if y + ph > gr.bottom():
+                        y = gr.bottom() - ph - 20
+                    if x < gr.left():
+                        x = gr.left() + 20
+                    if y < gr.top():
+                        y = gr.top() + 20
+                    self._dropdown_popup.move(x, y)
                 self._dropdown_popup.show()
                 self._dropdown_popup.raise_()
         else:

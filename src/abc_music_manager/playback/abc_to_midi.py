@@ -14,10 +14,13 @@ from .maestro_abc.abc_to_midi import abc_to_midi as _maestro_abc_to_midi
 def abc_to_midi(
     abc_content: str,
     file_path: Optional[str | Path] = None,
+    *,
+    stereo: int = 100,
 ) -> bytes:
     """
     Convert ABC content to MIDI bytes.
     Uses native maestro_abc engine. Applies LOTRO instrument mapping from %%part-name and %%made-for per part.
+    stereo: 0-100, pan modifier (100=full spread, 0=centered).
     Returns raw MIDI file bytes.
     """
-    return _maestro_abc_to_midi(abc_content, file_path)
+    return _maestro_abc_to_midi(abc_content, file_path, stereo=stereo)

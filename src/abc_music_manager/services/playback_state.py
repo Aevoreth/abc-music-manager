@@ -22,15 +22,17 @@ class _ConversionWorker(QThread):
     finished_ok = Signal(object)  # bytes
     finished_error = Signal(str)
 
-    def __init__(self, file_path: str, parent=None) -> None:
+    def __init__(self, file_path: str, stereo_slider: int = 100, parent=None) -> None:
         super().__init__(parent)
         self._file_path = file_path
+        self._stereo_slider = stereo_slider
 
     def run(self) -> None:
         result_queue: multiprocessing.Queue = multiprocessing.Queue()
         proc = multiprocessing.Process(
             target=run_conversion,
             args=(self._file_path, result_queue),
+            kwargs={"stereo": self._stereo_slider},
         )
         proc.start()
         try:
@@ -176,7 +178,7 @@ class PlaybackState(QObject):
 
     @tempo_factor.setter
     def tempo_factor(self, value: float) -> None:
-        self._tempo_factor = max(0.5, min(2.0, value))
+        self._tempo_factor = max(0.25, min(4.0, value))
         self._save_prefs()
         self.state_changed.emit()
 
@@ -289,7 +291,9 @@ class PlaybackState(QObject):
             return True  # Already converting
         self._conversion_cancelled = False
         entry = self._playlist[self._current_index]
-        self._conversion_worker = _ConversionWorker(entry.file_path, self)
+        self._conversion_worker = _ConversionWorker(
+            entry.file_path, stereo_slider=self._stereo_slider, parent=self
+        )
         self._conversion_worker.finished_ok.connect(self._on_conversion_done)
         self._conversion_worker.finished_error.connect(self._on_conversion_error)
         self._conversion_worker.finished_ok.connect(self._conversion_worker.deleteLater)
@@ -379,13 +383,56 @@ class PlaybackState(QObject):
         self.position_changed.emit(self.position_sec)
 
     def _advance_to_next(self) -> None:
-        """Move to next playlist item; play if available."""
+        """Move to next playlist item; play if available. Same flow as song ending naturally."""
         if self._current_index < len(self._playlist) - 1:
             self._current_index += 1
             self.state_changed.emit()
             self.play()
         else:
             self.state_changed.emit()
+
+    def next_track(self) -> None:
+        """
+        Skip to next track. Triggers same end-of-song MIDI cleanup as natural end:
+        stop current (sounds_off), then advance to next and play.
+        """
+        if not self._playlist:
+            return
+        self._position_timer.stop()
+        if self._player:
+            try:
+                self._player.stop()  # Same as song ending: stop, sounds_off
+            except Exception:
+                pass
+        if self._current_index < len(self._playlist) - 1:
+            self._current_index += 1
+            self.state_changed.emit()
+            self.play()
+        else:
+            self.state_changed.emit()
+
+    def previous_track_or_rewind(self, seconds_since_last_prev: float) -> bool:
+        """
+        First click: rewind to beginning. Second click within 1 second: previous song.
+        Returns True if we went to previous (or restarted), False if just rewound.
+        """
+        if not self._playlist:
+            return False
+        if seconds_since_last_prev < 1.0 and self._current_index > 0:
+            # Second click within 1s: go to previous track
+            self._position_timer.stop()
+            if self._player:
+                try:
+                    self._player.stop()
+                except Exception:
+                    pass
+            self._current_index -= 1
+            self.state_changed.emit()
+            self.play()
+            return True
+        # First click or >1s: rewind to start
+        self.seek(0.0)
+        return False
 
     def seek(self, position_sec: float) -> None:
         """Seek to position."""
