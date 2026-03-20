@@ -8,35 +8,56 @@ import io
 import threading
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Optional
 
 import mido
 
 from .midi_utils import normalize_midi_ppqn, scale_midi_tempo
 
 
+def _part_index_to_midi_channel(part_index: int) -> int:
+    """
+    Map part index (0-based order) to MIDI channel. Matches abc_to_midi._get_track_channel:
+    channel 9 is reserved for drums, so parts 1-9 -> ch 0-8, part 10 -> ch 10, etc.
+    """
+    track_num = part_index + 1
+    if track_num < 10:
+        return track_num - 1
+    return track_num  # skip channel 9
+
+
 def _part_mutes_to_muted_channels(part_mutes: dict[int, bool]) -> frozenset[int]:
-    """Convert part_number -> muted to set of muted MIDI channels."""
-    return frozenset(
-        part_num - 1 if part_num <= 9 else part_num
-        for part_num, muted in part_mutes.items()
-        if muted
-    )
+    """Return set of muted MIDI channels. Keys are part indices (for tests)."""
+    return frozenset(_part_index_to_midi_channel(i) for i, m in part_mutes.items() if m and 0 <= i < 16)
 
 
-def _make_mute_filter(muted_channels: frozenset[int]) -> Callable:
-    """Return filter that drops NoteOn/NoteOff for muted channels."""
+def _strip_volume_cc_filter(event) -> bool | None:
+    """
+    Filter that drops CC 7 (channel volume) events from MIDI load.
+    We control volume ourselves via set_part_mutes/set_volume, so the
+    ABC's volume events would overwrite our mutes.
+    """
+    import tinysoundfont.midi as tsf_midi
+    if isinstance(event.action, tsf_midi.ControlChange) and event.action.control == 7:
+        return True  # delete
+    return False  # keep
 
-    def filter_fn(event) -> bool | None:
-        import tinysoundfont.midi as tsf_midi
-        if event.channel not in muted_channels:
-            return False  # keep
-        action = event.action
-        if isinstance(action, (tsf_midi.NoteOn, tsf_midi.NoteOff)):
-            return True  # delete
-        return False  # keep (e.g. ProgramChange, ControlChange)
 
-    return filter_fn
+def _apply_part_mutes_to_synth(synth, part_mutes: dict[int, bool], unmuted_volume: int) -> None:
+    """
+    Apply part mutes via MIDI CC 7 (volume) and notes_off per channel.
+    part_mutes key = part index (0-based order). Map to MIDI channel (skip ch 9).
+    We strip CC 7 from MIDI, so we must set volume for all channels.
+    """
+    for ch in range(16):
+        # Reverse mapping: which part index uses this channel?
+        part_idx = ch if ch < 9 else ch - 1  # ch 9 unused, so ch 10 -> part 9
+        muted = part_mutes.get(part_idx, False)
+        if muted:
+            synth.control_change(ch, 7, 0)
+            synth.notes_off(ch)  # immediately stop any sounding notes
+        else:
+            synth.control_change(ch, 7, unmuted_volume)
 
 
 class MidiPlayer:
@@ -55,6 +76,7 @@ class MidiPlayer:
         self._duration_sec: float = 0.0
         self._lock = threading.Lock()
         self._volume: float = 0.5  # 0-1, mapped to dB
+        self._part_mutes: dict[int, bool] = {}
         self._is_paused: bool = False
         self._paused_at_time: float = 0.0
         self._playing_since: Optional[float] = None
@@ -100,7 +122,7 @@ class MidiPlayer:
     ) -> tuple[bool, str]:
         """
         Start playback. Uses midi_bytes if provided, else previously loaded.
-        part_mutes: part_number -> muted (filter NoteOn/NoteOff for muted channels).
+        part_mutes: channel_index (0-15) -> muted, by part order in ABC (applied via CC7).
         tempo_factor: 0.5-2.0, scales playback speed.
         Returns (success, error_message). error_message is empty on success.
         """
@@ -144,11 +166,13 @@ class MidiPlayer:
             # New Sequencer per play to avoid leftover events
             self._seq = tinysoundfont.Sequencer(synth)
 
-            # Load MIDI with part mutes filter
-            muted = _part_mutes_to_muted_channels(part_mutes or {})
-            filter_fn = _make_mute_filter(muted) if muted else None
-            events = tinysoundfont.midi.load_memory(data, filter=filter_fn, persistent=True)
+            # Strip CC 7 (volume) from MIDI so our mute/set_volume control stays in effect
+            events = tinysoundfont.midi.load_memory(data, filter=_strip_volume_cc_filter, persistent=True)
             self._seq.add(events)
+
+            self._part_mutes = dict(part_mutes or {})
+            unmuted_vol = int(127 * max(0.001, self._volume))
+            _apply_part_mutes_to_synth(synth, self._part_mutes, unmuted_vol)
 
             synth.start(buffer_size=4096)
             self._stopped = False
@@ -220,11 +244,21 @@ class MidiPlayer:
         self._volume = max(0.0, min(1.0, value))
         if self._synth:
             try:
-                db = self._volume_to_db(self._volume)
-                # TinySoundFont Synth has no runtime gain setter; use MIDI volume on all channels
-                vol_midi = int(127 * max(0.0, min(1.0, value)))
-                for ch in range(16):
-                    self._synth.control_change(ch, 7, vol_midi)
+                vol_midi = int(127 * max(0.001, self._volume))
+                _apply_part_mutes_to_synth(self._synth, self._part_mutes, vol_midi)
+            except Exception:
+                pass
+
+    def set_part_mutes(self, part_mutes: dict[int, bool]) -> None:
+        """
+        Update part mutes in real-time during playback.
+        Uses CC 7 (volume) and notes_off per channel.
+        """
+        self._part_mutes = dict(part_mutes or {})
+        if self._synth:
+            try:
+                unmuted_vol = int(127 * max(0.001, self._volume))
+                _apply_part_mutes_to_synth(self._synth, self._part_mutes, unmuted_vol)
             except Exception:
                 pass
 

@@ -206,8 +206,11 @@ class PlaybackState(QObject):
     def part_mutes(self) -> dict[int, bool]:
         return dict(self._part_mutes)
 
-    def set_part_muted(self, part_number: int, muted: bool) -> None:
-        self._part_mutes[part_number] = muted
+    def set_part_muted(self, channel_index: int, muted: bool) -> None:
+        """channel_index: 0-based part order (matches MIDI channel for that part)."""
+        self._part_mutes[channel_index] = muted
+        if self._player and (self.is_playing or self.is_paused):
+            self._player.set_part_mutes(self._part_mutes)
         self.state_changed.emit()
 
     @property
@@ -386,6 +389,7 @@ class PlaybackState(QObject):
         """Move to next playlist item; play if available. Same flow as song ending naturally."""
         if self._current_index < len(self._playlist) - 1:
             self._current_index += 1
+            self._part_mutes.clear()  # New song = fresh mutes
             self.state_changed.emit()
             self.play()
         else:
@@ -406,6 +410,7 @@ class PlaybackState(QObject):
                 pass
         if self._current_index < len(self._playlist) - 1:
             self._current_index += 1
+            self._part_mutes.clear()
             self.state_changed.emit()
             self.play()
         else:
@@ -422,6 +427,7 @@ class PlaybackState(QObject):
             except Exception:
                 pass
         self._current_index = index
+        self._part_mutes.clear()
         self.state_changed.emit()
         self.play()
 
@@ -441,6 +447,7 @@ class PlaybackState(QObject):
                 except Exception:
                     pass
             self._current_index -= 1
+            self._part_mutes.clear()
             self.state_changed.emit()
             self.play()
             return True

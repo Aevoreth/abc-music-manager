@@ -609,18 +609,22 @@ class PlaybackToolbar(QToolBar):
             layout.addStretch()
             return
         mutes = self._state.part_mutes
-        for p in detail["parts"]:
+        for idx, p in enumerate(detail["parts"]):
+            if idx >= 16:
+                break  # MIDI has max 16 channels
             pnum = int(p.get("part_number", 0))
             name = p.get("part_name") or p.get("instrument_name") or f"Part {pnum}"
             cb = QCheckBox(name)
-            cb.setChecked(not mutes.get(pnum, False))
+            cb.blockSignals(True)
+            cb.setChecked(not mutes.get(idx, False))
+            cb.blockSignals(False)
 
-            def make_handler(pn: int):
+            def make_handler(channel_idx: int):
                 def handler(checked: int) -> None:
-                    self._state.set_part_muted(pn, checked != Qt.CheckState.Checked.value)
+                    self._state.set_part_muted(channel_idx, checked != Qt.CheckState.Checked.value)
                 return handler
 
-            cb.stateChanged.connect(make_handler(pnum))
+            cb.stateChanged.connect(make_handler(idx))
             layout.addWidget(cb)
         layout.addStretch()
 
