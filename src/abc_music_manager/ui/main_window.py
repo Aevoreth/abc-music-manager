@@ -89,7 +89,8 @@ class MainWindow(QMainWindow):
         self.playback_state = PlaybackState(self)
         self.playback_state.soundfont_missing.connect(self._on_soundfont_missing)
         self.playback_state.playback_failed.connect(self._on_playback_failed)
-        self.setWindowTitle("ABC Music Manager")
+        self.playback_state.state_changed.connect(self._update_window_title)
+        self._update_window_title()
         self.setMinimumSize(900, 600)
         self.resize(1000, 700)
         _restore_window_geometry(self)
@@ -299,6 +300,21 @@ class MainWindow(QMainWindow):
         from .plugindata_export_dialog import PlugindataExportDialog
         dlg = PlugindataExportDialog(self.app_state.conn, self)
         dlg.exec()
+
+    def _update_window_title(self) -> None:
+        """Set window title to include currently playing song when applicable."""
+        base = "ABC Music Manager"
+        ps = self.playback_state
+        if ps.playlist and 0 <= ps.current_index < len(ps.playlist):
+            entry = ps.playlist[ps.current_index]
+            if ps.is_playing:
+                self.setWindowTitle(f"{base} — Now playing: {entry.title}")
+            elif ps.is_paused:
+                self.setWindowTitle(f"{base} — Paused: {entry.title}")
+            else:
+                self.setWindowTitle(f"{base} — {entry.title}")
+        else:
+            self.setWindowTitle(base)
 
     def _on_playback_failed(self, message: str) -> None:
         """Show error when ABC-to-MIDI conversion fails."""

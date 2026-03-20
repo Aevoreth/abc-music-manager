@@ -204,6 +204,65 @@ def set_setlists_songs_table_header_state(sizes: list[int]) -> None:
     save_preferences(prefs)
 
 
+def get_parts_playlist_popup_geometry() -> dict[str, int] | None:
+    """Saved Parts/Playlist popup size: {width, height}. None if not set."""
+    prefs = load_preferences()
+    v = prefs.get("parts_playlist_popup_geometry")
+    if isinstance(v, dict) and "width" in v and "height" in v:
+        try:
+            w, h = int(v["width"]), int(v["height"])
+            if w >= 400 and h >= 300:
+                return {"width": w, "height": h}
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_parts_playlist_popup_geometry(width: int, height: int) -> None:
+    """Save Parts/Playlist popup size."""
+    prefs = load_preferences()
+    prefs["parts_playlist_popup_geometry"] = {"width": width, "height": height}
+    save_preferences(prefs)
+
+
+def get_parts_playlist_splitter_state() -> list[int] | None:
+    """Saved Parts/Playlist splitter sizes. None if not set."""
+    prefs = load_preferences()
+    v = prefs.get("parts_playlist_splitter_state")
+    if isinstance(v, list) and len(v) >= 2:
+        try:
+            return [int(x) for x in v]
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_parts_playlist_splitter_state(sizes: list[int]) -> None:
+    """Save Parts/Playlist splitter sizes."""
+    prefs = load_preferences()
+    prefs["parts_playlist_splitter_state"] = sizes
+    save_preferences(prefs)
+
+
+def get_playback_playlist_table_columns() -> list[int] | None:
+    """Saved playback playlist table column widths. None if not set."""
+    prefs = load_preferences()
+    v = prefs.get("playback_playlist_table_columns")
+    if isinstance(v, list) and len(v) >= 5:
+        try:
+            return [int(x) for x in v]
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_playback_playlist_table_columns(sizes: list[int]) -> None:
+    """Save playback playlist table column widths."""
+    prefs = load_preferences()
+    prefs["playback_playlist_table_columns"] = sizes
+    save_preferences(prefs)
+
+
 def get_setlists_folder_expanded_state() -> list[int]:
     """Folder ids that are expanded. Returns empty list if not set."""
     prefs = load_preferences()

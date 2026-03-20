@@ -31,11 +31,13 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QHeaderView,
     QSplitter,
+    QSizeGrip,
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QObject, QEvent, QRect, QMimeData
 from PySide6.QtGui import QMouseEvent, QDrag
 
 from ..services.playback_state import PlaybackState, PlaylistEntry
+from ..services import preferences
 
 if TYPE_CHECKING:
     from ..services.app_state import AppState
@@ -450,8 +452,8 @@ class PlaybackToolbar(QToolBar):
             self._stop_single_click_timer = None
 
     def _build_dropdown_panel(self) -> None:
-        """Build dropdown: two columns - Parts (mute) | Playlist table. Opens under button."""
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        """Build dropdown: two columns - Parts (mute) | Playlist table. Resizable, geometry saved."""
+        self._parts_playlist_splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Left: Parts
         parts_w = QWidget()
@@ -463,45 +465,54 @@ class PlaybackToolbar(QToolBar):
         parts_scroll = QScrollArea()
         parts_scroll.setWidget(self._parts_container)
         parts_scroll.setWidgetResizable(True)
-        parts_scroll.setMaximumWidth(160)
         parts_scroll.setMinimumWidth(120)
+        parts_scroll.setMinimumHeight(360)
         parts_layout.addWidget(parts_scroll)
-        splitter.addWidget(parts_w)
+        self._parts_playlist_splitter.addWidget(parts_w)
 
-        # Right: Playlist table
+        # Right: Playlist table (play indicator | Title | Parts | Duration | Composer)
         playlist_layout = QVBoxLayout()
         playlist_layout.addWidget(QLabel("Playlist"))
         self._playlist_table = PlaylistTable()
-        self._playlist_table.setColumnCount(4)
-        self._playlist_table.setHorizontalHeaderLabels(["Title", "Parts", "Duration", "Composer"])
-        self._playlist_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._playlist_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self._playlist_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self._playlist_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self._playlist_table.setColumnCount(5)
+        self._playlist_table.setHorizontalHeaderLabels(["", "Title", "Parts", "Duration", "Composer"])
+        hh = self._playlist_table.horizontalHeader()
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self._playlist_table.setColumnWidth(0, 28)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        for c in range(2, 5):
+            hh.setSectionResizeMode(c, QHeaderView.ResizeMode.Interactive)
         self._playlist_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._playlist_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._playlist_table.setMaximumHeight(220)
+        self._playlist_table.setMinimumHeight(200)
         self._playlist_table.rowReordered = self._on_playlist_reordered
         self._playlist_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._playlist_table.customContextMenuRequested.connect(self._on_playlist_context_menu)
+        self._playlist_table.cellDoubleClicked.connect(self._on_playlist_cell_double_clicked)
+        self._playlist_table.horizontalHeader().sectionResized.connect(self._on_playlist_header_resized)
         playlist_w = QWidget()
         pl_layout = QVBoxLayout(playlist_w)
         pl_layout.addWidget(self._playlist_table)
-        splitter.addWidget(playlist_w)
+        self._parts_playlist_splitter.addWidget(playlist_w)
 
-        splitter.setSizes([140, 260])
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
+        self._parts_playlist_splitter.setStretchFactor(0, 0)
+        self._parts_playlist_splitter.setStretchFactor(1, 1)
+        saved_split = preferences.get_parts_playlist_splitter_state()
+        if saved_split and len(saved_split) >= 2:
+            self._parts_playlist_splitter.setSizes(saved_split)
+        else:
+            self._parts_playlist_splitter.setSizes([160, 400])
+        self._parts_playlist_splitter.splitterMoved.connect(self._on_parts_playlist_splitter_moved)
 
         panel = QFrame()
         panel.setFrameStyle(QFrame.Shape.StyledPanel)
         panel_layout = QVBoxLayout(panel)
-        panel_layout.addWidget(splitter)
+        panel_layout.addWidget(self._parts_playlist_splitter)
 
         scroll = QScrollArea()
         scroll.setWidget(panel)
         scroll.setWidgetResizable(True)
-        scroll.setMaximumHeight(280)
+        scroll.setMinimumSize(500, 350)
         self._dropdown_panel = scroll
         popup = QWidget(self.window())
         popup.setWindowFlags(
@@ -510,9 +521,19 @@ class PlaybackToolbar(QToolBar):
         popup_layout = QVBoxLayout(popup)
         popup_layout.setContentsMargins(2, 2, 2, 2)
         popup_layout.addWidget(scroll)
-        popup.setFixedWidth(420)
+        grip_row = QHBoxLayout()
+        grip_row.addStretch()
+        grip_row.addWidget(QSizeGrip(popup))
+        popup_layout.addLayout(grip_row)
+        popup.setMinimumSize(504, 354)
+        geom = preferences.get_parts_playlist_popup_geometry()
+        if geom:
+            popup.resize(geom["width"], geom["height"])
+        else:
+            popup.resize(600, 440)
 
         def on_popup_hidden() -> None:
+            self._save_parts_playlist_state()
             self._dropdown_btn.blockSignals(True)
             self._dropdown_btn.setChecked(False)
             self._dropdown_btn.blockSignals(False)
@@ -523,6 +544,27 @@ class PlaybackToolbar(QToolBar):
         self._refresh_dropdown()
 
         self._dropdown_popup = popup
+        self._parts_playlist_save_timer = QTimer(self)
+        self._parts_playlist_save_timer.setSingleShot(True)
+        self._parts_playlist_save_timer.timeout.connect(self._save_parts_playlist_state)
+
+    def _save_parts_playlist_state(self) -> None:
+        """Save popup geometry, splitter sizes, table column widths to preferences."""
+        if self._dropdown_popup:
+            w, h = self._dropdown_popup.width(), self._dropdown_popup.height()
+            if w >= 400 and h >= 300:
+                preferences.set_parts_playlist_popup_geometry(w, h)
+        if hasattr(self, "_parts_playlist_splitter") and self._parts_playlist_splitter:
+            preferences.set_parts_playlist_splitter_state(self._parts_playlist_splitter.sizes())
+        if hasattr(self, "_playlist_table") and self._playlist_table.columnCount() >= 5:
+            w = [self._playlist_table.columnWidth(c) for c in range(5)]
+            preferences.set_playback_playlist_table_columns(w)
+
+    def _on_parts_playlist_splitter_moved(self) -> None:
+        self._parts_playlist_save_timer.start(200)
+
+    def _on_playlist_header_resized(self) -> None:
+        self._parts_playlist_save_timer.start(200)
 
     def _refresh_dropdown(self) -> None:
         self._refresh_parts_display()
@@ -539,15 +581,18 @@ class PlaybackToolbar(QToolBar):
         song_id = self._state.current_song_id
         if not self._app_state or not song_id:
             layout.addWidget(QLabel("(No song loaded)"))
+            layout.addStretch()
             return
         try:
             from ..db.library_query import get_song_for_detail
             detail = get_song_for_detail(self._app_state.conn, song_id)
         except Exception:
             layout.addWidget(QLabel("(No song loaded)"))
+            layout.addStretch()
             return
         if not detail or not detail.get("parts"):
             layout.addWidget(QLabel("(No parts)"))
+            layout.addStretch()
             return
         mutes = self._state.part_mutes
         for p in detail["parts"]:
@@ -563,6 +608,7 @@ class PlaybackToolbar(QToolBar):
 
             cb.stateChanged.connect(make_handler(pnum))
             layout.addWidget(cb)
+        layout.addStretch()
 
     def _refresh_playlist_list(self) -> None:
         if not hasattr(self, "_playlist_table"):
@@ -574,6 +620,8 @@ class PlaybackToolbar(QToolBar):
             return
         try:
             from ..db.library_query import get_song_for_detail, get_song_id_for_file_path
+            current_idx = self._state.current_index
+            playing_or_paused = self._state.is_playing or self._state.is_paused
             for i, entry in enumerate(self._state.playlist):
                 sid = entry.song_id or get_song_id_for_file_path(self._app_state.conn, entry.file_path)
                 detail = get_song_for_detail(self._app_state.conn, sid) if sid else None
@@ -581,14 +629,28 @@ class PlaybackToolbar(QToolBar):
                 duration_sec = detail.get("duration_seconds") if detail else None
                 composers = (detail.get("composers") or "—") if detail else "—"
                 self._playlist_table.insertRow(i)
+                # Col 0: play indicator
+                play_item = QTableWidgetItem("▶" if i == current_idx and playing_or_paused else "")
+                play_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                play_item.setFlags(play_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self._playlist_table.setItem(i, 0, play_item)
+                # Col 1: title
                 t = QTableWidgetItem(entry.title)
                 t.setData(Qt.ItemDataRole.UserRole, i)
                 t.setFlags(t.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self._playlist_table.setItem(i, 0, t)
-                for col, val in enumerate((str(part_count), _fmt_duration(duration_sec), composers), 1):
+                self._playlist_table.setItem(i, 1, t)
+                # Cols 2-4
+                for col, val in enumerate((str(part_count), _fmt_duration(duration_sec), composers), 2):
                     it = QTableWidgetItem(val)
                     it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     self._playlist_table.setItem(i, col, it)
+            # Restore column widths from preferences (first refresh only, when we have rows)
+            if self._playlist_table.rowCount() > 0 and not getattr(self, "_playlist_columns_restored", False):
+                self._playlist_columns_restored = True
+                saved = preferences.get_playback_playlist_table_columns()
+                if saved and len(saved) >= 5:
+                    for c, w in enumerate(saved[:5]):
+                        self._playlist_table.setColumnWidth(c, max(28 if c == 0 else 40, w))
         except Exception:
             pass
         self._playlist_table.blockSignals(False)
@@ -598,12 +660,17 @@ class PlaybackToolbar(QToolBar):
             return
         indices = []
         for row in range(self._playlist_table.rowCount()):
-            it = self._playlist_table.item(row, 0)
+            it = self._playlist_table.item(row, 1)
             if it:
                 old = it.data(Qt.ItemDataRole.UserRole)
                 indices.append(old if old is not None else row)
         if len(indices) == len(self._state.playlist):
             self._state.reorder_playlist(indices)
+
+    def _on_playlist_cell_double_clicked(self, row: int, col: int) -> None:
+        """Double-click on song in queue: jump to that song and start playing."""
+        if 0 <= row < len(self._state.playlist):
+            self._state.go_to_index(row)
 
     def _on_playlist_context_menu(self, pos: QPoint) -> None:
         if not hasattr(self, "_playlist_table"):
@@ -695,7 +762,10 @@ class PlaybackToolbar(QToolBar):
             if self._dropdown_panel is None:
                 self._build_dropdown_panel()
             if self._dropdown_popup:
-                self._dropdown_popup.adjustSize()
+                # Restore saved size (adjustSize would reset to content size and forget user resize)
+                geom = preferences.get_parts_playlist_popup_geometry()
+                if geom:
+                    self._dropdown_popup.resize(geom["width"], geom["height"])
                 # Position upper-left just under button's bottom-left (same screen as button)
                 btn_bottom_left = self._dropdown_btn.mapToGlobal(self._dropdown_btn.rect().bottomLeft())
                 self._dropdown_popup.move(btn_bottom_left.x(), btn_bottom_left.y() + 4)

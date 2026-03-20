@@ -411,6 +411,20 @@ class PlaybackState(QObject):
         else:
             self.state_changed.emit()
 
+    def go_to_index(self, index: int) -> None:
+        """Jump to playlist item at index and start playing."""
+        if not self._playlist or index < 0 or index >= len(self._playlist):
+            return
+        self._position_timer.stop()
+        if self._player:
+            try:
+                self._player.stop()
+            except Exception:
+                pass
+        self._current_index = index
+        self.state_changed.emit()
+        self.play()
+
     def previous_track_or_rewind(self, seconds_since_last_prev: float) -> bool:
         """
         First click: rewind to beginning. Second click within 1 second: previous song.
