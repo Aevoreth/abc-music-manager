@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QCheckBox,
     QSpinBox,
+    QDoubleSpinBox,
     QDialog,
     QFormLayout,
     QMessageBox,
@@ -48,6 +49,16 @@ from ..services.preferences import (
     get_default_lotro_root,
     get_music_root,
     get_set_export_dir,
+    get_playback_fluidsynth_bin_path,
+    set_playback_fluidsynth_bin_path,
+    get_playback_soundfont_path,
+    set_playback_soundfont_path,
+    get_playback_volume,
+    set_playback_volume,
+    get_playback_tempo,
+    set_playback_tempo,
+    get_playback_stereo_mode,
+    set_playback_stereo_mode,
     get_set_export_dir_stored,
     set_set_export_dir,
     ensure_default_lotro_root,
@@ -409,6 +420,7 @@ class SettingsView(QWidget):
         self.tabs.addTab(self._build_folder_rules_tab(), "Folder rules")
         self.tabs.addTab(self._build_statuses_tab(), "Statuses")
         self.tabs.addTab(self._build_account_targets_tab(), "Account targets")
+        self.tabs.addTab(self._build_playback_tab(), "Playback")
         self.tabs.currentChanged.connect(self._on_settings_tab_changed)
         layout.addWidget(self.tabs)
 
@@ -1027,6 +1039,93 @@ class SettingsView(QWidget):
         add_btn.clicked.connect(self._add_account_target)
         self._refresh_account_targets()
         return w
+
+    def _build_playback_tab(self) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.addWidget(QLabel("FluidSynth bin directory (Windows):"))
+        fs_row = QHBoxLayout()
+        self.playback_fluidsynth_bin_edit = QLineEdit()
+        self.playback_fluidsynth_bin_edit.setPlaceholderText("e.g. C:\\tools\\fluidsynth\\bin — folder with libfluidsynth DLL")
+        self.playback_fluidsynth_bin_edit.setText(get_playback_fluidsynth_bin_path())
+        self.playback_fluidsynth_bin_edit.textChanged.connect(
+            lambda: set_playback_fluidsynth_bin_path(self.playback_fluidsynth_bin_edit.text())
+        )
+        self.playback_fluidsynth_bin_edit.setToolTip(
+            "Folder containing libfluidsynth DLL. Required on Windows if FluidSynth is not at C:\\tools\\fluidsynth\\bin. "
+            "Download from https://github.com/FluidSynth/fluidsynth/releases"
+        )
+        fs_row.addWidget(self.playback_fluidsynth_bin_edit)
+        fs_browse_btn = QPushButton("Browse...")
+        fs_browse_btn.clicked.connect(self._on_browse_fluidsynth_bin)
+        fs_row.addWidget(fs_browse_btn)
+        v.addLayout(fs_row)
+        v.addWidget(QLabel("Soundfont path (empty = use default lookup):"))
+        sf_row = QHBoxLayout()
+        self.playback_soundfont_edit = QLineEdit()
+        self.playback_soundfont_edit.setPlaceholderText("Leave empty to use MaestroCommon or download")
+        self.playback_soundfont_edit.setText(get_playback_soundfont_path())
+        self.playback_soundfont_edit.textChanged.connect(
+            lambda: set_playback_soundfont_path(self.playback_soundfont_edit.text())
+        )
+        sf_row.addWidget(self.playback_soundfont_edit)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self._on_browse_soundfont)
+        sf_row.addWidget(browse_btn)
+        use_default_btn = QPushButton("Use default")
+        use_default_btn.clicked.connect(lambda: self.playback_soundfont_edit.setText(""))
+        sf_row.addWidget(use_default_btn)
+        v.addLayout(sf_row)
+        vol_row = QHBoxLayout()
+        vol_row.addWidget(QLabel("Default volume (0–100):"))
+        self.playback_volume_spin = QSpinBox()
+        self.playback_volume_spin.setRange(0, 100)
+        self.playback_volume_spin.setValue(int(get_playback_volume()))
+        self.playback_volume_spin.valueChanged.connect(lambda v: set_playback_volume(v))
+        vol_row.addWidget(self.playback_volume_spin)
+        vol_row.addStretch()
+        v.addLayout(vol_row)
+        tempo_row = QHBoxLayout()
+        tempo_row.addWidget(QLabel("Default tempo (0.5–2.0×):"))
+        self.playback_tempo_spin = QDoubleSpinBox()
+        self.playback_tempo_spin.setRange(0.5, 2.0)
+        self.playback_tempo_spin.setSingleStep(0.1)
+        self.playback_tempo_spin.setValue(get_playback_tempo())
+        self.playback_tempo_spin.valueChanged.connect(lambda v: set_playback_tempo(v))
+        tempo_row.addWidget(self.playback_tempo_spin)
+        tempo_row.addStretch()
+        v.addLayout(tempo_row)
+        stereo_row = QHBoxLayout()
+        stereo_row.addWidget(QLabel("Stereo mode:"))
+        self.playback_stereo_combo = QComboBox()
+        self.playback_stereo_combo.addItem("Maestro", "maestro")
+        self.playback_stereo_combo.addItem("Band layout", "band_layout")
+        mode = get_playback_stereo_mode()
+        idx = self.playback_stereo_combo.findData(mode)
+        if idx >= 0:
+            self.playback_stereo_combo.setCurrentIndex(idx)
+        self.playback_stereo_combo.currentIndexChanged.connect(
+            lambda: set_playback_stereo_mode(self.playback_stereo_combo.currentData())
+        )
+        stereo_row.addWidget(self.playback_stereo_combo)
+        stereo_row.addStretch()
+        v.addLayout(stereo_row)
+        v.addStretch()
+        return w
+
+    def _on_browse_fluidsynth_bin(self) -> None:
+        path = QFileDialog.getExistingDirectory(
+            self, "Select FluidSynth bin folder (contains libfluidsynth DLL)", ""
+        )
+        if path:
+            self.playback_fluidsynth_bin_edit.setText(path)
+
+    def _on_browse_soundfont(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Soundfont", "", "SoundFont (*.sf2);;All Files (*)"
+        )
+        if path:
+            self.playback_soundfont_edit.setText(path)
 
     def _scan_account_targets(self) -> None:
         lotro_root = get_lotro_root()

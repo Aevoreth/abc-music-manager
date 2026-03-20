@@ -83,8 +83,9 @@ from ..db.setlist_folder_repo import add_folder, update_folder, delete_folder, l
 from ..db.player_repo import list_player_instruments_bulk
 from ..db.instrument import get_instrument_ids_with_same_name_ci
 from ..db.library_query import get_primary_file_path_for_song, get_song_id_for_file_path
+from ..services.playback_state import PlaybackState, PlaylistEntry
 from ..services.abcp_service import parse_abcp, write_abcp
-from ..services.preferences import get_set_export_dir
+from ..services.preferences import get_set_export_dir, resolve_music_path
 from .setlist_band_assignment_panel import SetlistBandAssignmentPanel
 from .set_export_dialog import SetExportDialog
 from .theme import COLOR_ON_SURFACE, COLOR_PRIMARY
@@ -543,7 +544,7 @@ class SetlistSongsTable(QTableWidget):
         n = self.rowCount()
         if from_row >= n or to_row > n:
             return
-        w = self.cellWidget(from_row, 5)
+        w = self.cellWidget(from_row, 6)
         if w:
             w.setParent(None)
         items = [self.takeItem(from_row, c) for c in range(self.columnCount())]
@@ -554,7 +555,7 @@ class SetlistSongsTable(QTableWidget):
         for c, it in enumerate(items):
             self.setItem(to_row, c, it)
         if w:
-            self.setCellWidget(to_row, 5, w)
+            self.setCellWidget(to_row, 6, w)
         self._drag_row = to_row
         self.selectRow(to_row)
 
@@ -596,9 +597,15 @@ class SetlistSongsTable(QTableWidget):
 
 
 class SetlistsView(QWidget):
-    def __init__(self, app_state: AppState, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        app_state: AppState,
+        playback_state=None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.app_state = app_state
+        self.playback_state = playback_state
         self._selected_setlist_id: int | None = None
         self._loaded_name = ""
         self._loaded_notes = ""
@@ -771,14 +778,16 @@ class SetlistsView(QWidget):
         sv.addLayout(sh)
 
         self.songs_table = SetlistSongsTable()
-        self.songs_table.setColumnCount(6)
-        self.songs_table.setHorizontalHeaderLabels(["", "Title", "Parts", "Duration", "Artist", "Actions"])
+        self.songs_table.setColumnCount(7)
+        self.songs_table.setHorizontalHeaderLabels(["", "", "Title", "Parts", "Duration", "Artist", "Actions"])
         self.songs_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.songs_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        for col in range(6):
+        self.songs_table.cellClicked.connect(self._on_song_cell_clicked)
+        for col in range(7):
             self.songs_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
         self.songs_table.horizontalHeader().setMinimumSectionSize(20)
-        self.songs_table.horizontalHeader().resizeSection(0, 24)
+        self.songs_table.horizontalHeader().resizeSection(0, 28)  # Play
+        self.songs_table.horizontalHeader().resizeSection(1, 24)  # Flag
         fm = self.songs_table.fontMetrics()
         row_height = fm.lineSpacing() + 8
         self.songs_table.verticalHeader().setDefaultSectionSize(row_height)
@@ -1068,6 +1077,11 @@ class SetlistsView(QWidget):
 
         self.songs_table.setRowCount(len(rows))
         for i, r in enumerate(rows):
+            play_item = QTableWidgetItem("▶")
+            play_item.setFlags(play_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            play_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.songs_table.setItem(i, 0, play_item)
+
             err = self._song_has_error(sl, r, bulk, slots)
             flag = QTableWidgetItem("\u26a0" if err else "")
             flag.setForeground(QColor("#ff4444") if err else QColor(COLOR_ON_SURFACE))
@@ -1077,24 +1091,24 @@ class SetlistsView(QWidget):
             flag.setFont(f)
             flag.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             flag.setFlags(flag.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.songs_table.setItem(i, 0, flag)
+            self.songs_table.setItem(i, 1, flag)
 
             t = QTableWidgetItem(r.title)
             t.setData(Qt.ItemDataRole.UserRole, r.item.id)
             t.setFlags(t.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.songs_table.setItem(i, 1, t)
+            self.songs_table.setItem(i, 2, t)
 
             pc = QTableWidgetItem(str(r.part_count))
             pc.setFlags(pc.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.songs_table.setItem(i, 2, pc)
+            self.songs_table.setItem(i, 3, pc)
 
             dur = QTableWidgetItem(_fmt_duration(r.duration_seconds))
             dur.setFlags(dur.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.songs_table.setItem(i, 3, dur)
+            self.songs_table.setItem(i, 4, dur)
 
             art = QTableWidgetItem(r.composers or "—")
             art.setFlags(art.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.songs_table.setItem(i, 4, art)
+            self.songs_table.setItem(i, 5, art)
 
             w = QWidget()
             h = QHBoxLayout(w)
@@ -1119,7 +1133,7 @@ class SetlistsView(QWidget):
             h.addWidget(up_btn)
             h.addWidget(down_btn)
             h.addWidget(rem_btn)
-            self.songs_table.setCellWidget(i, 5, w)
+            self.songs_table.setCellWidget(i, 6, w)
 
         self.songs_table.verticalHeader().blockSignals(False)
         self._filling_songs = False
@@ -1222,19 +1236,40 @@ class SetlistsView(QWidget):
         reorder_setlist_items(self.app_state.conn, self._selected_setlist_id, ids)
         self._refresh_songs_table(select_item_id=item_id)
 
+    def _on_song_cell_clicked(self, row: int, col: int) -> None:
+        if col == 0 and self.playback_state and self._selected_setlist_id:
+            self._play_from_setlist(row)
+
+    def _play_from_setlist(self, start_index: int) -> None:
+        """Load setlist into playlist, start from start_index, use setlist band layout."""
+        if not self.playback_state or not self._selected_setlist_id:
+            return
+        rows = list_setlist_items_with_song_meta(self.app_state.conn, self._selected_setlist_id)
+        sl = next(s for s in list_setlists(self.app_state.conn) if s.id == self._selected_setlist_id)
+        entries = []
+        for r in rows:
+            fp = get_primary_file_path_for_song(self.app_state.conn, r.item.song_id)
+            if fp:
+                fp = resolve_music_path(fp) or fp
+                entries.append(PlaylistEntry(song_id=r.item.song_id, file_path=fp, title=r.title, source="setlist"))
+        if not entries:
+            return
+        self.playback_state.active_band_layout_id = sl.band_layout_id
+        self.playback_state.replace_playlist(entries, start_index=start_index)
+
     def _on_song_row_dragged(self) -> None:
         """Persist current table order after drag-drop (rows already moved visually)."""
         if self._filling_songs or not self._selected_setlist_id:
             return
         ids = []
         for r in range(self.songs_table.rowCount()):
-            it = self.songs_table.item(r, 1)
+            it = self.songs_table.item(r, 2)
             if it:
                 ids.append(it.data(Qt.ItemDataRole.UserRole))
         if len(ids) != self.songs_table.rowCount():
             return
         cr = self.songs_table.currentRow()
-        sel_id = self.songs_table.item(cr, 1).data(Qt.ItemDataRole.UserRole) if cr >= 0 and self.songs_table.item(cr, 1) else None
+        sel_id = self.songs_table.item(cr, 2).data(Qt.ItemDataRole.UserRole) if cr >= 0 and self.songs_table.item(cr, 2) else None
         reorder_setlist_items(self.app_state.conn, self._selected_setlist_id, ids)
         self._refresh_songs_table(select_item_id=sel_id)
 
@@ -1255,7 +1290,7 @@ class SetlistsView(QWidget):
         bulk = list_player_instruments_bulk(self.app_state.conn, pids) if pids else {}
         for i, r in enumerate(rows):
             err = self._song_has_error(sl, r, bulk, slots)
-            flag = self.songs_table.item(i, 0)
+            flag = self.songs_table.item(i, 1)
             if flag:
                 flag.setText("\u26a0" if err else "")
                 flag.setForeground(QColor("#ff4444") if err else QColor(COLOR_ON_SURFACE))

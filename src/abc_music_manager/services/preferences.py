@@ -529,6 +529,106 @@ def to_music_relative(path: str) -> str:
         return path
 
 
+# --- Playback preferences ---
+
+
+def get_playback_fluidsynth_bin_path() -> str:
+    """FluidSynth bin directory (contains libfluidsynth DLL). Empty = use default C:\\tools\\fluidsynth\\bin."""
+    prefs = load_preferences()
+    return (prefs.get("playback_fluidsynth_bin_path") or "").strip()
+
+
+def set_playback_fluidsynth_bin_path(path: str) -> None:
+    """Set FluidSynth bin directory."""
+    prefs = load_preferences()
+    prefs["playback_fluidsynth_bin_path"] = (path or "").strip()
+    save_preferences(prefs)
+
+
+def get_playback_soundfont_path() -> str:
+    """User-configured soundfont path. Empty = use default lookup."""
+    prefs = load_preferences()
+    return (prefs.get("playback_soundfont_path") or "").strip()
+
+
+def set_playback_soundfont_path(path: str) -> None:
+    """Set soundfont path. Empty = use default lookup."""
+    prefs = load_preferences()
+    prefs["playback_soundfont_path"] = (path or "").strip()
+    save_preferences(prefs)
+
+
+def get_playback_volume() -> float:
+    """Volume 0-100. Default 70."""
+    prefs = load_preferences()
+    v = prefs.get("playback_volume")
+    if v is None:
+        return 70.0
+    try:
+        return max(0.0, min(100.0, float(v)))
+    except (TypeError, ValueError):
+        return 70.0
+
+
+def set_playback_volume(value: float) -> None:
+    """Set volume 0-100."""
+    prefs = load_preferences()
+    prefs["playback_volume"] = max(0.0, min(100.0, float(value)))
+    save_preferences(prefs)
+
+
+def get_playback_tempo() -> float:
+    """Tempo factor 0.5-2.0. Default 1.0."""
+    prefs = load_preferences()
+    v = prefs.get("playback_tempo")
+    if v is None:
+        return 1.0
+    try:
+        return max(0.5, min(2.0, float(v)))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def set_playback_tempo(value: float) -> None:
+    """Set tempo factor 0.5-2.0."""
+    prefs = load_preferences()
+    prefs["playback_tempo"] = max(0.5, min(2.0, float(value)))
+    save_preferences(prefs)
+
+
+def get_playback_stereo_mode() -> str:
+    """'maestro' or 'band_layout'. Default maestro."""
+    prefs = load_preferences()
+    v = prefs.get("playback_stereo_mode") or "maestro"
+    return v if v in ("maestro", "band_layout") else "maestro"
+
+
+def set_playback_stereo_mode(mode: str) -> None:
+    """Set stereo mode: maestro or band_layout."""
+    prefs = load_preferences()
+    prefs["playback_stereo_mode"] = mode if mode in ("maestro", "band_layout") else "maestro"
+    save_preferences(prefs)
+
+
+def get_playback_stereo_slider() -> int:
+    """Stereo width 0-100. Default 100."""
+    prefs = load_preferences()
+    v = prefs.get("playback_stereo_slider")
+    if v is None:
+        return 100
+    try:
+        return max(0, min(100, int(v)))
+    except (TypeError, ValueError):
+        return 100
+
+
+def set_playback_stereo_slider(value: int) -> None:
+    """Set stereo width 0-100."""
+    prefs = load_preferences()
+    prefs["playback_stereo_slider"] = max(0, min(100, int(value)))
+    save_preferences(prefs)
+
+
 def resolve_music_path(relative_or_absolute: str) -> str:
     """
     If path is relative, resolve against the Music folder and return absolute path.

@@ -22,7 +22,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QObject, Signal
 
 from ..services.app_state import AppState
+from ..services.playback_state import PlaybackState, PlaylistEntry
 from ..db.setlist_repo import list_setlists, list_setlist_items, get_setlist_band_assignments
+from ..db.library_query import get_primary_file_path_for_song
+from ..services.preferences import resolve_music_path
 from ..db.song_layout_repo import get_song_layout_assignments
 from ..db import get_instrument_name
 from ..db.band_repo import list_layout_slots
@@ -64,9 +67,15 @@ def _get_next_song_layout_slots(conn, setlist_item_id: int) -> list[tuple[str, i
 class SetPlaybackView(QWidget):
     """Leader view: select setlist, show current/next, band layout for next, mark played."""
 
-    def __init__(self, app_state: AppState, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        app_state: AppState,
+        playback_state: PlaybackState | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.app_state = app_state
+        self.playback_state = playback_state
         self._setlist_id: int | None = None
         self._current_index: int = -1  # last played index
         self._next_index: int = 0
@@ -88,10 +97,11 @@ class SetPlaybackView(QWidget):
 
         self.songs_group = QGroupBox("Setlist items")
         self.songs_table = QTableWidget()
-        self.songs_table.setColumnCount(4)
-        self.songs_table.setHorizontalHeaderLabels(["#", "Song", "Status", "Layout"])
+        self.songs_table.setColumnCount(5)
+        self.songs_table.setHorizontalHeaderLabels(["", "#", "Song", "Status", "Layout"])
         self.songs_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.songs_table.itemSelectionChanged.connect(self._on_selection_changed)
+        self.songs_table.cellClicked.connect(self._on_cell_clicked)
         slayout = QVBoxLayout(self.songs_group)
         slayout.addWidget(self.songs_table)
         layout.addWidget(self.songs_group)
@@ -141,20 +151,21 @@ class SetPlaybackView(QWidget):
         items_with_titles = list_setlist_items(self.app_state.conn, self._setlist_id)
         self.songs_table.setRowCount(len(items_with_titles))
         for i, (item, song_title) in enumerate(items_with_titles):
-            self.songs_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            self.songs_table.setItem(i, 1, QTableWidgetItem(song_title))
+            self.songs_table.setItem(i, 0, QTableWidgetItem("▶"))
+            self.songs_table.setItem(i, 1, QTableWidgetItem(str(i + 1)))
+            self.songs_table.setItem(i, 2, QTableWidgetItem(song_title))
             status = ""
             if i == self._current_index:
                 status = "Last played"
             elif i == self._next_index:
                 status = "Next"
-            self.songs_table.setItem(i, 2, QTableWidgetItem(status))
+            self.songs_table.setItem(i, 3, QTableWidgetItem(status))
             layout_name = "—"
             if item.song_layout_id:
                 r = self.app_state.conn.execute("SELECT name FROM SongLayout WHERE id = ?", (item.song_layout_id,)).fetchone()
                 layout_name = r[0] if r and r[0] else str(item.song_layout_id)
-            self.songs_table.setItem(i, 3, QTableWidgetItem(layout_name))
-            for c in range(4):
+            self.songs_table.setItem(i, 4, QTableWidgetItem(layout_name))
+            for c in range(5):
                 cell = self.songs_table.item(i, c)
                 if cell:
                     if i == self._current_index:
@@ -164,6 +175,27 @@ class SetPlaybackView(QWidget):
         self.songs_table.setRowCount(len(items_with_titles))
         self.mark_played_btn.setEnabled(self._next_index < len(items_with_titles))
         self._refresh_next_layout()
+
+    def _on_cell_clicked(self, row: int, col: int) -> None:
+        if col == 0 and self.playback_state and self._setlist_id:
+            self._play_from_setlist(row)
+
+    def _play_from_setlist(self, start_index: int) -> None:
+        """Load setlist into playlist, start from start_index, use setlist band layout."""
+        if not self.playback_state or not self._setlist_id:
+            return
+        items_with_titles = list_setlist_items(self.app_state.conn, self._setlist_id)
+        setlist = next(s for s in list_setlists(self.app_state.conn) if s.id == self._setlist_id)
+        entries = []
+        for item, song_title in items_with_titles:
+            fp = get_primary_file_path_for_song(self.app_state.conn, item.song_id)
+            if fp:
+                fp = resolve_music_path(fp) or fp
+                entries.append(PlaylistEntry(song_id=item.song_id, file_path=fp, title=song_title, source="set_playback"))
+        if not entries:
+            return
+        self.playback_state.active_band_layout_id = setlist.band_layout_id
+        self.playback_state.replace_playlist(entries, start_index=start_index)
 
     def _on_selection_changed(self) -> None:
         row = self.songs_table.currentRow()

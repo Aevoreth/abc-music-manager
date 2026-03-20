@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtWidgets import (
@@ -41,6 +42,9 @@ from PySide6.QtCore import QByteArray
 from PySide6.QtGui import QColor, QAction, QPainter, QFont, QBrush, QPen, QIcon, QPixmap
 
 from ..services.app_state import AppState
+from ..services.playback_state import PlaybackState, PlaylistEntry
+from ..db.library_query import get_primary_file_path_for_song
+from ..services.preferences import resolve_music_path
 from ..services.preferences import get_default_filters, get_library_table_header_state, set_library_table_header_state
 from ..db import list_library_songs, list_unique_transcribers, get_status_list, LibrarySongRow
 from ..db.status_repo import list_statuses
@@ -587,9 +591,15 @@ class LibraryView(QWidget):
 
     navigateToSetlist = Signal(int)  # setlist_id
 
-    def __init__(self, app_state: AppState, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        app_state: AppState,
+        playback_state: PlaybackState | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.app_state = app_state
+        self.playback_state = playback_state
         layout = QVBoxLayout(self)
 
         # ---- Main filter row: Title/Composer, Status, In set, Rating from/to, More Filters ----
@@ -903,7 +913,7 @@ class LibraryView(QWidget):
                         self._on_set_play_time(song_id)
                         return True
                     if 104 <= rx <= 132:
-                        self._on_played_now(song_id)
+                        self._on_play_song(song_id, row_data.title)
                         return True
                 if col == 6:
                     # Rating: star hit test, 5 stars each 14px wide
@@ -946,6 +956,27 @@ class LibraryView(QWidget):
 
     def _set_song_status(self, song_id: int, status_id: Optional[int]) -> None:
         update_song_app_metadata(self.app_state.conn, song_id, status_id=status_id)
+        self.model.refresh()
+
+    def _on_play_song(self, song_id: int, title: str) -> None:
+        """Replace playlist with this song and start playback."""
+        if not self.playback_state:
+            log_play(self.app_state.conn, song_id)
+            self.model.refresh()
+            return
+        fp = get_primary_file_path_for_song(self.app_state.conn, song_id)
+        if not fp:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Playback", "No ABC file path found for this song.")
+            return
+        fp = resolve_music_path(fp) or fp
+        if not Path(fp).is_file():
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Playback", f"ABC file not found:\n{fp}")
+            return
+        entry = PlaylistEntry(song_id=song_id, file_path=fp, title=title, source="library")
+        self.playback_state.replace_playlist([entry], start_index=0)
+        log_play(self.app_state.conn, song_id)
         self.model.refresh()
 
     def _on_played_now(self, song_id: int) -> None:
@@ -1521,7 +1552,17 @@ class LibraryView(QWidget):
         song_id = self.model.song_id_at(source_row)
         if song_id is None:
             return
+        row_data = self.model.row_at(source_row)
+        if not row_data:
+            return
         menu = QMenu(self)
+        if self.playback_state:
+            fp = get_primary_file_path_for_song(self.app_state.conn, song_id)
+            if fp:
+                act = menu.addAction("Add to queue")
+                act.triggered.connect(
+                    lambda checked=False, sid=song_id, fp=fp, t=row_data.title: self._add_to_queue(sid, fp, t)
+                )
         add_to_set = menu.addMenu("Add to Set")
         unlocked = [s for s in list_setlists(self.app_state.conn) if not s.locked]
         for s in unlocked:
@@ -1530,6 +1571,12 @@ class LibraryView(QWidget):
         if not unlocked:
             add_to_set.setEnabled(False)
         menu.exec(self.table.viewport().mapToGlobal(pos))
+
+    def _add_to_queue(self, song_id: int, file_path: str, title: str) -> None:
+        """Append song to playlist without starting playback."""
+        if self.playback_state:
+            entry = PlaylistEntry(song_id=song_id, file_path=file_path, title=title, source="library")
+            self.playback_state.add_to_playlist([entry])
 
     def _add_song_to_set(self, setlist_id: int, song_id: int) -> None:
         items = list_setlist_items(self.app_state.conn, setlist_id)
