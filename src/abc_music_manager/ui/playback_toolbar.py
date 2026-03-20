@@ -19,9 +19,11 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QSizePolicy,
     QMenu,
+    QStyle,
+    QStyleOptionSlider,
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QObject, QEvent
-from PySide6.QtGui import QAction, QIcon
+from PySide6.QtGui import QAction, QIcon, QMouseEvent
 
 from ..services.playback_state import PlaybackState, PlaylistEntry
 
@@ -46,6 +48,66 @@ def _icon_char(c: str) -> str:
     return c
 
 
+class ClickableScrubSlider(QSlider):
+    """
+    Scrub slider that supports both click-to-jump and drag-to-scrub.
+    Click anywhere on the track to seek; click-and-drag to scrub through the song.
+    """
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self._scrub_dragging = False
+
+    def _value_from_pos(self, pos: QPoint) -> int:
+        opt = QStyleOptionSlider()
+        self.initStyleOption(opt)
+        groove = self.style().subControlRect(
+            QStyle.ComplexControl.CC_Slider, opt, QStyle.SubControl.SC_SliderGroove, self
+        )
+        span = max(1, groove.width() - 1 if self.orientation() == Qt.Orientation.Horizontal else groove.height() - 1)
+        pos_in_span = pos.x() - groove.x() if self.orientation() == Qt.Orientation.Horizontal else pos.y() - groove.y()
+        pos_in_span = max(0, min(span, pos_in_span))
+        return QStyle.sliderValueFromPosition(
+            self.minimum(), self.maximum(), pos_in_span, span, opt.upsideDown
+        )
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            opt = QStyleOptionSlider()
+            self.initStyleOption(opt)
+            groove = self.style().subControlRect(
+                QStyle.ComplexControl.CC_Slider, opt, QStyle.SubControl.SC_SliderGroove, self
+            )
+            handle = self.style().subControlRect(
+                QStyle.ComplexControl.CC_Slider, opt, QStyle.SubControl.SC_SliderHandle, self
+            )
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            if not handle.contains(pos) and groove.contains(pos):
+                # Click on groove: jump and start drag so user can scrub by dragging
+                value = self._value_from_pos(pos)
+                self.setValue(value)
+                self._scrub_dragging = True
+                self.grabMouse()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._scrub_dragging:
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            self.setValue(self._value_from_pos(pos))
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._scrub_dragging:
+            self._scrub_dragging = False
+            self.releaseMouse()
+            pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+            self.setValue(self._value_from_pos(pos))
+            return
+        super().mouseReleaseEvent(event)
+
+
 class PlaybackToolbar(QToolBar):
     """
     Persistent playback toolbar below menu bar.
@@ -61,6 +123,9 @@ class PlaybackToolbar(QToolBar):
 
         self._play_btn = QPushButton(_icon_char("▶") + " Play")
         self._play_btn.setToolTip("Play")
+        self._play_btn.setFixedWidth(
+            self._play_btn.fontMetrics().horizontalAdvance(_icon_char("▶") + " Resume") + 24
+        )
         self._play_btn.clicked.connect(self._on_play)
 
         self._stop_btn = QPushButton(_icon_char("■") + " Stop")
@@ -68,11 +133,11 @@ class PlaybackToolbar(QToolBar):
         self._stop_btn.clicked.connect(self._on_stop_clicked)
         self._stop_single_click_timer: QTimer | None = None
 
-        self._scrub_slider = QSlider(Qt.Orientation.Horizontal)
+        self._scrub_slider = ClickableScrubSlider()
         self._scrub_slider.setRange(0, 1000)
         self._scrub_slider.setValue(0)
-        self._scrub_slider.setToolTip("Position")
-        self._scrub_slider.sliderMoved.connect(self._on_scrub_moved)
+        self._scrub_slider.setToolTip("Position (click or drag to seek)")
+        self._scrub_slider.valueChanged.connect(self._on_scrub_moved)
 
         self._pos_label = QLabel("0:00 / 0:00")
         self._pos_label.setMinimumWidth(80)
