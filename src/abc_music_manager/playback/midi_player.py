@@ -123,6 +123,24 @@ class MidiPlayer:
         try:
             import tinysoundfont
             synth = self._ensure_synth()
+            # Stop previous playback and clear state before starting new song.
+            # Prevents tempo drift, stuck MIDI events, and decay tails from previous song.
+            with self._lock:
+                if self._seq:
+                    try:
+                        self._seq.sounds_off()
+                    except Exception:
+                        pass
+                    self._seq = None
+                if synth:
+                    try:
+                        synth.sounds_off()
+                        # Reset controllers (sustain, expression, etc.) so they don't bleed into next song
+                        for ch in range(16):
+                            synth.control_change(ch, 121, 0)  # ALL_CTRL_OFF
+                        synth.stop()
+                    except Exception:
+                        pass
             # New Sequencer per play to avoid leftover events
             self._seq = tinysoundfont.Sequencer(synth)
 
