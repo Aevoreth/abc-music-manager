@@ -624,21 +624,21 @@ def set_playback_volume(value: float) -> None:
 
 
 def get_playback_tempo() -> float:
-    """Tempo factor 0.25-4.0. Default 1.0."""
+    """Tempo factor 0.5-2.0. Default 1.0."""
     prefs = load_preferences()
     v = prefs.get("playback_tempo")
     if v is None:
         return 1.0
     try:
-        return max(0.25, min(4.0, float(v)))
+        return max(0.5, min(2.0, float(v)))
     except (TypeError, ValueError):
         return 1.0
 
 
 def set_playback_tempo(value: float) -> None:
-    """Set tempo factor 0.25-4.0."""
+    """Set tempo factor 0.5-2.0."""
     prefs = load_preferences()
-    prefs["playback_tempo"] = max(0.25, min(4.0, float(value)))
+    prefs["playback_tempo"] = max(0.5, min(2.0, float(value)))
     save_preferences(prefs)
 
 

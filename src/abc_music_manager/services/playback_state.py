@@ -178,8 +178,24 @@ class PlaybackState(QObject):
 
     @tempo_factor.setter
     def tempo_factor(self, value: float) -> None:
-        self._tempo_factor = max(0.25, min(4.0, value))
+        old_factor = self._tempo_factor
+        self._tempo_factor = max(0.5, min(2.0, value))
         self._save_prefs()
+        # If playing or paused, restart with new tempo from current position
+        if self._player and (self.is_playing or self.is_paused):
+            pos = self._player.get_position_sec()
+            was_paused = self._player.is_paused()
+            ok, _ = self._player.play(
+                part_mutes=self._part_mutes,
+                tempo_factor=self._tempo_factor,
+            )
+            if ok:
+                # Seek to equivalent position (position in sec scales with tempo change)
+                new_pos = pos * old_factor / self._tempo_factor
+                self._player.seek(new_pos)
+                if was_paused:
+                    self._player.pause()
+                self._position_timer.start()
         self.state_changed.emit()
 
     @property

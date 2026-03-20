@@ -65,9 +65,9 @@ def _icon_char(c: str) -> str:
     return c
 
 
-# Tempo: 0.25-4.0, 1.0 at center (snapping point). Log scale so center = 1x
-_TEMPO_MIN = 0.25
-_TEMPO_MAX = 4.0
+# Tempo: 0.5-2.0, 1.0 at center (snapping point). Log scale so center = 1x
+_TEMPO_MIN = 0.5
+_TEMPO_MAX = 2.0
 _TEMPO_SNAP = 1.0
 _TEMPO_LOG_MIN = _math.log(_TEMPO_MIN)
 _TEMPO_LOG_MAX = _math.log(_TEMPO_MAX)
@@ -97,7 +97,7 @@ class TempoButtonWithPopup(QPushButton):
         self._popup: QWidget | None = None
         self._slider: QSlider | None = None
         self._update_text()
-        self.setToolTip("Tempo (click for slider: 0.25×–4×)")
+        self.setToolTip("Tempo (click for slider: 0.5×–2×)")
         self.clicked.connect(self._on_clicked)
 
     def _update_text(self) -> None:
@@ -105,7 +105,7 @@ class TempoButtonWithPopup(QPushButton):
 
     def _on_clicked(self) -> None:
         if self._popup and self._popup.isVisible():
-            self._popup.hide()
+            self._popup.hide()  # Event filter applies tempo on hide
             return
         self._show_popup()
 
@@ -126,23 +126,33 @@ class TempoButtonWithPopup(QPushButton):
         slider.setFixedHeight(120)
         slider.setInvertedAppearance(True)
 
-        def on_slide(val: int) -> None:
-            v = _tempo_slider_to_value(val)
-            self._state.tempo_factor = v
-            self._update_text()
-
-        slider.valueChanged.connect(on_slide)
-
         def update_label(val: int) -> None:
             v = _tempo_slider_to_value(val)
             lbl.setText(f"{v:.2f}×")
 
+        def on_released() -> None:
+            v = _tempo_slider_to_value(slider.value())
+            self._state.tempo_factor = v
+            self._update_text()
+
         slider.valueChanged.connect(update_label)
+        slider.sliderReleased.connect(on_released)
         update_label(slider.value())
         layout.addWidget(slider)
 
         self._popup = popup
         self._slider = slider
+
+        def apply_tempo_on_close() -> None:
+            if self._slider is not None:
+                v = _tempo_slider_to_value(self._slider.value())
+                if abs(v - self._state.tempo_factor) >= 1e-6:
+                    self._state.tempo_factor = v
+                self._update_text()
+
+        close_filter = _PopupCloseFilter(popup, apply_tempo_on_close, self, self)
+        popup.installEventFilter(close_filter)
+
         # Explicit size so popup is never zero-sized
         popup.setMinimumSize(80, 160)
         popup.adjustSize()
