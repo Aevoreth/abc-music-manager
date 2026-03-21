@@ -145,6 +145,9 @@ def get_setlists_splitter_state() -> list[int] | None:
 
 
 def set_setlists_splitter_state(sizes: list[int]) -> None:
+    """Save only if sizes are valid; avoids overwriting good prefs with corrupt state."""
+    if not sizes or len(sizes) < 2 or sizes[0] < 100 or sizes[1] < 100:
+        return
     prefs = load_preferences()
     prefs["setlists_splitter_state"] = sizes
     save_preferences(prefs)
@@ -163,6 +166,9 @@ def get_setlists_editor_splitter_state() -> list[int] | None:
 
 
 def set_setlists_editor_splitter_state(sizes: list[int]) -> None:
+    """Save only if sizes are valid; avoids overwriting good prefs with corrupt state."""
+    if not sizes or len(sizes) < 2 or sizes[0] < 80 or sizes[1] < 80:
+        return
     prefs = load_preferences()
     prefs["setlists_editor_splitter_state"] = sizes
     save_preferences(prefs)
@@ -181,6 +187,9 @@ def get_setlists_top_split_state() -> list[int] | None:
 
 
 def set_setlists_top_split_state(sizes: list[int]) -> None:
+    """Save only if sizes are valid; avoids overwriting good prefs with corrupt state."""
+    if not sizes or len(sizes) < 2 or sizes[0] < 80 or sizes[1] < 80:
+        return
     prefs = load_preferences()
     prefs["setlists_top_split_state"] = sizes
     save_preferences(prefs)

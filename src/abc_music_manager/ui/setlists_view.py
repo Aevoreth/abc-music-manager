@@ -1858,7 +1858,8 @@ class SetlistsView(QWidget):
     def _restore_setlists_splitters(self) -> None:
         """Restore splitter positions from preferences. Runs deferred so layout is ready."""
         total = self.setlists_splitter.width()
-        if total < 200:
+        total_h = self.setlists_splitter.height()
+        if total < 200 or total_h < 150:
             # Geometry not ready yet; retry up to 20 times (≈1s total)
             if self._splitter_restore_retries < 20:
                 self._splitter_restore_retries += 1
@@ -1876,21 +1877,40 @@ class SetlistsView(QWidget):
                     left_now = max(120, min(320, left_now))  # Clamp to tree min/max
                     self.setlists_splitter.setSizes([left_now, total - left_now])
                 else:
-                    self.setlists_splitter.setSizes(saved)
+                    # Saved state invalid (left too small or corrupt); use sensible default
+                    left_default = min(200, total - 120)
+                    left_default = max(120, min(320, left_default))
+                    self.setlists_splitter.setSizes([left_default, total - left_default])
             else:
                 left_default = min(200, total - 120)
                 left_default = max(120, min(320, left_default))
                 self.setlists_splitter.setSizes([left_default, total - left_default])
         if not self._editor_splitter_restored:
             self._editor_splitter_restored = True
-            saved = get_setlists_editor_splitter_state()
-            if saved and len(saved) >= 2:
-                self.editor_splitter.setSizes(saved)
+            total_ed = self.editor_splitter.height()
+            if total_ed >= 150:
+                saved = get_setlists_editor_splitter_state()
+                if saved and len(saved) >= 2 and saved[0] >= 80 and saved[1] >= 80:
+                    ratio_top = saved[0] / (saved[0] + saved[1])
+                    top_now = int(total_ed * ratio_top)
+                    top_now = max(80, min(total_ed - 80, top_now))
+                    self.editor_splitter.setSizes([top_now, total_ed - top_now])
+                else:
+                    top_default = max(80, min(total_ed - 80, int(total_ed * 0.4)))
+                    self.editor_splitter.setSizes([top_default, total_ed - top_default])
         if not self._top_split_restored:
             self._top_split_restored = True
-            saved = get_setlists_top_split_state()
-            if saved and len(saved) >= 2:
-                self.top_split.setSizes(saved)
+            total_top = self.top_split.width()
+            if total_top >= 200:
+                saved = get_setlists_top_split_state()
+                if saved and len(saved) >= 2 and saved[0] >= 80 and saved[1] >= 80:
+                    ratio_left = saved[0] / (saved[0] + saved[1])
+                    left_now = int(total_top * ratio_left)
+                    left_now = max(80, min(total_top - 80, left_now))
+                    self.top_split.setSizes([left_now, total_top - left_now])
+                else:
+                    left_default = max(80, min(total_top - 80, int(total_top * 0.35)))
+                    self.top_split.setSizes([left_default, total_top - left_default])
         if not self._songs_table_header_restored:
             self._songs_table_header_restored = True
             saved = get_setlists_songs_table_header_state()
