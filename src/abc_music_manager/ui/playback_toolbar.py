@@ -625,8 +625,8 @@ class PlaybackToolbar(QToolBar):
             return
         mutes = self._state.part_mutes
         for idx, p in enumerate(detail["parts"]):
-            if idx >= 16:
-                break  # MIDI has max 16 channels
+            if idx >= 24:
+                break  # MIDI supports up to 24 parts (LOTRO limit)
             pnum = int(p.get("part_number", 0))
             name = p.get("part_name") or p.get("instrument_name") or f"Part {pnum}"
             cb = QCheckBox(name)

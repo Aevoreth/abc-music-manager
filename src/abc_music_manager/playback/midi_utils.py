@@ -6,11 +6,12 @@ from __future__ import annotations
 
 import io
 import os
-from typing import Optional
+from typing import Callable, Optional
 
 import mido
 
 PAN_CC = 0x0A
+MAX_VIRTUAL_CHANNELS = 24  # LOTRO supports up to 24 parts; we map port+channel to 0-23
 
 # TinySoundFont mishandles non-standard PPQN (e.g. 11520 from L:1/1875000 ABC).
 # Normalize to 480 before playback so events play at correct times.
@@ -69,24 +70,147 @@ def scale_midi_tempo(midi_bytes: bytes, tempo_factor: float) -> bytes:
         return midi_bytes
 
 
+def _virtual_channel(port: int, channel: int) -> int:
+    """Map (port, channel) to virtual channel 0-23 for up to 24 parts."""
+    return 16 * port + channel
+
+
 def extract_pan_per_channel(midi_bytes: bytes) -> dict[int, int]:
     """
-    Extract first pan (CC 10) value per MIDI channel. Returns {channel: pan 0-127}.
-    Channels without pan default to 64 (center). Used to apply pan explicitly
-    to the synth so TinySoundFont respects stereo positioning.
+    Extract first pan (CC 10) value per MIDI channel. Returns {virtual_channel: pan 0-127}.
+    Port-aware: port 1 channel 0 maps to virtual channel 16. Used to apply pan
+    explicitly to the synth so TinySoundFont respects stereo positioning.
     """
     result: dict[int, int] = {}
     try:
         midi_file = mido.MidiFile(file=io.BytesIO(midi_bytes))
         for track in midi_file.tracks:
+            port = 0
+            abs_tick = 0
             for msg in track:
-                if msg.type == "control_change" and msg.control == PAN_CC:
-                    ch = msg.channel
-                    if ch not in result:
-                        result[ch] = min(127, max(0, msg.value))
+                abs_tick += getattr(msg, "time", 0)
+                if msg.type == "midi_port":
+                    port = getattr(msg, "port", 0)
+                elif msg.type == "control_change" and msg.control == PAN_CC:
+                    vch = _virtual_channel(port, msg.channel)
+                    if vch not in result:
+                        result[vch] = min(127, max(0, msg.value))
     except Exception:
         pass
     if os.environ.get("ABC_PAN_DEBUG") == "1":
         import sys
         print(f"[pan] midi_player extracted pan per channel: {dict(sorted(result.items())) if result else '(none found)'}", file=sys.stderr, flush=True)
     return result
+
+
+def load_midi_port_aware(
+    midi_bytes: bytes,
+    filter: Optional[Callable] = None,
+    persistent: bool = True,
+) -> list:
+    """
+    Load MIDI with port support for >16 channels. TinySoundFont's loader ignores
+    port meta, so we parse with mido and map port+channel to virtual channels 0-23.
+    Returns list of tinysoundfont Event objects.
+    """
+    import tinysoundfont.midi as tsf_midi
+
+    events: list = []
+    try:
+        midi_file = mido.MidiFile(file=io.BytesIO(midi_bytes))
+        ticks_per_beat = midi_file.ticks_per_beat
+        tempo_map: list[tuple[int, int]] = [(0, 500_000)]
+
+        # Build tempo map from all tracks (typically track 0 has set_tempo)
+        for track in midi_file.tracks:
+            abs_tick = 0
+            for msg in track:
+                abs_tick += getattr(msg, "time", 0)
+                if msg.type == "set_tempo":
+                    tempo_map.append((abs_tick, msg.tempo))
+        tempo_map.sort(key=lambda x: x[0])
+
+        for track in midi_file.tracks:
+            port = 0
+            abs_tick = 0
+            for msg in track:
+                abs_tick += getattr(msg, "time", 0)
+                if msg.type == "midi_port":
+                    port = getattr(msg, "port", 0)
+                elif msg.type == "note_on":
+                    vch = _virtual_channel(port, msg.channel)
+                    t_sec = _tick_to_sec(abs_tick, tempo_map, ticks_per_beat)
+                    evt = tsf_midi.Event(
+                        tsf_midi.NoteOn(msg.note, msg.velocity),
+                        t=t_sec,
+                        channel=vch,
+                        persistent=persistent,
+                    )
+                    if filter is None or not filter(evt):
+                        events.append(evt)
+                elif msg.type == "note_off":
+                    vch = _virtual_channel(port, msg.channel)
+                    t_sec = _tick_to_sec(abs_tick, tempo_map, ticks_per_beat)
+                    evt = tsf_midi.Event(
+                        tsf_midi.NoteOff(msg.note),
+                        t=t_sec,
+                        channel=vch,
+                        persistent=persistent,
+                    )
+                    if filter is None or not filter(evt):
+                        events.append(evt)
+                elif msg.type == "control_change":
+                    vch = _virtual_channel(port, msg.channel)
+                    t_sec = _tick_to_sec(abs_tick, tempo_map, ticks_per_beat)
+                    evt = tsf_midi.Event(
+                        tsf_midi.ControlChange(msg.control, msg.value),
+                        t=t_sec,
+                        channel=vch,
+                        persistent=persistent,
+                    )
+                    if filter is None or not filter(evt):
+                        events.append(evt)
+                elif msg.type == "program_change":
+                    vch = _virtual_channel(port, msg.channel)
+                    t_sec = _tick_to_sec(abs_tick, tempo_map, ticks_per_beat)
+                    evt = tsf_midi.Event(
+                        tsf_midi.ProgramChange(msg.program),
+                        t=t_sec,
+                        channel=vch,
+                        persistent=persistent,
+                    )
+                    if filter is None or not filter(evt):
+                        events.append(evt)
+                elif msg.type == "pitchwheel":
+                    vch = _virtual_channel(port, msg.channel)
+                    t_sec = _tick_to_sec(abs_tick, tempo_map, ticks_per_beat)
+                    evt = tsf_midi.Event(
+                        tsf_midi.PitchBend(msg.pitch + 8192),
+                        t=t_sec,
+                        channel=vch,
+                        persistent=persistent,
+                    )
+                    if filter is None or not filter(evt):
+                        events.append(evt)
+
+        events.sort(key=lambda e: e.t)
+    except Exception:
+        pass
+    return events
+
+
+def _tick_to_sec(tick: int, tempo_map: list[tuple[int, int]], ppqn: int) -> float:
+    """Convert absolute tick to seconds using tempo map."""
+    if not tempo_map:
+        return 0.0
+    tempo_map = sorted(tempo_map, key=lambda x: x[0])
+    sec = 0.0
+    last_tick = 0
+    last_tempo = tempo_map[0][1]
+    for t, tempo in tempo_map:
+        if t > tick:
+            break
+        sec += (t - last_tick) * last_tempo / (ppqn * 1_000_000)
+        last_tick, last_tempo = t, tempo
+    sec += (tick - last_tick) * last_tempo / (ppqn * 1_000_000)
+    return sec

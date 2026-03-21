@@ -47,7 +47,7 @@ def test_scale_midi_tempo_faster() -> None:
 
 
 def test_part_mutes_to_muted_channels() -> None:
-    """Part indices map to MIDI channels (channel 9 skipped for drums)."""
+    """Part indices map to MIDI channels (channel 9 skipped for drums). Up to 24 parts (LOTRO)."""
     assert _part_mutes_to_muted_channels({}) == frozenset()
     assert _part_mutes_to_muted_channels({0: True}) == frozenset({0})
     assert _part_mutes_to_muted_channels({1: True}) == frozenset({1})
@@ -55,3 +55,6 @@ def test_part_mutes_to_muted_channels() -> None:
     assert _part_mutes_to_muted_channels({9: True}) == frozenset({10})  # part 10 -> ch 10 (skip 9)
     assert _part_mutes_to_muted_channels({0: True, 2: True}) == frozenset({0, 2})
     assert _part_mutes_to_muted_channels({0: False, 1: True}) == frozenset({1})  # only muted
+    assert _part_mutes_to_muted_channels({14: True}) == frozenset({15})  # part 15 -> ch 15
+    assert _part_mutes_to_muted_channels({15: True}) == frozenset({16})  # part 16 -> port 1 ch 0 -> vch 16
+    assert _part_mutes_to_muted_channels({23: True}) == frozenset({24})  # part 24 -> port1 ch8 -> vch 24

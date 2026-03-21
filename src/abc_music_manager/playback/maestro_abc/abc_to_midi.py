@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 import mido
+from mido import MetaMessage
 
 from .. import lotro_instruments
 from ..lotro_instruments import is_non_sustained_instrument
@@ -26,7 +27,7 @@ from .abc_info import AbcInfo
 from .dynamics import Dynamics
 from .exceptions import AbcParseError, LotroParseError
 from .key_signature import KeySignature
-from .midi_constants import CHANNEL_COUNT, DRUM_CHANNEL, MAX_VOLUME
+from .midi_constants import DRUM_CHANNEL, MAX_PARTS, MAX_VOLUME
 from .midi_factory import (
     bpm_to_mpqn,
     create_channel_volume_event,
@@ -62,10 +63,24 @@ NOTE_PATTERN = re.compile(
 CHR_NOTE_DELTA = [9, 11, 0, 2, 4, 5, 7]  # a-g -> semitones above C
 
 
+def _get_track_port_and_channel(track_number: int) -> tuple[int, int]:
+    """
+    Return (port, channel) for a track. Supports up to 24 parts (LOTRO limit).
+    Channel 9 is reserved for drums on port 0.
+    Parts 1-15: port 0, channels 0-8 and 10-15.
+    Parts 16-24: port 1, channels 0-8.
+    """
+    if track_number <= 9:
+        return (0, track_number - 1)  # ch 0-8
+    if track_number <= 15:
+        return (0, track_number)  # ch 10-15 (skip 9)
+    return (1, track_number - 16)  # port 1, ch 0-8 for parts 16-24
+
+
 def _get_track_channel(track_number: int) -> int:
-    if track_number < DRUM_CHANNEL + 1:
-        return track_number - 1
-    return track_number
+    """Legacy: return channel only (port 0). For port 1 tracks, channel is 0-8."""
+    _, ch = _get_track_port_and_channel(track_number)
+    return ch
 
 
 def _read_lines(path: str | Path) -> list[str]:
@@ -270,9 +285,9 @@ def _convert(
             track_index = track_number
             if track_index not in track_events:
                 track_index = len(track_events)
-                channel = _get_track_channel(track_index)
-                if channel >= CHANNEL_COUNT:
-                    raise AbcParseError(f"Too many parts (max {CHANNEL_COUNT - 1})", file_name, part_start_line)
+                if track_index > MAX_PARTS:
+                    raise AbcParseError(f"Too many parts (max {MAX_PARTS})", file_name, part_start_line)
+                _, channel = _get_track_port_and_channel(track_index)
                 track_events[track_index] = []
                 prog = info.get_instrument_midi_program()
                 # Program change
@@ -602,7 +617,7 @@ def _convert(
                     abc_info.get_part_name(i),
                     stereo,
                 )
-            ch = _get_track_channel(i)
+            _, ch = _get_track_port_and_channel(i)
             events_by_track[i].insert(1, (1, create_pan_event(pan_val, ch, 1)[1]))
 
     # Time and key signature
@@ -616,6 +631,10 @@ def _convert(
     for idx in sorted(events_by_track.keys()):
         evs = sorted(events_by_track[idx], key=lambda x: x[0])
         track = mido.MidiTrack()
+        if idx > 0:
+            port, _ = _get_track_port_and_channel(idx)
+            if port > 0:
+                track.append(MetaMessage("midi_port", port=port, time=0))
         prev_tick = 0
         for tick, msg in evs:
             delta = tick - prev_tick

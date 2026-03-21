@@ -12,23 +12,34 @@ from typing import Optional
 
 import mido
 
-from .midi_utils import extract_pan_per_channel, normalize_midi_ppqn, scale_midi_tempo
+from .midi_utils import (
+    extract_pan_per_channel,
+    load_midi_port_aware,
+    normalize_midi_ppqn,
+    scale_midi_tempo,
+)
+
+MAX_PARTS = 24  # LOTRO supports up to 24 parts
 
 
 def _part_index_to_midi_channel(part_index: int) -> int:
     """
-    Map part index (0-based order) to MIDI channel. Matches abc_to_midi._get_track_channel:
-    channel 9 is reserved for drums, so parts 1-9 -> ch 0-8, part 10 -> ch 10, etc.
+    Map part index (0-based order) to virtual MIDI channel. Matches abc_to_midi
+    port+channel mapping: parts 1-9 -> ch 0-8, 10-15 -> ch 10-15, 16-24 -> ch 16-23.
     """
     track_num = part_index + 1
-    if track_num < 10:
+    if track_num <= 9:
         return track_num - 1
-    return track_num  # skip channel 9
+    if track_num <= 15:
+        return track_num  # skip channel 9 (drums)
+    return 16 + (track_num - 16)  # port 1: ch 16-23
 
 
 def _part_mutes_to_muted_channels(part_mutes: dict[int, bool]) -> frozenset[int]:
     """Return set of muted MIDI channels. Keys are part indices (for tests)."""
-    return frozenset(_part_index_to_midi_channel(i) for i, m in part_mutes.items() if m and 0 <= i < 16)
+    return frozenset(
+        _part_index_to_midi_channel(i) for i, m in part_mutes.items() if m and 0 <= i < MAX_PARTS
+    )
 
 
 def _strip_volume_cc_filter(event) -> bool | None:
@@ -43,21 +54,53 @@ def _strip_volume_cc_filter(event) -> bool | None:
     return False  # keep
 
 
+def _channel_to_part_index(virtual_ch: int) -> int | None:
+    """Reverse of _part_index_to_midi_channel. Ch 9 is reserved for drums (unused)."""
+    if virtual_ch <= 8:
+        return virtual_ch
+    if virtual_ch == 9:
+        return None  # drums, no part
+    if virtual_ch <= 15:
+        return virtual_ch - 1  # ch 10->9, ..., 15->14
+    if virtual_ch <= 24:
+        return 15 + (virtual_ch - 16)  # ch 16->15, ..., 24->23
+    return None
+
+
+# All virtual channels we use (0-8, 10-15, 16-24). tinysoundfont's sounds_off()
+# only touches 0-15, so we must explicitly silence 16-24 when switching songs.
+_ALL_CHANNELS = [*range(9), *range(10, 16), *range(16, 25)]
+
+
+def _sounds_off_all_channels(synth) -> None:
+    """Silence all channels we use, including 16-24. tinysoundfont's sounds_off() only does 0-15."""
+    for ch in _ALL_CHANNELS:
+        if ch in synth.channel:
+            try:
+                synth.sounds_off(ch)
+            except Exception:
+                pass
+
+
 def _apply_part_mutes_to_synth(synth, part_mutes: dict[int, bool], unmuted_volume: int) -> None:
     """
     Apply part mutes via MIDI CC 7 (volume) and notes_off per channel.
-    part_mutes key = part index (0-based order). Map to MIDI channel (skip ch 9).
-    We strip CC 7 from MIDI, so we must set volume for all channels.
+    part_mutes key = part index (0-based order). Supports up to 24 parts.
+    Virtual channels: 0-8, 10-15, 16-24 (ch 9 reserved for drums).
+    Only touches channels that are assigned (synth.channel).
     """
-    for ch in range(16):
-        # Reverse mapping: which part index uses this channel?
-        part_idx = ch if ch < 9 else ch - 1  # ch 9 unused, so ch 10 -> part 9
+    for vch in _ALL_CHANNELS:
+        if vch not in synth.channel:
+            continue
+        part_idx = _channel_to_part_index(vch)
+        if part_idx is None:
+            continue
         muted = part_mutes.get(part_idx, False)
         if muted:
-            synth.control_change(ch, 7, 0)
-            synth.notes_off(ch)  # immediately stop any sounding notes
+            synth.control_change(vch, 7, 0)
+            synth.notes_off(vch)
         else:
-            synth.control_change(ch, 7, unmuted_volume)
+            synth.control_change(vch, 7, unmuted_volume)
 
 
 class MidiPlayer:
@@ -98,7 +141,12 @@ class MidiPlayer:
             if self._synth is None:
                 gain_db = self._volume_to_db(self._volume) + self._HEADROOM_DB
                 self._synth = tinysoundfont.Synth(gain=gain_db, samplerate=44100)
-                self._synth.sfload(str(self._sf_path))
+                sfid = self._synth.sfload(str(self._sf_path))
+                # Pre-assign channels 16-24 for 24-part LOTRO support.
+                # tinysoundfont only pre-assigns 0-15 on sfload; parts 16-24 use virtual ch 16-24.
+                # Use direct dict assignment to avoid C-level validation that may reject ch>15.
+                for ch in range(16, 25):
+                    self._synth.channel[ch] = sfid
             return self._synth
 
     def _get_duration_sec(self, midi_bytes: bytes) -> float:
@@ -122,7 +170,7 @@ class MidiPlayer:
     ) -> tuple[bool, str]:
         """
         Start playback. Uses midi_bytes if provided, else previously loaded.
-        part_mutes: channel_index (0-15) -> muted, by part order in ABC (applied via CC7).
+        part_mutes: part index (0-23) -> muted, by part order in ABC (applied via CC7).
         tempo_factor: 0.5-2.0, scales playback speed.
         Returns (success, error_message). error_message is empty on success.
         """
@@ -156,18 +204,21 @@ class MidiPlayer:
                     self._seq = None
                 if synth:
                     try:
-                        synth.sounds_off()
+                        _sounds_off_all_channels(synth)
                         # Reset controllers (sustain, expression, etc.) so they don't bleed into next song
-                        for ch in range(16):
-                            synth.control_change(ch, 121, 0)  # ALL_CTRL_OFF
+                        for ch in _ALL_CHANNELS:
+                            if ch in synth.channel:
+                                synth.control_change(ch, 121, 0)  # ALL_CTRL_OFF
                         synth.stop()
                     except Exception:
                         pass
             # New Sequencer per play to avoid leftover events
             self._seq = tinysoundfont.Sequencer(synth)
 
-            # Strip CC 7 (volume) from MIDI so our mute/set_volume control stays in effect
-            events = tinysoundfont.midi.load_memory(data, filter=_strip_volume_cc_filter, persistent=True)
+            # Use port-aware loader so parts 16-24 work (TinySoundFont ignores port meta)
+            events = load_midi_port_aware(
+                data, filter=_strip_volume_cc_filter, persistent=True
+            )
             self._seq.add(events)
 
             self._part_mutes = dict(part_mutes or {})
@@ -194,6 +245,8 @@ class MidiPlayer:
                 self._paused_at_time = self._seq.get_time()
                 self._seq.pause(True)
                 self._seq.sounds_off()
+                if self._synth:
+                    _sounds_off_all_channels(self._synth)
                 self._is_paused = True
 
     def resume(self) -> None:
@@ -213,15 +266,17 @@ class MidiPlayer:
                 try:
                     if self._seq:
                         self._seq.sounds_off()
+                    _sounds_off_all_channels(self._synth)
                     self._synth.stop()
                 except Exception:
                     pass
+
     def panic(self) -> None:
         """MIDI panic: all notes off on all channels."""
         with self._lock:
             if self._synth:
                 try:
-                    self._synth.sounds_off()
+                    _sounds_off_all_channels(self._synth)
                 except Exception:
                     pass
 
@@ -238,6 +293,7 @@ class MidiPlayer:
             pos = max(0.0, min(position_sec, self._duration_sec))
             try:
                 self._seq.sounds_off()
+                _sounds_off_all_channels(self._synth)
                 self._seq.set_time(pos)
                 if self._is_paused:
                     self._paused_at_time = pos

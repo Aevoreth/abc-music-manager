@@ -23,7 +23,7 @@ from PySide6.QtGui import QColor, QFontMetrics, QPalette
 
 from ..services.app_state import AppState
 from ..services import preferences
-from ..services.playback_state import PlaybackState
+from ..services.playback_state import PlaybackState, PlaylistEntry
 from ..services.preferences import (
     get_splitter_state,
     set_splitter_state,
@@ -314,14 +314,46 @@ class MainWindow(QMainWindow):
         ps = self.playback_state
         if ps.playlist and 0 <= ps.current_index < len(ps.playlist):
             entry = ps.playlist[ps.current_index]
-            if ps.is_playing:
-                self.setWindowTitle(f"{base} — Now playing: {entry.title}")
-            elif ps.is_paused:
-                self.setWindowTitle(f"{base} — Paused: {entry.title}")
+            sub = self._format_title_bar_song(entry)
+            if sub:
+                if ps.is_playing:
+                    self.setWindowTitle(f"{base} — Now Playing: {sub}")
+                elif ps.is_paused:
+                    self.setWindowTitle(f"{base} — Paused: {sub}")
+                else:
+                    self.setWindowTitle(f"{base} — {sub}")
             else:
                 self.setWindowTitle(f"{base} — {entry.title}")
         else:
             self.setWindowTitle(base)
+
+    def _format_title_bar_song(self, entry: PlaylistEntry) -> str:
+        """Format current song as 'Song Name - Composer (duration) [# Parts]' for title bar."""
+        from ..db.library_query import get_song_for_detail, get_song_id_for_file_path
+
+        sid = entry.song_id or (
+            get_song_id_for_file_path(self.app_state.conn, entry.file_path) if self.app_state else None
+        )
+        detail = get_song_for_detail(self.app_state.conn, sid) if (self.app_state and sid) else None
+        name = entry.title or "Unknown"
+        composer = (detail.get("composers") or "").strip() if detail else ""
+        duration_sec = detail.get("duration_seconds") if detail else None
+        part_count = detail.get("part_count", 0) if detail else 0
+
+        def _fmt_dur(s):
+            if s is None or s < 0:
+                return ""
+            m, s = int(s // 60), int(s % 60)
+            return f"{m}:{s:02d}" if m > 0 else f"0:{s:02d}"
+
+        parts = f"[{part_count} Parts]"
+        out = name
+        if composer:
+            out += f" - {composer}"
+        if duration_sec is not None and duration_sec >= 0:
+            out += f" ({_fmt_dur(duration_sec)})"
+        out += f" {parts}"
+        return out
 
     def _on_playback_failed(self, message: str) -> None:
         """Show error when ABC-to-MIDI conversion fails."""
