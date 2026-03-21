@@ -21,6 +21,7 @@ class PartInfo:
     midi_program: int = 24
     name: Optional[str] = None
     name_is_from_extended_info: bool = False
+    user_pan: Optional[str] = None  # "auto" or "0"-"127" from %%user-pan
 
 
 class AbcInfo:
@@ -70,6 +71,14 @@ class AbcInfo:
         self._ensure_part(track_number)
         self._part_info[track_number].midi_program = midi_program
 
+    def set_part_user_pan(self, track_number: int, value: str) -> None:
+        self._ensure_part(track_number)
+        self._part_info[track_number].user_pan = value.strip().lower() if value else None
+
+    def get_part_user_pan(self, track_number: int) -> Optional[str]:
+        p = self._part_info.get(track_number)
+        return (p.user_pan if p else None) if p else None
+
     def set_time_signature(self, ts: TimeSignature) -> None:
         self._time_signature = ts
 
@@ -93,6 +102,11 @@ class AbcInfo:
     def get_part_instrument(self, track_number: int) -> int:
         p = self._part_info.get(track_number)
         return p.midi_program if p else 24
+
+    def get_part_number(self, track_number: int) -> int:
+        """Part number (from ABC X: field) for this track. Matches Song.parts and assignment panel."""
+        p = self._part_info.get(track_number)
+        return p.number if p else track_number
 
     def get_time_signature(self) -> TimeSignature:
         return self._time_signature

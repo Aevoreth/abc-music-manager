@@ -642,30 +642,33 @@ def set_playback_tempo(value: float) -> None:
     save_preferences(prefs)
 
 
+_STEREO_MODES = ("band_layout", "maestro_user_pan", "maestro")
+
+
 def get_playback_stereo_mode() -> str:
-    """'maestro' or 'band_layout'. Default maestro."""
+    """'band_layout', 'maestro_user_pan', or 'maestro'. Default maestro."""
     prefs = load_preferences()
     v = prefs.get("playback_stereo_mode") or "maestro"
-    return v if v in ("maestro", "band_layout") else "maestro"
+    return v if v in _STEREO_MODES else "maestro"
 
 
 def set_playback_stereo_mode(mode: str) -> None:
-    """Set stereo mode: maestro or band_layout."""
+    """Set stereo mode: band_layout, maestro_user_pan, or maestro."""
     prefs = load_preferences()
-    prefs["playback_stereo_mode"] = mode if mode in ("maestro", "band_layout") else "maestro"
+    prefs["playback_stereo_mode"] = mode if mode in _STEREO_MODES else "maestro"
     save_preferences(prefs)
 
 
 def get_playback_stereo_slider() -> int:
-    """Stereo width 0-100. Default 100."""
+    """Stereo width 0-100. Default 0 = full L/R spread (stereo). 100 = all center (mono)."""
     prefs = load_preferences()
     v = prefs.get("playback_stereo_slider")
     if v is None:
-        return 100
+        return 0  # Full stereo by default; was 100 which collapsed all pans to center
     try:
         return max(0, min(100, int(v)))
     except (TypeError, ValueError):
-        return 100
+        return 0
 
 
 def set_playback_stereo_slider(value: int) -> None:

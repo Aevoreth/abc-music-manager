@@ -12,7 +12,7 @@ from typing import Optional
 
 import mido
 
-from .midi_utils import normalize_midi_ppqn, scale_midi_tempo
+from .midi_utils import extract_pan_per_channel, normalize_midi_ppqn, scale_midi_tempo
 
 
 def _part_index_to_midi_channel(part_index: int) -> int:
@@ -174,6 +174,11 @@ class MidiPlayer:
             unmuted_vol = int(127 * max(0.001, self._volume))
             _apply_part_mutes_to_synth(synth, self._part_mutes, unmuted_vol)
 
+            # Apply pan explicitly so stereo positioning is respected (TinySoundFont may not
+            # apply pan from MIDI events correctly)
+            for ch, pan in extract_pan_per_channel(data).items():
+                synth.control_change(ch, 10, pan)
+
             synth.start(buffer_size=4096)
             self._stopped = False
             self._is_paused = False
@@ -228,7 +233,7 @@ class MidiPlayer:
     def seek(self, position_sec: float) -> None:
         """Seek to position. Only valid when loaded and (playing or paused)."""
         with self._lock:
-            if not self._seq or self._stopped:
+            if not self._seq or self._stopped or not self._synth:
                 return
             pos = max(0.0, min(position_sec, self._duration_sec))
             try:
@@ -236,6 +241,9 @@ class MidiPlayer:
                 self._seq.set_time(pos)
                 if self._is_paused:
                     self._paused_at_time = pos
+                # Re-apply pan after seek; TinySoundFont may reset controller state
+                for ch, pan in extract_pan_per_channel(self._midi_bytes).items():
+                    self._synth.control_change(ch, 10, pan)
             except Exception:
                 pass
 
@@ -257,6 +265,9 @@ class MidiPlayer:
         self._part_mutes = dict(part_mutes or {})
         if self._synth:
             try:
+                if self._midi_bytes:
+                    for ch, pan in extract_pan_per_channel(self._midi_bytes).items():
+                        self._synth.control_change(ch, 10, pan)
                 unmuted_vol = int(127 * max(0.001, self._volume))
                 _apply_part_mutes_to_synth(self._synth, self._part_mutes, unmuted_vol)
             except Exception:

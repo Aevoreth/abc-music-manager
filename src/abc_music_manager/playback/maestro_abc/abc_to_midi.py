@@ -104,10 +104,14 @@ def abc_to_midi(
     use_lotro_instruments: bool = True,
     enable_lotro_errors: bool = False,
     stereo: int = 100,
+    stereo_mode: str = "maestro",
+    part_pan_map: Optional[dict[int, int]] = None,
 ) -> bytes:
     """
     Convert ABC content to MIDI bytes.
     Self-contained port of Maestro's AbcToMidi - handles complex time signatures.
+    stereo_mode: 'band_layout', 'maestro_user_pan', or 'maestro'. band_layout uses part_pan_map when provided.
+    part_pan_map: part_number (1-based) -> pan (0-127) for band_layout mode.
     """
     filename = Path(file_path).name if file_path else "ABC"
     lines = abc_content.splitlines()
@@ -121,6 +125,8 @@ def abc_to_midi(
         instrument_override_map=None,
         enable_lotro_errors=enable_lotro_errors,
         stereo=stereo,
+        stereo_mode=stereo_mode,
+        part_pan_map=part_pan_map,
     )
 
 
@@ -130,6 +136,8 @@ def _convert(
     instrument_override_map: Optional[dict[int, int]] = None,
     enable_lotro_errors: bool = False,
     stereo: int = 100,
+    stereo_mode: str = "maestro",
+    part_pan_map: Optional[dict[int, int]] = None,
 ) -> bytes:
     abc_info = AbcInfo()
     abc_info.reset()
@@ -176,7 +184,9 @@ def _convert(
                         pass
                 elif field:
                     abc_info.set_extended_metadata(field, value)
-                    if field == AbcField.PART_NAME:
+                    if field == AbcField.USER_PAN:
+                        abc_info.set_part_user_pan(track_number, value)
+                    elif field == AbcField.PART_NAME:
                         info.set_title(value, True)
                         abc_info.set_part_name(track_number, value, True)
                         if not instrument_override_map or track_number not in instrument_override_map:
@@ -544,15 +554,54 @@ def _convert(
     pan_sorted.sort(key=lambda i: abc_info.get_part_instrument(i))
 
     events_by_track[0].append((0, create_track_name_event(abc_info.get_title(), 0)[1]))
+    CENTER = 64
     for i in pan_sorted:
         if i in events_by_track:
             part_name = abc_info.get_part_name(i) or f"Part {i}"
             events_by_track[i].insert(0, (0, create_track_name_event(part_name, 0)[1]))
-            pan_val = get_maestro_pan(
-                abc_info.get_part_instrument(i),
-                abc_info.get_part_name(i),
-                stereo,
-            )
+            part_num = abc_info.get_part_number(i)
+            # X: values are instrument ids (1, 31, 321, etc.), not sequential. Assignment
+            # panel uses those; fallback uses track order (1, 2, 3...). Try both.
+            if stereo_mode == "band_layout" and part_pan_map is not None:
+                pan_val = (
+                    part_pan_map[part_num]
+                    if part_num in part_pan_map
+                    else part_pan_map.get(i)
+                )
+            else:
+                pan_val = None
+            if pan_val is not None:
+                if stereo != 100:
+                    offset = pan_val - CENTER
+                    pan_val = CENTER + int(offset * stereo / 100.0)
+                    pan_val = max(0, min(127, pan_val))
+            elif stereo_mode == "maestro_user_pan":
+                user_pan = abc_info.get_part_user_pan(i)
+                if user_pan and user_pan != "auto":
+                    try:
+                        pan_val = max(0, min(127, int(user_pan)))
+                        if stereo != 100:
+                            offset = pan_val - CENTER
+                            pan_val = CENTER + int(offset * stereo / 100.0)
+                            pan_val = max(0, min(127, pan_val))
+                    except (ValueError, TypeError):
+                        pan_val = get_maestro_pan(
+                            abc_info.get_part_instrument(i),
+                            abc_info.get_part_name(i),
+                            stereo,
+                        )
+                else:
+                    pan_val = get_maestro_pan(
+                        abc_info.get_part_instrument(i),
+                        abc_info.get_part_name(i),
+                        stereo,
+                    )
+            else:
+                pan_val = get_maestro_pan(
+                    abc_info.get_part_instrument(i),
+                    abc_info.get_part_name(i),
+                    stereo,
+                )
             ch = _get_track_channel(i)
             events_by_track[i].insert(1, (1, create_pan_event(pan_val, ch, 1)[1]))
 

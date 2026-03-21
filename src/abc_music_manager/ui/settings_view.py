@@ -5,6 +5,7 @@ Settings: folder rules, statuses, account targets (PluginData).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -39,6 +40,7 @@ from PySide6.QtCore import Qt, QTime, QDateTime, QDate
 from PySide6.QtGui import QColor, QPainter, QPen
 
 from ..services.app_state import AppState
+from ..services.playback_state import PlaybackState
 from ..services.preferences import (
     get_default_status_id,
     set_default_status_id,
@@ -57,6 +59,8 @@ from ..services.preferences import (
     set_playback_tempo,
     get_playback_stereo_mode,
     set_playback_stereo_mode,
+    get_playback_stereo_slider,
+    set_playback_stereo_slider,
     get_set_export_dir_stored,
     set_set_export_dir,
     ensure_default_lotro_root,
@@ -408,9 +412,15 @@ class AccountTargetEditor(QDialog):
 
 
 class SettingsView(QWidget):
-    def __init__(self, app_state: AppState, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        app_state: AppState,
+        playback_state: Optional[PlaybackState] = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.app_state = app_state
+        self.playback_state = playback_state
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_appearance_tab(), "Appearance")
@@ -779,6 +789,9 @@ class SettingsView(QWidget):
         if index == 1:
             ensure_default_lotro_root()
             self._refresh_lotro_and_set_export_display()
+        # Playback tab is index 5: sync stereo controls from PlaybackState
+        if index == 5:
+            self._refresh_playback_tab()
 
     def _refresh_lotro_and_set_export_display(self) -> None:
         lotro = get_lotro_root()
@@ -1079,20 +1092,52 @@ class SettingsView(QWidget):
         stereo_row = QHBoxLayout()
         stereo_row.addWidget(QLabel("Stereo mode:"))
         self.playback_stereo_combo = QComboBox()
-        self.playback_stereo_combo.addItem("Maestro", "maestro")
         self.playback_stereo_combo.addItem("Band layout", "band_layout")
+        self.playback_stereo_combo.addItem("Maestro: user-pan", "maestro_user_pan")
+        self.playback_stereo_combo.addItem("Maestro: Default", "maestro")
         mode = get_playback_stereo_mode()
         idx = self.playback_stereo_combo.findData(mode)
         if idx >= 0:
             self.playback_stereo_combo.setCurrentIndex(idx)
         self.playback_stereo_combo.currentIndexChanged.connect(
-            lambda: set_playback_stereo_mode(self.playback_stereo_combo.currentData())
+            self._on_stereo_mode_changed
         )
         stereo_row.addWidget(self.playback_stereo_combo)
+        stereo_row.addWidget(QLabel("Stereo width (0=full L/R, 100=center):"))
+        self.playback_stereo_slider = QSpinBox()
+        self.playback_stereo_slider.setRange(0, 100)
+        self.playback_stereo_slider.setValue(get_playback_stereo_slider())
+        self.playback_stereo_slider.valueChanged.connect(self._on_stereo_slider_changed)
+        stereo_row.addWidget(self.playback_stereo_slider)
         stereo_row.addStretch()
         v.addLayout(stereo_row)
         v.addStretch()
         return w
+
+    def _on_stereo_mode_changed(self) -> None:
+        mode = self.playback_stereo_combo.currentData()
+        if mode:
+            if self.playback_state is not None:
+                self.playback_state.stereo_mode = mode
+            else:
+                set_playback_stereo_mode(mode)
+
+    def _on_stereo_slider_changed(self, value: int) -> None:
+        if self.playback_state is not None:
+            self.playback_state.stereo_slider = value
+        else:
+            set_playback_stereo_slider(value)
+
+    def _refresh_playback_tab(self) -> None:
+        """Sync playback controls from PlaybackState when tab is shown."""
+        from PySide6.QtCore import QSignalBlocker
+        if self.playback_state is not None:
+            with QSignalBlocker(self.playback_stereo_combo):
+                idx = self.playback_stereo_combo.findData(self.playback_state.stereo_mode)
+                if idx >= 0:
+                    self.playback_stereo_combo.setCurrentIndex(idx)
+            with QSignalBlocker(self.playback_stereo_slider):
+                self.playback_stereo_slider.setValue(self.playback_state.stereo_slider)
 
     def _on_browse_soundfont(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

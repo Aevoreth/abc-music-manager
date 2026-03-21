@@ -429,9 +429,14 @@ class PlaybackToolbar(QToolBar):
         self.addSeparator()
 
         self._stereo_combo = QComboBox()
-        self._stereo_combo.addItems(["Maestro", "Band layout"])
-        self._stereo_combo.setCurrentIndex(0 if playback_state.stereo_mode == "maestro" else 1)
-        self._stereo_combo.setToolTip("Stereo format")
+        self._stereo_combo.addItem("Band layout", "band_layout")
+        self._stereo_combo.addItem("Maestro: user-pan", "maestro_user_pan")
+        self._stereo_combo.addItem("Maestro: Default", "maestro")
+        idx = self._stereo_combo.findData(playback_state.stereo_mode)
+        self._stereo_combo.setCurrentIndex(max(0, idx))
+        self._stereo_combo.setToolTip(
+            "Pan method: Band layout = position; user-pan = %%user-pan from file; Default = instrument-based"
+        )
         self._stereo_combo.currentIndexChanged.connect(self._on_stereo_changed)
         self.addWidget(self._stereo_combo)
 
@@ -808,7 +813,9 @@ class PlaybackToolbar(QToolBar):
         self._state.stereo_slider = value
 
     def _on_stereo_changed(self, index: int) -> None:
-        self._state.stereo_mode = "maestro" if index == 0 else "band_layout"
+        mode = self._stereo_combo.currentData()
+        if mode:
+            self._state.stereo_mode = mode
 
     def _on_position_changed(self, position_sec: float) -> None:
         dur = self._state.duration_sec
@@ -835,7 +842,8 @@ class PlaybackToolbar(QToolBar):
         self._stereo_slider.setValue(self._state.stereo_slider)
         self._stereo_slider.blockSignals(False)
         self._stereo_combo.blockSignals(True)
-        self._stereo_combo.setCurrentIndex(0 if self._state.stereo_mode == "maestro" else 1)
+        idx = self._stereo_combo.findData(self._state.stereo_mode)
+        self._stereo_combo.setCurrentIndex(max(0, idx))
         self._stereo_combo.blockSignals(False)
 
     def _on_dropdown_toggled(self, checked: bool) -> None:

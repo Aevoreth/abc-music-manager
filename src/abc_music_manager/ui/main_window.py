@@ -86,7 +86,13 @@ class MainWindow(QMainWindow):
     def __init__(self, app_state: AppState) -> None:
         super().__init__()
         self.app_state = app_state
-        self.playback_state = PlaybackState(self)
+        from ..services.band_layout_pan_service import get_part_pan_map
+        self.playback_state = PlaybackState(
+            self,
+            get_part_pan_map=lambda sl_id, bl_id, setlist_item_id=None: get_part_pan_map(
+                app_state.conn, sl_id, bl_id, setlist_item_id
+            ),
+        )
         self.playback_state.soundfont_missing.connect(self._on_soundfont_missing)
         self.playback_state.playback_failed.connect(self._on_playback_failed)
         self.playback_state.state_changed.connect(self._update_window_title)
@@ -119,7 +125,7 @@ class MainWindow(QMainWindow):
         self.stacked.addWidget(self.setlists_view)
         self.stacked.addWidget(self.bands_view)
         self.stacked.addWidget(SetPlaybackView(app_state, self.playback_state))
-        self.stacked.addWidget(SettingsView(app_state))
+        self.stacked.addWidget(SettingsView(app_state, self.playback_state))
         self.library_view.navigateToSetlist.connect(self._on_navigate_to_setlist)
         self._playback_toolbar.playlistExportedAsSet.connect(self._on_navigate_to_setlist)
 

@@ -1,12 +1,16 @@
 """
-MIDI utilities: tempo scaling, PPQN normalization for playback.
+MIDI utilities: tempo scaling, PPQN normalization, pan extraction for playback.
 """
 
 from __future__ import annotations
 
 import io
+import os
+from typing import Optional
 
 import mido
+
+PAN_CC = 0x0A
 
 # TinySoundFont mishandles non-standard PPQN (e.g. 11520 from L:1/1875000 ABC).
 # Normalize to 480 before playback so events play at correct times.
@@ -63,3 +67,26 @@ def scale_midi_tempo(midi_bytes: bytes, tempo_factor: float) -> bytes:
         return out.getvalue()
     except Exception:
         return midi_bytes
+
+
+def extract_pan_per_channel(midi_bytes: bytes) -> dict[int, int]:
+    """
+    Extract first pan (CC 10) value per MIDI channel. Returns {channel: pan 0-127}.
+    Channels without pan default to 64 (center). Used to apply pan explicitly
+    to the synth so TinySoundFont respects stereo positioning.
+    """
+    result: dict[int, int] = {}
+    try:
+        midi_file = mido.MidiFile(file=io.BytesIO(midi_bytes))
+        for track in midi_file.tracks:
+            for msg in track:
+                if msg.type == "control_change" and msg.control == PAN_CC:
+                    ch = msg.channel
+                    if ch not in result:
+                        result[ch] = min(127, max(0, msg.value))
+    except Exception:
+        pass
+    if os.environ.get("ABC_PAN_DEBUG") == "1":
+        import sys
+        print(f"[pan] midi_player extracted pan per channel: {dict(sorted(result.items())) if result else '(none found)'}", file=sys.stderr, flush=True)
+    return result

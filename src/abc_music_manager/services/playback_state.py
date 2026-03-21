@@ -7,7 +7,7 @@ from __future__ import annotations
 import multiprocessing
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from PySide6.QtCore import QObject, Signal, QTimer, QThread
 
@@ -22,17 +22,34 @@ class _ConversionWorker(QThread):
     finished_ok = Signal(object)  # bytes
     finished_error = Signal(str)
 
-    def __init__(self, file_path: str, stereo_slider: int = 100, parent=None) -> None:
+    def __init__(
+        self,
+        file_path: str,
+        stereo_slider: int = 100,
+        stereo_mode: str = "maestro",
+        part_pan_map: Optional[dict[int, int]] = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self._file_path = file_path
         self._stereo_slider = stereo_slider
+        self._stereo_mode = (
+            stereo_mode
+            if stereo_mode in ("band_layout", "maestro_user_pan", "maestro")
+            else "maestro"
+        )
+        self._part_pan_map = part_pan_map
 
     def run(self) -> None:
         result_queue: multiprocessing.Queue = multiprocessing.Queue()
         proc = multiprocessing.Process(
             target=run_conversion,
             args=(self._file_path, result_queue),
-            kwargs={"stereo": self._stereo_slider},
+            kwargs={
+                "stereo": self._stereo_slider,
+                "stereo_mode": self._stereo_mode,
+                "part_pan_map": self._part_pan_map,
+            },
         )
         proc.start()
         try:
@@ -59,6 +76,9 @@ class PlaylistEntry:
     file_path: str
     title: str
     source: str  # "library" | "setlist" | "set_playback"
+    song_layout_id: Optional[int] = None  # for band_layout stereo when from setlist
+    band_layout_id: Optional[int] = None  # for band_layout stereo when from setlist
+    setlist_item_id: Optional[int] = None  # setlist item id for SetlistBandAssignment overrides
 
 
 class PlaybackState(QObject):
@@ -73,7 +93,17 @@ class PlaybackState(QObject):
     soundfont_missing = Signal()  # prompt user to locate/download
     playback_failed = Signal(str)  # error message when conversion fails
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        parent: QObject | None = None,
+        *,
+        get_part_pan_map: Optional[
+            Callable[
+                [Optional[int], Optional[int], Optional[int]],
+                Optional[dict[int, int]],
+            ]
+        ] = None,
+    ) -> None:
         super().__init__(parent)
         self._player: Optional[MidiPlayer] = None
         self._playlist: list[PlaylistEntry] = []
@@ -86,6 +116,9 @@ class PlaybackState(QObject):
         self._position_timer.setInterval(100)  # 10 Hz
         self._conversion_worker: Optional[_ConversionWorker] = None
         self._conversion_cancelled = False
+        self._pending_seek_sec: Optional[float] = None
+        self._pending_was_paused = False
+        self._get_part_pan_map = get_part_pan_map
         self._load_prefs()
 
     def _load_prefs(self) -> None:
@@ -204,8 +237,19 @@ class PlaybackState(QObject):
 
     @stereo_mode.setter
     def stereo_mode(self, value: str) -> None:
-        self._stereo_mode = value if value in ("maestro", "band_layout") else "maestro"
+        self._stereo_mode = (
+            value
+            if value in ("band_layout", "maestro_user_pan", "maestro")
+            else "maestro"
+        )
         self._save_prefs()
+        if self._player and (self.is_playing or self.is_paused):
+            pos = self._player.get_position_sec()
+            was_paused = self._player.is_paused()
+            self.stop()
+            self._pending_seek_sec = pos
+            self._pending_was_paused = was_paused
+            self.play()
         self.state_changed.emit()
 
     @property
@@ -216,6 +260,13 @@ class PlaybackState(QObject):
     def stereo_slider(self, value: int) -> None:
         self._stereo_slider = max(0, min(100, value))
         self._save_prefs()
+        if self._player and (self.is_playing or self.is_paused):
+            pos = self._player.get_position_sec()
+            was_paused = self._player.is_paused()
+            self.stop()
+            self._pending_seek_sec = pos
+            self._pending_was_paused = was_paused
+            self.play()
         self.state_changed.emit()
 
     @property
@@ -310,8 +361,30 @@ class PlaybackState(QObject):
             return True  # Already converting
         self._conversion_cancelled = False
         entry = self._playlist[self._current_index]
+        part_pan_map: Optional[dict[int, int]] = None
+        # Always compute part_pan_map when we have setlist layout data, so switching
+        # to band_layout mid-song (reconvert) produces correct pan.
+        if self._get_part_pan_map is not None:
+            sl_id = entry.song_layout_id or self._active_song_layout_id
+            bl_id = entry.band_layout_id or self._active_band_layout_id
+            setlist_item_id = entry.setlist_item_id
+            if bl_id:
+                part_pan_map = self._get_part_pan_map(sl_id, bl_id, setlist_item_id)
+            if part_pan_map is None and bl_id:
+                import os
+                import sys
+                if os.environ.get("ABC_PAN_DEBUG") == "1":
+                    print(
+                        f"[pan] get_part_pan_map returned None (sl={sl_id}, bl={bl_id}, item={setlist_item_id})",
+                        file=sys.stderr,
+                        flush=True,
+                    )
         self._conversion_worker = _ConversionWorker(
-            entry.file_path, stereo_slider=self._stereo_slider, parent=self
+            entry.file_path,
+            stereo_slider=self._stereo_slider,
+            stereo_mode=self._stereo_mode,
+            part_pan_map=part_pan_map,
+            parent=self,
         )
         self._conversion_worker.finished_ok.connect(self._on_conversion_done)
         self._conversion_worker.finished_error.connect(self._on_conversion_error)
@@ -332,7 +405,18 @@ class PlaybackState(QObject):
         )
         if ok:
             self._position_timer.start()
+            if self._pending_seek_sec is not None:
+                pos = self._pending_seek_sec
+                was_paused = self._pending_was_paused
+                self._pending_seek_sec = None
+                self._pending_was_paused = False
+                self._player.seek(pos)
+                if was_paused:
+                    self._player.pause()
+                    self._position_timer.stop()
         else:
+            self._pending_seek_sec = None
+            self._pending_was_paused = False
             self.playback_failed.emit(
                 f"Playback failed: {err}" if err else "TinySoundFont could not start. Check soundfont in Settings."
             )
@@ -340,6 +424,8 @@ class PlaybackState(QObject):
 
     def _on_conversion_error(self, message: str) -> None:
         self._conversion_worker = None
+        self._pending_seek_sec = None
+        self._pending_was_paused = False
         self.playback_failed.emit(message)
         self.state_changed.emit()
 

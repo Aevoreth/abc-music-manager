@@ -23,10 +23,18 @@ from PySide6.QtCore import Qt, QObject, Signal
 
 from ..services.app_state import AppState
 from ..services.playback_state import PlaybackState, PlaylistEntry
-from ..db.setlist_repo import list_setlists, list_setlist_items, get_setlist_band_assignments
+from ..db.setlist_repo import (
+    list_setlists,
+    list_setlist_items,
+    get_setlist_band_assignments,
+    update_setlist_item,
+)
 from ..db.library_query import get_primary_file_path_for_song
 from ..services.preferences import resolve_music_path
-from ..db.song_layout_repo import get_song_layout_assignments
+from ..db.song_layout_repo import (
+    get_song_layout_assignments,
+    get_or_create_song_layout_for_band,
+)
 from ..db import get_instrument_name
 from ..db.band_repo import list_layout_slots
 from ..db.player_repo import list_players
@@ -191,7 +199,23 @@ class SetPlaybackView(QWidget):
             fp = get_primary_file_path_for_song(self.app_state.conn, item.song_id)
             if fp:
                 fp = resolve_music_path(fp) or fp
-                entries.append(PlaylistEntry(song_id=item.song_id, file_path=fp, title=song_title, source="set_playback"))
+                song_layout_id = item.song_layout_id
+                if setlist.band_layout_id and song_layout_id is None:
+                    song_layout_id = get_or_create_song_layout_for_band(
+                        self.app_state.conn, item.song_id, setlist.band_layout_id
+                    )
+                    update_setlist_item(self.app_state.conn, item.id, song_layout_id=song_layout_id)
+                entries.append(
+                    PlaylistEntry(
+                        song_id=item.song_id,
+                        file_path=fp,
+                        title=song_title,
+                        source="set_playback",
+                        song_layout_id=song_layout_id,
+                        band_layout_id=setlist.band_layout_id,
+                        setlist_item_id=item.id,
+                    )
+                )
         if not entries:
             return
         self.playback_state.active_band_layout_id = setlist.band_layout_id

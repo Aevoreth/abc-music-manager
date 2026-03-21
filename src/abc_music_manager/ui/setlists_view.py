@@ -77,6 +77,7 @@ from ..db.song_layout_repo import (
     add_song_layout,
     set_song_layout_assignment,
     get_song_layout_assignments,
+    get_or_create_song_layout_for_band,
 )
 from ..db.band_repo import list_all_band_layouts, list_layout_slots, list_band_members, get_band_layout_display_name
 from ..db.setlist_folder_repo import add_folder, update_folder, delete_folder, list_folders, reorder_folders
@@ -1252,7 +1253,23 @@ class SetlistsView(QWidget):
             fp = get_primary_file_path_for_song(self.app_state.conn, r.item.song_id)
             if fp:
                 fp = resolve_music_path(fp) or fp
-                entries.append(PlaylistEntry(song_id=r.item.song_id, file_path=fp, title=r.title, source="setlist"))
+                song_layout_id = r.item.song_layout_id
+                if sl.band_layout_id and song_layout_id is None:
+                    song_layout_id = get_or_create_song_layout_for_band(
+                        self.app_state.conn, r.item.song_id, sl.band_layout_id
+                    )
+                    update_setlist_item(self.app_state.conn, r.item.id, song_layout_id=song_layout_id)
+                entries.append(
+                    PlaylistEntry(
+                        song_id=r.item.song_id,
+                        file_path=fp,
+                        title=r.title,
+                        source="setlist",
+                        song_layout_id=song_layout_id,
+                        band_layout_id=sl.band_layout_id,
+                        setlist_item_id=r.item.id,
+                    )
+                )
         if not entries:
             return
         self.playback_state.active_band_layout_id = sl.band_layout_id
