@@ -145,6 +145,9 @@ def get_setlists_splitter_state() -> list[int] | None:
 
 
 def set_setlists_splitter_state(sizes: list[int]) -> None:
+    """Save only if sizes are valid; avoids overwriting good prefs with corrupt state."""
+    if not sizes or len(sizes) < 2 or sizes[0] < 100 or sizes[1] < 100:
+        return
     prefs = load_preferences()
     prefs["setlists_splitter_state"] = sizes
     save_preferences(prefs)
@@ -163,6 +166,9 @@ def get_setlists_editor_splitter_state() -> list[int] | None:
 
 
 def set_setlists_editor_splitter_state(sizes: list[int]) -> None:
+    """Save only if sizes are valid; avoids overwriting good prefs with corrupt state."""
+    if not sizes or len(sizes) < 2 or sizes[0] < 80 or sizes[1] < 80:
+        return
     prefs = load_preferences()
     prefs["setlists_editor_splitter_state"] = sizes
     save_preferences(prefs)
@@ -181,6 +187,9 @@ def get_setlists_top_split_state() -> list[int] | None:
 
 
 def set_setlists_top_split_state(sizes: list[int]) -> None:
+    """Save only if sizes are valid; avoids overwriting good prefs with corrupt state."""
+    if not sizes or len(sizes) < 2 or sizes[0] < 80 or sizes[1] < 80:
+        return
     prefs = load_preferences()
     prefs["setlists_top_split_state"] = sizes
     save_preferences(prefs)
@@ -201,6 +210,65 @@ def get_setlists_songs_table_header_state() -> list[int] | None:
 def set_setlists_songs_table_header_state(sizes: list[int]) -> None:
     prefs = load_preferences()
     prefs["setlists_songs_table_header_state"] = sizes
+    save_preferences(prefs)
+
+
+def get_parts_playlist_popup_geometry() -> dict[str, int] | None:
+    """Saved Parts/Playlist popup size: {width, height}. None if not set."""
+    prefs = load_preferences()
+    v = prefs.get("parts_playlist_popup_geometry")
+    if isinstance(v, dict) and "width" in v and "height" in v:
+        try:
+            w, h = int(v["width"]), int(v["height"])
+            if w >= 400 and h >= 300:
+                return {"width": w, "height": h}
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_parts_playlist_popup_geometry(width: int, height: int) -> None:
+    """Save Parts/Playlist popup size."""
+    prefs = load_preferences()
+    prefs["parts_playlist_popup_geometry"] = {"width": width, "height": height}
+    save_preferences(prefs)
+
+
+def get_parts_playlist_splitter_state() -> list[int] | None:
+    """Saved Parts/Playlist splitter sizes. None if not set."""
+    prefs = load_preferences()
+    v = prefs.get("parts_playlist_splitter_state")
+    if isinstance(v, list) and len(v) >= 2:
+        try:
+            return [int(x) for x in v]
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_parts_playlist_splitter_state(sizes: list[int]) -> None:
+    """Save Parts/Playlist splitter sizes."""
+    prefs = load_preferences()
+    prefs["parts_playlist_splitter_state"] = sizes
+    save_preferences(prefs)
+
+
+def get_playback_playlist_table_columns() -> list[int] | None:
+    """Saved playback playlist table column widths. None if not set."""
+    prefs = load_preferences()
+    v = prefs.get("playback_playlist_table_columns")
+    if isinstance(v, list) and len(v) >= 5:
+        try:
+            return [int(x) for x in v]
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def set_playback_playlist_table_columns(sizes: list[int]) -> None:
+    """Save playback playlist table column widths."""
+    prefs = load_preferences()
+    prefs["playback_playlist_table_columns"] = sizes
     save_preferences(prefs)
 
 
@@ -527,6 +595,96 @@ def to_music_relative(path: str) -> str:
         return full.relative_to(music_p).as_posix()
     except (ValueError, OSError, RuntimeError):
         return path
+
+
+# --- Playback preferences ---
+
+
+def get_playback_soundfont_path() -> str:
+    """User-configured soundfont path. Empty = use default lookup."""
+    prefs = load_preferences()
+    return (prefs.get("playback_soundfont_path") or "").strip()
+
+
+def set_playback_soundfont_path(path: str) -> None:
+    """Set soundfont path. Empty = use default lookup."""
+    prefs = load_preferences()
+    prefs["playback_soundfont_path"] = (path or "").strip()
+    save_preferences(prefs)
+
+
+def get_playback_volume() -> float:
+    """Volume 0-100. Default 70."""
+    prefs = load_preferences()
+    v = prefs.get("playback_volume")
+    if v is None:
+        return 70.0
+    try:
+        return max(0.0, min(100.0, float(v)))
+    except (TypeError, ValueError):
+        return 70.0
+
+
+def set_playback_volume(value: float) -> None:
+    """Set volume 0-100."""
+    prefs = load_preferences()
+    prefs["playback_volume"] = max(0.0, min(100.0, float(value)))
+    save_preferences(prefs)
+
+
+def get_playback_tempo() -> float:
+    """Tempo factor 0.5-2.0. Default 1.0."""
+    prefs = load_preferences()
+    v = prefs.get("playback_tempo")
+    if v is None:
+        return 1.0
+    try:
+        return max(0.5, min(2.0, float(v)))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def set_playback_tempo(value: float) -> None:
+    """Set tempo factor 0.5-2.0."""
+    prefs = load_preferences()
+    prefs["playback_tempo"] = max(0.5, min(2.0, float(value)))
+    save_preferences(prefs)
+
+
+_STEREO_MODES = ("band_layout", "maestro_user_pan", "maestro")
+
+
+def get_playback_stereo_mode() -> str:
+    """'band_layout', 'maestro_user_pan', or 'maestro'. Default maestro."""
+    prefs = load_preferences()
+    v = prefs.get("playback_stereo_mode") or "maestro"
+    return v if v in _STEREO_MODES else "maestro"
+
+
+def set_playback_stereo_mode(mode: str) -> None:
+    """Set stereo mode: band_layout, maestro_user_pan, or maestro."""
+    prefs = load_preferences()
+    prefs["playback_stereo_mode"] = mode if mode in _STEREO_MODES else "maestro"
+    save_preferences(prefs)
+
+
+def get_playback_stereo_slider() -> int:
+    """Stereo width 0-100. Default 0 = full L/R spread (stereo). 100 = all center (mono)."""
+    prefs = load_preferences()
+    v = prefs.get("playback_stereo_slider")
+    if v is None:
+        return 0  # Full stereo by default; was 100 which collapsed all pans to center
+    try:
+        return max(0, min(100, int(v)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def set_playback_stereo_slider(value: int) -> None:
+    """Set stereo width 0-100."""
+    prefs = load_preferences()
+    prefs["playback_stereo_slider"] = max(0, min(100, int(value)))
+    save_preferences(prefs)
 
 
 def resolve_music_path(relative_or_absolute: str) -> str:

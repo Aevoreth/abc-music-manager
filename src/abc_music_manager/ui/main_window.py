@@ -23,6 +23,7 @@ from PySide6.QtGui import QColor, QFontMetrics, QPalette
 
 from ..services.app_state import AppState
 from ..services import preferences
+from ..services.playback_state import PlaybackState, PlaylistEntry
 from ..services.preferences import (
     get_splitter_state,
     set_splitter_state,
@@ -85,12 +86,27 @@ class MainWindow(QMainWindow):
     def __init__(self, app_state: AppState) -> None:
         super().__init__()
         self.app_state = app_state
-        self.setWindowTitle("ABC Music Manager")
+        from ..services.band_layout_pan_service import get_part_pan_map
+        self.playback_state = PlaybackState(
+            self,
+            get_part_pan_map=lambda sl_id, bl_id, setlist_item_id=None: get_part_pan_map(
+                app_state.conn, sl_id, bl_id, setlist_item_id
+            ),
+        )
+        self.playback_state.soundfont_missing.connect(self._on_soundfont_missing)
+        self.playback_state.playback_failed.connect(self._on_playback_failed)
+        self.playback_state.state_changed.connect(self._update_window_title)
+        self._update_window_title()
         self.setMinimumSize(900, 600)
         self.resize(1000, 700)
         _restore_window_geometry(self)
 
         self._build_menu_bar()
+        from .playback_toolbar import PlaybackToolbar
+        self._playback_toolbar = PlaybackToolbar(
+            self.playback_state, self, app_state=app_state
+        )
+        self.addToolBar(self._playback_toolbar)
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QHBoxLayout(central)
@@ -102,15 +118,16 @@ class MainWindow(QMainWindow):
         from .bands_view import BandsView
         from .set_playback_view import SetPlaybackView
         from .settings_view import SettingsView
-        self.library_view = LibraryView(app_state)
-        self.setlists_view = SetlistsView(app_state)
+        self.library_view = LibraryView(app_state, self.playback_state)
+        self.setlists_view = SetlistsView(app_state, self.playback_state)
         self.bands_view = BandsView(app_state)
         self.stacked.addWidget(self.library_view)
         self.stacked.addWidget(self.setlists_view)
         self.stacked.addWidget(self.bands_view)
-        self.stacked.addWidget(SetPlaybackView(app_state))
-        self.stacked.addWidget(SettingsView(app_state))
+        self.stacked.addWidget(SetPlaybackView(app_state, self.playback_state))
+        self.stacked.addWidget(SettingsView(app_state, self.playback_state))
         self.library_view.navigateToSetlist.connect(self._on_navigate_to_setlist)
+        self._playback_toolbar.playlistExportedAsSet.connect(self._on_navigate_to_setlist)
 
         self.nav_list = QListWidget()
         self.nav_list.setObjectName("nav_list")
@@ -184,6 +201,7 @@ class MainWindow(QMainWindow):
         if not self._confirm_leave_page_with_unsaved(-1):
             event.ignore()
             return
+        self.playback_state.close()
         _save_window_geometry(self)
         set_splitter_state(self._splitter.sizes())
         set_bands_splitter_state(self.bands_view.bands_splitter.sizes())
@@ -289,6 +307,62 @@ class MainWindow(QMainWindow):
         from .plugindata_export_dialog import PlugindataExportDialog
         dlg = PlugindataExportDialog(self.app_state.conn, self)
         dlg.exec()
+
+    def _update_window_title(self) -> None:
+        """Set window title to include currently playing song when applicable."""
+        base = "ABC Music Manager"
+        ps = self.playback_state
+        if ps.playlist and 0 <= ps.current_index < len(ps.playlist):
+            entry = ps.playlist[ps.current_index]
+            sub = self._format_title_bar_song(entry)
+            if sub:
+                if ps.is_playing:
+                    self.setWindowTitle(f"{base} — Now Playing: {sub}")
+                elif ps.is_paused:
+                    self.setWindowTitle(f"{base} — Paused: {sub}")
+                else:
+                    self.setWindowTitle(f"{base} — {sub}")
+            else:
+                self.setWindowTitle(f"{base} — {entry.title}")
+        else:
+            self.setWindowTitle(base)
+
+    def _format_title_bar_song(self, entry: PlaylistEntry) -> str:
+        """Format current song as 'Song Name - Composer (duration) [# Parts]' for title bar."""
+        from ..db.library_query import get_song_for_detail, get_song_id_for_file_path
+
+        sid = entry.song_id or (
+            get_song_id_for_file_path(self.app_state.conn, entry.file_path) if self.app_state else None
+        )
+        detail = get_song_for_detail(self.app_state.conn, sid) if (self.app_state and sid) else None
+        name = entry.title or "Unknown"
+        composer = (detail.get("composers") or "").strip() if detail else ""
+        duration_sec = detail.get("duration_seconds") if detail else None
+        part_count = detail.get("part_count", 0) if detail else 0
+
+        def _fmt_dur(s):
+            if s is None or s < 0:
+                return ""
+            m, s = int(s // 60), int(s % 60)
+            return f"{m}:{s:02d}" if m > 0 else f"0:{s:02d}"
+
+        parts = f"[{part_count} Parts]"
+        out = name
+        if composer:
+            out += f" - {composer}"
+        if duration_sec is not None and duration_sec >= 0:
+            out += f" ({_fmt_dur(duration_sec)})"
+        out += f" {parts}"
+        return out
+
+    def _on_playback_failed(self, message: str) -> None:
+        """Show error when ABC-to-MIDI conversion fails."""
+        QMessageBox.warning(self, "Playback Error", message)
+
+    def _on_soundfont_missing(self) -> None:
+        """Show dialog when soundfont is not found. User can locate or download."""
+        from .soundfont_dialog import show_soundfont_dialog
+        show_soundfont_dialog(self)
 
     def _on_about(self) -> None:
         QMessageBox.about(

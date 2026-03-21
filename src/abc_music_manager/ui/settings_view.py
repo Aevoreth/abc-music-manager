@@ -5,6 +5,7 @@ Settings: folder rules, statuses, account targets (PluginData).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -20,6 +21,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QCheckBox,
     QSpinBox,
+    QDoubleSpinBox,
     QDialog,
     QFormLayout,
     QMessageBox,
@@ -38,6 +40,7 @@ from PySide6.QtCore import Qt, QTime, QDateTime, QDate
 from PySide6.QtGui import QColor, QPainter, QPen
 
 from ..services.app_state import AppState
+from ..services.playback_state import PlaybackState
 from ..services.preferences import (
     get_default_status_id,
     set_default_status_id,
@@ -48,6 +51,16 @@ from ..services.preferences import (
     get_default_lotro_root,
     get_music_root,
     get_set_export_dir,
+    get_playback_soundfont_path,
+    set_playback_soundfont_path,
+    get_playback_volume,
+    set_playback_volume,
+    get_playback_tempo,
+    set_playback_tempo,
+    get_playback_stereo_mode,
+    set_playback_stereo_mode,
+    get_playback_stereo_slider,
+    set_playback_stereo_slider,
     get_set_export_dir_stored,
     set_set_export_dir,
     ensure_default_lotro_root,
@@ -399,9 +412,15 @@ class AccountTargetEditor(QDialog):
 
 
 class SettingsView(QWidget):
-    def __init__(self, app_state: AppState, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        app_state: AppState,
+        playback_state: Optional[PlaybackState] = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.app_state = app_state
+        self.playback_state = playback_state
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_appearance_tab(), "Appearance")
@@ -409,6 +428,7 @@ class SettingsView(QWidget):
         self.tabs.addTab(self._build_folder_rules_tab(), "Folder rules")
         self.tabs.addTab(self._build_statuses_tab(), "Statuses")
         self.tabs.addTab(self._build_account_targets_tab(), "Account targets")
+        self.tabs.addTab(self._build_playback_tab(), "Playback")
         self.tabs.currentChanged.connect(self._on_settings_tab_changed)
         layout.addWidget(self.tabs)
 
@@ -769,6 +789,9 @@ class SettingsView(QWidget):
         if index == 1:
             ensure_default_lotro_root()
             self._refresh_lotro_and_set_export_display()
+        # Playback tab is index 5: sync stereo controls from PlaybackState
+        if index == 5:
+            self._refresh_playback_tab()
 
     def _refresh_lotro_and_set_export_display(self) -> None:
         lotro = get_lotro_root()
@@ -1027,6 +1050,101 @@ class SettingsView(QWidget):
         add_btn.clicked.connect(self._add_account_target)
         self._refresh_account_targets()
         return w
+
+    def _build_playback_tab(self) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.addWidget(QLabel("Soundfont path (empty = use default lookup):"))
+        sf_row = QHBoxLayout()
+        self.playback_soundfont_edit = QLineEdit()
+        self.playback_soundfont_edit.setPlaceholderText("Leave empty to use MaestroCommon or download")
+        self.playback_soundfont_edit.setText(get_playback_soundfont_path())
+        self.playback_soundfont_edit.textChanged.connect(
+            lambda: set_playback_soundfont_path(self.playback_soundfont_edit.text())
+        )
+        sf_row.addWidget(self.playback_soundfont_edit)
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self._on_browse_soundfont)
+        sf_row.addWidget(browse_btn)
+        use_default_btn = QPushButton("Use default")
+        use_default_btn.clicked.connect(lambda: self.playback_soundfont_edit.setText(""))
+        sf_row.addWidget(use_default_btn)
+        v.addLayout(sf_row)
+        vol_row = QHBoxLayout()
+        vol_row.addWidget(QLabel("Default volume (0–100):"))
+        self.playback_volume_spin = QSpinBox()
+        self.playback_volume_spin.setRange(0, 100)
+        self.playback_volume_spin.setValue(int(get_playback_volume()))
+        self.playback_volume_spin.valueChanged.connect(lambda v: set_playback_volume(v))
+        vol_row.addWidget(self.playback_volume_spin)
+        vol_row.addStretch()
+        v.addLayout(vol_row)
+        tempo_row = QHBoxLayout()
+        tempo_row.addWidget(QLabel("Default tempo (0.5×–2×):"))
+        self.playback_tempo_spin = QDoubleSpinBox()
+        self.playback_tempo_spin.setRange(0.5, 2.0)
+        self.playback_tempo_spin.setSingleStep(0.1)
+        self.playback_tempo_spin.setValue(get_playback_tempo())
+        self.playback_tempo_spin.valueChanged.connect(lambda v: set_playback_tempo(v))
+        tempo_row.addWidget(self.playback_tempo_spin)
+        tempo_row.addStretch()
+        v.addLayout(tempo_row)
+        stereo_row = QHBoxLayout()
+        stereo_row.addWidget(QLabel("Stereo mode:"))
+        self.playback_stereo_combo = QComboBox()
+        self.playback_stereo_combo.addItem("Band layout", "band_layout")
+        self.playback_stereo_combo.addItem("Maestro: user-pan", "maestro_user_pan")
+        self.playback_stereo_combo.addItem("Maestro: Default", "maestro")
+        mode = get_playback_stereo_mode()
+        idx = self.playback_stereo_combo.findData(mode)
+        if idx >= 0:
+            self.playback_stereo_combo.setCurrentIndex(idx)
+        self.playback_stereo_combo.currentIndexChanged.connect(
+            self._on_stereo_mode_changed
+        )
+        stereo_row.addWidget(self.playback_stereo_combo)
+        stereo_row.addWidget(QLabel("Stereo width (0=full L/R, 100=center):"))
+        self.playback_stereo_slider = QSpinBox()
+        self.playback_stereo_slider.setRange(0, 100)
+        self.playback_stereo_slider.setValue(get_playback_stereo_slider())
+        self.playback_stereo_slider.valueChanged.connect(self._on_stereo_slider_changed)
+        stereo_row.addWidget(self.playback_stereo_slider)
+        stereo_row.addStretch()
+        v.addLayout(stereo_row)
+        v.addStretch()
+        return w
+
+    def _on_stereo_mode_changed(self) -> None:
+        mode = self.playback_stereo_combo.currentData()
+        if mode:
+            if self.playback_state is not None:
+                self.playback_state.stereo_mode = mode
+            else:
+                set_playback_stereo_mode(mode)
+
+    def _on_stereo_slider_changed(self, value: int) -> None:
+        if self.playback_state is not None:
+            self.playback_state.stereo_slider = value
+        else:
+            set_playback_stereo_slider(value)
+
+    def _refresh_playback_tab(self) -> None:
+        """Sync playback controls from PlaybackState when tab is shown."""
+        from PySide6.QtCore import QSignalBlocker
+        if self.playback_state is not None:
+            with QSignalBlocker(self.playback_stereo_combo):
+                idx = self.playback_stereo_combo.findData(self.playback_state.stereo_mode)
+                if idx >= 0:
+                    self.playback_stereo_combo.setCurrentIndex(idx)
+            with QSignalBlocker(self.playback_stereo_slider):
+                self.playback_stereo_slider.setValue(self.playback_state.stereo_slider)
+
+    def _on_browse_soundfont(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Soundfont", "", "SoundFont (*.sf2);;All Files (*)"
+        )
+        if path:
+            self.playback_soundfont_edit.setText(path)
 
     def _scan_account_targets(self) -> None:
         lotro_root = get_lotro_root()

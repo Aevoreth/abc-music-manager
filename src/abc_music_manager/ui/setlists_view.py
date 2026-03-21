@@ -77,14 +77,16 @@ from ..db.song_layout_repo import (
     add_song_layout,
     set_song_layout_assignment,
     get_song_layout_assignments,
+    get_or_create_song_layout_for_band,
 )
 from ..db.band_repo import list_all_band_layouts, list_layout_slots, list_band_members, get_band_layout_display_name
 from ..db.setlist_folder_repo import add_folder, update_folder, delete_folder, list_folders, reorder_folders
 from ..db.player_repo import list_player_instruments_bulk
 from ..db.instrument import get_instrument_ids_with_same_name_ci
 from ..db.library_query import get_primary_file_path_for_song, get_song_id_for_file_path
+from ..services.playback_state import PlaybackState, PlaylistEntry
 from ..services.abcp_service import parse_abcp, write_abcp
-from ..services.preferences import get_set_export_dir
+from ..services.preferences import get_set_export_dir, resolve_music_path
 from .setlist_band_assignment_panel import SetlistBandAssignmentPanel
 from .set_export_dialog import SetExportDialog
 from .theme import COLOR_ON_SURFACE, COLOR_PRIMARY
@@ -513,6 +515,7 @@ class SetlistSongsTable(QTableWidget):
         super().__init__(parent)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDragDropOverwriteMode(False)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
@@ -543,7 +546,7 @@ class SetlistSongsTable(QTableWidget):
         n = self.rowCount()
         if from_row >= n or to_row > n:
             return
-        w = self.cellWidget(from_row, 5)
+        w = self.cellWidget(from_row, 6)
         if w:
             w.setParent(None)
         items = [self.takeItem(from_row, c) for c in range(self.columnCount())]
@@ -554,7 +557,7 @@ class SetlistSongsTable(QTableWidget):
         for c, it in enumerate(items):
             self.setItem(to_row, c, it)
         if w:
-            self.setCellWidget(to_row, 5, w)
+            self.setCellWidget(to_row, 6, w)
         self._drag_row = to_row
         self.selectRow(to_row)
 
@@ -590,15 +593,21 @@ class SetlistSongsTable(QTableWidget):
         if not mime.hasFormat(_MIME_ROW):
             event.ignore()
             return
-        event.accept()
+        event.acceptProposedAction()
         if self.rowReordered:
-            self.rowReordered()
+            QTimer.singleShot(0, self.rowReordered)
 
 
 class SetlistsView(QWidget):
-    def __init__(self, app_state: AppState, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        app_state: AppState,
+        playback_state=None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.app_state = app_state
+        self.playback_state = playback_state
         self._selected_setlist_id: int | None = None
         self._loaded_name = ""
         self._loaded_notes = ""
@@ -613,6 +622,7 @@ class SetlistsView(QWidget):
         self._editor_splitter_restored = False
         self._top_split_restored = False
         self._songs_table_header_restored = False
+        self._splitter_restore_retries = 0
         self._songs_header_save_timer = QTimer(self)
         self._songs_header_save_timer.setSingleShot(True)
         self._songs_header_save_timer.timeout.connect(self._save_songs_table_header_state)
@@ -771,14 +781,16 @@ class SetlistsView(QWidget):
         sv.addLayout(sh)
 
         self.songs_table = SetlistSongsTable()
-        self.songs_table.setColumnCount(6)
-        self.songs_table.setHorizontalHeaderLabels(["", "Title", "Parts", "Duration", "Artist", "Actions"])
+        self.songs_table.setColumnCount(7)
+        self.songs_table.setHorizontalHeaderLabels(["", "", "Title", "Parts", "Duration", "Artist", "Actions"])
         self.songs_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.songs_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        for col in range(6):
+        self.songs_table.cellClicked.connect(self._on_song_cell_clicked)
+        for col in range(7):
             self.songs_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
         self.songs_table.horizontalHeader().setMinimumSectionSize(20)
-        self.songs_table.horizontalHeader().resizeSection(0, 24)
+        self.songs_table.horizontalHeader().resizeSection(0, 28)  # Play
+        self.songs_table.horizontalHeader().resizeSection(1, 24)  # Flag
         fm = self.songs_table.fontMetrics()
         row_height = fm.lineSpacing() + 8
         self.songs_table.verticalHeader().setDefaultSectionSize(row_height)
@@ -1068,6 +1080,11 @@ class SetlistsView(QWidget):
 
         self.songs_table.setRowCount(len(rows))
         for i, r in enumerate(rows):
+            play_item = QTableWidgetItem("▶")
+            play_item.setFlags(play_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            play_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.songs_table.setItem(i, 0, play_item)
+
             err = self._song_has_error(sl, r, bulk, slots)
             flag = QTableWidgetItem("\u26a0" if err else "")
             flag.setForeground(QColor("#ff4444") if err else QColor(COLOR_ON_SURFACE))
@@ -1077,24 +1094,24 @@ class SetlistsView(QWidget):
             flag.setFont(f)
             flag.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             flag.setFlags(flag.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.songs_table.setItem(i, 0, flag)
+            self.songs_table.setItem(i, 1, flag)
 
             t = QTableWidgetItem(r.title)
             t.setData(Qt.ItemDataRole.UserRole, r.item.id)
             t.setFlags(t.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.songs_table.setItem(i, 1, t)
+            self.songs_table.setItem(i, 2, t)
 
             pc = QTableWidgetItem(str(r.part_count))
             pc.setFlags(pc.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.songs_table.setItem(i, 2, pc)
+            self.songs_table.setItem(i, 3, pc)
 
             dur = QTableWidgetItem(_fmt_duration(r.duration_seconds))
             dur.setFlags(dur.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.songs_table.setItem(i, 3, dur)
+            self.songs_table.setItem(i, 4, dur)
 
             art = QTableWidgetItem(r.composers or "—")
             art.setFlags(art.flags() & ~Qt.ItemFlag.ItemIsEditable)
-            self.songs_table.setItem(i, 4, art)
+            self.songs_table.setItem(i, 5, art)
 
             w = QWidget()
             h = QHBoxLayout(w)
@@ -1119,7 +1136,7 @@ class SetlistsView(QWidget):
             h.addWidget(up_btn)
             h.addWidget(down_btn)
             h.addWidget(rem_btn)
-            self.songs_table.setCellWidget(i, 5, w)
+            self.songs_table.setCellWidget(i, 6, w)
 
         self.songs_table.verticalHeader().blockSignals(False)
         self._filling_songs = False
@@ -1222,19 +1239,58 @@ class SetlistsView(QWidget):
         reorder_setlist_items(self.app_state.conn, self._selected_setlist_id, ids)
         self._refresh_songs_table(select_item_id=item_id)
 
+    def _on_song_cell_clicked(self, row: int, col: int) -> None:
+        if col == 0 and self.playback_state and self._selected_setlist_id:
+            self._play_from_setlist(row)
+
+    def _play_from_setlist(self, start_index: int) -> None:
+        """Load setlist into playlist, start from start_index, use setlist band layout."""
+        if not self.playback_state or not self._selected_setlist_id:
+            return
+        rows = list_setlist_items_with_song_meta(self.app_state.conn, self._selected_setlist_id)
+        sl = next(s for s in list_setlists(self.app_state.conn) if s.id == self._selected_setlist_id)
+        entries = []
+        for r in rows:
+            fp = get_primary_file_path_for_song(self.app_state.conn, r.item.song_id)
+            if fp:
+                fp = resolve_music_path(fp) or fp
+                song_layout_id = r.item.song_layout_id
+                if sl.band_layout_id and song_layout_id is None:
+                    song_layout_id = get_or_create_song_layout_for_band(
+                        self.app_state.conn, r.item.song_id, sl.band_layout_id
+                    )
+                    update_setlist_item(self.app_state.conn, r.item.id, song_layout_id=song_layout_id)
+                entries.append(
+                    PlaylistEntry(
+                        song_id=r.item.song_id,
+                        file_path=fp,
+                        title=r.title,
+                        source="setlist",
+                        song_layout_id=song_layout_id,
+                        band_layout_id=sl.band_layout_id,
+                        setlist_item_id=r.item.id,
+                    )
+                )
+        if not entries:
+            return
+        self.playback_state.active_band_layout_id = sl.band_layout_id
+        self.playback_state.replace_playlist(entries, start_index=start_index)
+
     def _on_song_row_dragged(self) -> None:
         """Persist current table order after drag-drop (rows already moved visually)."""
         if self._filling_songs or not self._selected_setlist_id:
             return
-        ids = []
+        ids: list[int] = []
         for r in range(self.songs_table.rowCount()):
-            it = self.songs_table.item(r, 1)
+            it = self.songs_table.item(r, 2)
             if it:
-                ids.append(it.data(Qt.ItemDataRole.UserRole))
+                val = it.data(Qt.ItemDataRole.UserRole)
+                if val is not None and isinstance(val, int):
+                    ids.append(val)
         if len(ids) != self.songs_table.rowCount():
             return
         cr = self.songs_table.currentRow()
-        sel_id = self.songs_table.item(cr, 1).data(Qt.ItemDataRole.UserRole) if cr >= 0 and self.songs_table.item(cr, 1) else None
+        sel_id = self.songs_table.item(cr, 2).data(Qt.ItemDataRole.UserRole) if cr >= 0 and self.songs_table.item(cr, 2) else None
         reorder_setlist_items(self.app_state.conn, self._selected_setlist_id, ids)
         self._refresh_songs_table(select_item_id=sel_id)
 
@@ -1255,7 +1311,7 @@ class SetlistsView(QWidget):
         bulk = list_player_instruments_bulk(self.app_state.conn, pids) if pids else {}
         for i, r in enumerate(rows):
             err = self._song_has_error(sl, r, bulk, slots)
-            flag = self.songs_table.item(i, 0)
+            flag = self.songs_table.item(i, 1)
             if flag:
                 flag.setText("\u26a0" if err else "")
                 flag.setForeground(QColor("#ff4444") if err else QColor(COLOR_ON_SURFACE))
@@ -1802,8 +1858,13 @@ class SetlistsView(QWidget):
     def _restore_setlists_splitters(self) -> None:
         """Restore splitter positions from preferences. Runs deferred so layout is ready."""
         total = self.setlists_splitter.width()
-        if total < 200:
-            return  # Splitter not ready yet
+        total_h = self.setlists_splitter.height()
+        if total < 200 or total_h < 150:
+            # Geometry not ready yet; retry up to 20 times (≈1s total)
+            if self._splitter_restore_retries < 20:
+                self._splitter_restore_retries += 1
+                QTimer.singleShot(50, self._restore_setlists_splitters)
+            return
         if not self._splitter_restored:
             self._splitter_restored = True
             saved = get_setlists_splitter_state()
@@ -1816,21 +1877,40 @@ class SetlistsView(QWidget):
                     left_now = max(120, min(320, left_now))  # Clamp to tree min/max
                     self.setlists_splitter.setSizes([left_now, total - left_now])
                 else:
-                    self.setlists_splitter.setSizes(saved)
+                    # Saved state invalid (left too small or corrupt); use sensible default
+                    left_default = min(200, total - 120)
+                    left_default = max(120, min(320, left_default))
+                    self.setlists_splitter.setSizes([left_default, total - left_default])
             else:
                 left_default = min(200, total - 120)
                 left_default = max(120, min(320, left_default))
                 self.setlists_splitter.setSizes([left_default, total - left_default])
         if not self._editor_splitter_restored:
             self._editor_splitter_restored = True
-            saved = get_setlists_editor_splitter_state()
-            if saved and len(saved) >= 2:
-                self.editor_splitter.setSizes(saved)
+            total_ed = self.editor_splitter.height()
+            if total_ed >= 150:
+                saved = get_setlists_editor_splitter_state()
+                if saved and len(saved) >= 2 and saved[0] >= 80 and saved[1] >= 80:
+                    ratio_top = saved[0] / (saved[0] + saved[1])
+                    top_now = int(total_ed * ratio_top)
+                    top_now = max(80, min(total_ed - 80, top_now))
+                    self.editor_splitter.setSizes([top_now, total_ed - top_now])
+                else:
+                    top_default = max(80, min(total_ed - 80, int(total_ed * 0.4)))
+                    self.editor_splitter.setSizes([top_default, total_ed - top_default])
         if not self._top_split_restored:
             self._top_split_restored = True
-            saved = get_setlists_top_split_state()
-            if saved and len(saved) >= 2:
-                self.top_split.setSizes(saved)
+            total_top = self.top_split.width()
+            if total_top >= 200:
+                saved = get_setlists_top_split_state()
+                if saved and len(saved) >= 2 and saved[0] >= 80 and saved[1] >= 80:
+                    ratio_left = saved[0] / (saved[0] + saved[1])
+                    left_now = int(total_top * ratio_left)
+                    left_now = max(80, min(total_top - 80, left_now))
+                    self.top_split.setSizes([left_now, total_top - left_now])
+                else:
+                    left_default = max(80, min(total_top - 80, int(total_top * 0.35)))
+                    self.top_split.setSizes([left_default, total_top - left_default])
         if not self._songs_table_header_restored:
             self._songs_table_header_restored = True
             saved = get_setlists_songs_table_header_state()
@@ -1844,6 +1924,7 @@ class SetlistsView(QWidget):
         super().showEvent(event)
         # Restore splitters first (deferred so layout is ready), then load data.
         # This prevents the folder/sets list from taking the entire screen.
+        self._splitter_restore_retries = 0
         QTimer.singleShot(100, self._restore_setlists_splitters)
         QTimer.singleShot(150, self._on_show_deferred)
 

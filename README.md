@@ -78,6 +78,17 @@ ABC Music Manager is a local-first desktop application designed specifically for
 
 The database will be created automatically on first run (path TBD with Qt app). The previous Flet app’s CLI init lived at `python -m src.abc_music_manager.cli_init_db` (see `/old/`). Run unit tests with `pytest tests/ -v`.
 
+### Building (Distribution)
+
+To build a standalone executable with PyInstaller:
+
+1. **Install dependencies:** `pip install -r requirements.txt`
+2. **Install PyInstaller:** `pip install pyinstaller`
+3. **Build:** `pyinstaller abc-music-manager.spec`
+4. **Output:** `dist/ABC Music Manager.exe` (Windows) or equivalent in `dist/`
+
+The spec bundles TinySoundFont and PyAudio for MIDI playback. The soundfont is user-configured at runtime (Settings > Playback).
+
 ---
 
 ## Design Docs (Source of Truth)
