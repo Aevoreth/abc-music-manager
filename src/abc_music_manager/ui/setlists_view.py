@@ -622,6 +622,7 @@ class SetlistsView(QWidget):
         self._editor_splitter_restored = False
         self._top_split_restored = False
         self._songs_table_header_restored = False
+        self._splitter_restore_retries = 0
         self._songs_header_save_timer = QTimer(self)
         self._songs_header_save_timer.setSingleShot(True)
         self._songs_header_save_timer.timeout.connect(self._save_songs_table_header_state)
@@ -1858,7 +1859,11 @@ class SetlistsView(QWidget):
         """Restore splitter positions from preferences. Runs deferred so layout is ready."""
         total = self.setlists_splitter.width()
         if total < 200:
-            return  # Splitter not ready yet
+            # Geometry not ready yet; retry up to 20 times (≈1s total)
+            if self._splitter_restore_retries < 20:
+                self._splitter_restore_retries += 1
+                QTimer.singleShot(50, self._restore_setlists_splitters)
+            return
         if not self._splitter_restored:
             self._splitter_restored = True
             saved = get_setlists_splitter_state()
@@ -1899,6 +1904,7 @@ class SetlistsView(QWidget):
         super().showEvent(event)
         # Restore splitters first (deferred so layout is ready), then load data.
         # This prevents the folder/sets list from taking the entire screen.
+        self._splitter_restore_retries = 0
         QTimer.singleShot(100, self._restore_setlists_splitters)
         QTimer.singleShot(150, self._on_show_deferred)
 

@@ -68,6 +68,7 @@ class BandsView(QWidget):
         self._loaded_band_name: str = ""
         self._loaded_band_notes: str = ""
         self._bands_splitter_restored: bool = False
+        self._bands_splitter_restore_retries: int = 0
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_bands_tab(), "Bands")
@@ -503,6 +504,7 @@ class BandsView(QWidget):
         # Defer refresh to next event loop so layout is ready
         QTimer.singleShot(0, self._on_show_deferred)
         # Defer splitter restore further so layout has settled (avoids reset-to-right)
+        self._bands_splitter_restore_retries = 0
         QTimer.singleShot(100, self._restore_bands_splitter)
 
     def _on_show_deferred(self) -> None:
@@ -511,13 +513,17 @@ class BandsView(QWidget):
         self._refresh_players()
 
     def _restore_bands_splitter(self) -> None:
-        """Restore bands splitter from preferences. Runs after 100ms delay so layout is ready."""
+        """Restore bands splitter from preferences. Runs after delay so layout is ready."""
         if self._bands_splitter_restored:
             return
-        self._bands_splitter_restored = True
         total_now = self.bands_splitter.width()
         if total_now < 200:
-            return  # Splitter not ready yet
+            # Geometry not ready yet; retry up to 20 times (≈1s total)
+            if self._bands_splitter_restore_retries < 20:
+                self._bands_splitter_restore_retries += 1
+                QTimer.singleShot(50, self._restore_bands_splitter)
+            return
+        self._bands_splitter_restored = True
         saved = get_bands_splitter_state()
         if saved and len(saved) >= 2:
             left_saved, right_saved = saved[0], saved[1]
