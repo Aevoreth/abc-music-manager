@@ -214,3 +214,141 @@ def _tick_to_sec(tick: int, tempo_map: list[tuple[int, int]], ppqn: int) -> floa
         last_tick, last_tempo = t, tempo
     sec += (tick - last_tick) * last_tempo / (ppqn * 1_000_000)
     return sec
+
+
+def prepare_midi_for_playback(
+    midi_bytes: bytes,
+    *,
+    tempo_factor: float = 1.0,
+    target_ppqn: int = TARGET_PPQN,
+    filter: Optional[Callable] = None,
+    persistent: bool = True,
+) -> tuple[bytes, list, dict[int, int], float]:
+    """
+    Single-pass MIDI preparation: normalize PPQN, scale tempo, extract events and pan.
+    Returns (final_bytes, events, pan_map, duration_sec). Reduces 5 parses to 1.
+    """
+    import tinysoundfont.midi as tsf_midi
+
+    events: list = []
+    pan_map: dict[int, int] = {}
+    duration_sec = 0.0
+
+    try:
+        midi_file = mido.MidiFile(file=io.BytesIO(midi_bytes))
+        old_ppqn = midi_file.ticks_per_beat
+        scale_ppqn = target_ppqn / old_ppqn if old_ppqn != target_ppqn else 1.0
+        apply_tempo_scale = tempo_factor > 0 and abs(tempo_factor - 1.0) >= 1e-6
+
+        # Build PPQN-normalized and tempo-scaled structure
+        if scale_ppqn != 1.0 or apply_tempo_scale:
+            out_file = mido.MidiFile(type=midi_file.type, ticks_per_beat=target_ppqn)
+            for track in midi_file.tracks:
+                new_track = mido.MidiTrack()
+                abs_tick = 0
+                prev_new_tick = 0
+                for msg in track:
+                    abs_tick += getattr(msg, "time", 0)
+                    new_abs_tick = max(0, int(abs_tick * scale_ppqn))
+                    new_delta = new_abs_tick - prev_new_tick
+                    prev_new_tick = new_abs_tick
+                    new_msg = msg.copy(time=new_delta)
+                    if apply_tempo_scale and new_msg.type == "set_tempo":
+                        new_msg.tempo = max(1, int(new_msg.tempo / tempo_factor))
+                    new_track.append(new_msg)
+                out_file.tracks.append(new_track)
+            midi_file = out_file
+
+        ticks_per_beat = midi_file.ticks_per_beat
+        tempo_map: list[tuple[int, int]] = [(0, 500_000)]
+
+        for track in midi_file.tracks:
+            abs_tick = 0
+            for msg in track:
+                abs_tick += getattr(msg, "time", 0)
+                if msg.type == "set_tempo":
+                    tempo_map.append((abs_tick, msg.tempo))
+        tempo_map.sort(key=lambda x: x[0])
+
+        for track in midi_file.tracks:
+            port = 0
+            abs_tick = 0
+            for msg in track:
+                abs_tick += getattr(msg, "time", 0)
+                if msg.type == "midi_port":
+                    port = getattr(msg, "port", 0)
+                elif msg.type == "control_change":
+                    vch = _virtual_channel(port, msg.channel)
+                    if msg.control == PAN_CC and vch not in pan_map:
+                        pan_map[vch] = min(127, max(0, msg.value))
+                    t_sec = _tick_to_sec(abs_tick, tempo_map, ticks_per_beat)
+                    evt = tsf_midi.Event(
+                        tsf_midi.ControlChange(msg.control, msg.value),
+                        t=t_sec,
+                        channel=vch,
+                        persistent=persistent,
+                    )
+                    if filter is None or not filter(evt):
+                        events.append(evt)
+                elif msg.type == "note_on":
+                    vch = _virtual_channel(port, msg.channel)
+                    t_sec = _tick_to_sec(abs_tick, tempo_map, ticks_per_beat)
+                    evt = tsf_midi.Event(
+                        tsf_midi.NoteOn(msg.note, msg.velocity),
+                        t=t_sec,
+                        channel=vch,
+                        persistent=persistent,
+                    )
+                    if filter is None or not filter(evt):
+                        events.append(evt)
+                elif msg.type == "note_off":
+                    vch = _virtual_channel(port, msg.channel)
+                    t_sec = _tick_to_sec(abs_tick, tempo_map, ticks_per_beat)
+                    evt = tsf_midi.Event(
+                        tsf_midi.NoteOff(msg.note),
+                        t=t_sec,
+                        channel=vch,
+                        persistent=persistent,
+                    )
+                    if filter is None or not filter(evt):
+                        events.append(evt)
+                elif msg.type == "program_change":
+                    vch = _virtual_channel(port, msg.channel)
+                    t_sec = _tick_to_sec(abs_tick, tempo_map, ticks_per_beat)
+                    evt = tsf_midi.Event(
+                        tsf_midi.ProgramChange(msg.program),
+                        t=t_sec,
+                        channel=vch,
+                        persistent=persistent,
+                    )
+                    if filter is None or not filter(evt):
+                        events.append(evt)
+                elif msg.type == "pitchwheel":
+                    vch = _virtual_channel(port, msg.channel)
+                    t_sec = _tick_to_sec(abs_tick, tempo_map, ticks_per_beat)
+                    evt = tsf_midi.Event(
+                        tsf_midi.PitchBend(msg.pitch + 8192),
+                        t=t_sec,
+                        channel=vch,
+                        persistent=persistent,
+                    )
+                    if filter is None or not filter(evt):
+                        events.append(evt)
+
+        events.sort(key=lambda e: e.t)
+        duration_sec = midi_file.length
+
+        out = io.BytesIO()
+        midi_file.save(file=out)
+        final_bytes = out.getvalue()
+    except Exception:
+        final_bytes = midi_bytes
+        events = []
+        pan_map = {}
+        duration_sec = 0.0
+
+    if os.environ.get("ABC_PAN_DEBUG") == "1":
+        import sys
+        print(f"[pan] prepared pan per channel: {dict(sorted(pan_map.items())) if pan_map else '(none)'}", file=sys.stderr, flush=True)
+
+    return (final_bytes, events, pan_map, duration_sec)

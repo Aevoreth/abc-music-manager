@@ -12,12 +12,7 @@ from typing import Optional
 
 import mido
 
-from .midi_utils import (
-    extract_pan_per_channel,
-    load_midi_port_aware,
-    normalize_midi_ppqn,
-    scale_midi_tempo,
-)
+from .midi_utils import extract_pan_per_channel, prepare_midi_for_playback
 
 MAX_PARTS = 24  # LOTRO supports up to 24 parts
 
@@ -177,16 +172,16 @@ class MidiPlayer:
         data = midi_bytes or self._midi_bytes
         if not data:
             return False, "No MIDI data"
-        self._midi_bytes = data
 
-        # Normalize PPQN so TinySoundFont handles timing correctly (fixes parts repeating / not playing)
-        data = normalize_midi_ppqn(data)
-
-        # Apply tempo scaling
-        if abs(tempo_factor - 1.0) >= 1e-6:
-            data = scale_midi_tempo(data, tempo_factor)
-
-        self._duration_sec = self._get_duration_sec(data)
+        # Single-pass: normalize PPQN, scale tempo, extract events and pan (replaces 5 parses)
+        prepared_bytes, events, pan_map, duration_sec = prepare_midi_for_playback(
+            data,
+            tempo_factor=tempo_factor,
+            filter=_strip_volume_cc_filter,
+            persistent=True,
+        )
+        self._midi_bytes = prepared_bytes
+        self._duration_sec = duration_sec
         if self._duration_sec <= 0:
             return False, "Invalid or empty MIDI file"
 
@@ -215,10 +210,6 @@ class MidiPlayer:
             # New Sequencer per play to avoid leftover events
             self._seq = tinysoundfont.Sequencer(synth)
 
-            # Use port-aware loader so parts 16-24 work (TinySoundFont ignores port meta)
-            events = load_midi_port_aware(
-                data, filter=_strip_volume_cc_filter, persistent=True
-            )
             self._seq.add(events)
 
             self._part_mutes = dict(part_mutes or {})
@@ -227,7 +218,7 @@ class MidiPlayer:
 
             # Apply pan explicitly so stereo positioning is respected (TinySoundFont may not
             # apply pan from MIDI events correctly)
-            for ch, pan in extract_pan_per_channel(data).items():
+            for ch, pan in pan_map.items():
                 synth.control_change(ch, 10, pan)
 
             synth.start(buffer_size=4096)

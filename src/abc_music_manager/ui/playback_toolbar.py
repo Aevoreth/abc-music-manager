@@ -423,7 +423,7 @@ class PlaybackToolbar(QToolBar):
         self._stereo_slider.setValue(playback_state.stereo_slider)
         self._stereo_slider.setMaximumWidth(80)
         self._stereo_slider.setToolTip("Distance from band (0=close L/R, 100=equal)")
-        self._stereo_slider.valueChanged.connect(self._on_stereo_slider_changed)
+        self._stereo_slider.sliderReleased.connect(self._on_stereo_slider_released)
         self.addWidget(QLabel("Stereo"))
         self.addWidget(self._stereo_slider)
         self.addSeparator()
@@ -827,8 +827,8 @@ class PlaybackToolbar(QToolBar):
     def _on_volume_changed(self, value: int) -> None:
         self._state.volume = value
 
-    def _on_stereo_slider_changed(self, value: int) -> None:
-        self._state.stereo_slider = value
+    def _on_stereo_slider_released(self) -> None:
+        self._state.stereo_slider = self._stereo_slider.value()
 
     def _on_stereo_changed(self, index: int) -> None:
         mode = self._stereo_combo.currentData()

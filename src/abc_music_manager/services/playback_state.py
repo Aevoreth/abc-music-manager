@@ -246,12 +246,8 @@ class PlaybackState(QObject):
         )
         self._save_prefs()
         if self._player and (self.is_playing or self.is_paused):
-            pos = self._player.get_position_sec()
-            was_paused = self._player.is_paused()
-            self.stop()
-            self._pending_seek_sec = pos
-            self._pending_was_paused = was_paused
-            self.play()
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self.restart_current_with_new_stereo)
         self.state_changed.emit()
 
     @property
@@ -263,12 +259,11 @@ class PlaybackState(QObject):
         self._stereo_slider = max(0, min(100, value))
         self._save_prefs()
         if self._player and (self.is_playing or self.is_paused):
-            pos = self._player.get_position_sec()
-            was_paused = self._player.is_paused()
-            self.stop()
-            self._pending_seek_sec = pos
-            self._pending_was_paused = was_paused
-            self.play()
+            # Defer restart to next event loop tick so stereo_slider is committed and
+            # we avoid re-entrancy from valueChanged during drag; use same path as
+            # band layout change so pan is correctly applied after reconversion.
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, self.restart_current_with_new_stereo)
         self.state_changed.emit()
 
     @property

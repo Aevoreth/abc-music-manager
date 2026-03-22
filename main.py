@@ -25,6 +25,7 @@ def main() -> None:
     with AppState() as state:
         window = MainWindow(state)
         window.show()
+        app.aboutToQuit.connect(window.playback_state.close)
         sys.exit(app.exec())
 
 
