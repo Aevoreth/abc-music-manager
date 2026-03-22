@@ -165,6 +165,24 @@ class MainWindow(QMainWindow):
         self._splitter_save_timer.setSingleShot(True)
         self._splitter_save_timer.timeout.connect(lambda: set_splitter_state(self._splitter.sizes()))
         self._splitter.splitterMoved.connect(lambda: self._splitter_save_timer.start(150))
+        self._skip_save_on_exit = False
+
+    def _disable_saving_and_prepare_restart(self) -> None:
+        """Disable all preference saving on exit (used when restarting after reset)."""
+        from ..services import preferences as prefs_module
+
+        self._skip_save_on_exit = True
+        prefs_module.set_skip_all_saves(True)
+        self._geometry_save_timer.stop()
+        self._splitter_save_timer.stop()
+        self.bands_view._bands_splitter_save_timer.stop()
+        self.setlists_view._songs_header_save_timer.stop()
+        self.setlists_view._top_split_save_timer.stop()
+        self.setlists_view._setlists_splitter_save_timer.stop()
+        self.setlists_view._editor_splitter_save_timer.stop()
+        self.library_view._header_save_timer.stop()
+        if hasattr(self._playback_toolbar, "_parts_playlist_save_timer"):
+            self._playback_toolbar._parts_playlist_save_timer.stop()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -204,13 +222,14 @@ class MainWindow(QMainWindow):
             event.ignore()
             return
         self.playback_state.close()
-        _save_window_geometry(self)
-        set_splitter_state(self._splitter.sizes())
-        set_bands_splitter_state(self.bands_view.bands_splitter.sizes())
-        set_setlists_splitter_state(self.setlists_view.setlists_splitter.sizes())
-        set_setlists_editor_splitter_state(self.setlists_view.editor_splitter.sizes())
-        self.setlists_view._save_setlists_state()
-        self.library_view._save_library_table_header_state()
+        if not self._skip_save_on_exit:
+            _save_window_geometry(self)
+            set_splitter_state(self._splitter.sizes())
+            set_bands_splitter_state(self.bands_view.bands_splitter.sizes())
+            set_setlists_splitter_state(self.setlists_view.setlists_splitter.sizes())
+            set_setlists_editor_splitter_state(self.setlists_view.editor_splitter.sizes())
+            self.setlists_view._save_setlists_state()
+            self.library_view._save_library_table_header_state()
         super().closeEvent(event)
 
     def _build_menu_bar(self) -> None:

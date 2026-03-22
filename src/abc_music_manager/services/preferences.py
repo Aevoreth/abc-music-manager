@@ -12,8 +12,17 @@ from typing import Any
 from ..db.schema import get_db_path
 
 
+_skip_all_saves = False
+
+
 def _preferences_path() -> Path:
     return get_db_path().parent / "preferences.json"
+
+
+def set_skip_all_saves(value: bool) -> None:
+    """When True, save_preferences becomes a no-op (used when restarting after reset)."""
+    global _skip_all_saves
+    _skip_all_saves = value
 
 
 def load_preferences() -> dict[str, Any]:
@@ -30,10 +39,17 @@ def load_preferences() -> dict[str, Any]:
 
 def save_preferences(prefs: dict[str, Any]) -> None:
     """Save preferences to disk."""
+    if _skip_all_saves:
+        return
     path = _preferences_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(prefs, f, indent=2)
+
+
+def reset_all_preferences() -> None:
+    """Clear all preferences to defaults (equivalent to deleting preferences.json)."""
+    save_preferences({})
 
 
 def get_default_status_id() -> int | None:
@@ -94,6 +110,13 @@ def set_window_geometry(geometry: dict[str, Any]) -> None:
     """Save main window geometry as human-readable dict: x, y, width, height, maximized."""
     prefs = load_preferences()
     prefs["window_geometry"] = geometry
+    save_preferences(prefs)
+
+
+def reset_window_geometry() -> None:
+    """Clear saved window geometry (next launch uses default size/position)."""
+    prefs = load_preferences()
+    prefs.pop("window_geometry", None)
     save_preferences(prefs)
 
 

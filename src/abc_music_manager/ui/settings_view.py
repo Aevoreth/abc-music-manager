@@ -46,6 +46,8 @@ from ..services.preferences import (
     set_default_status_id,
     get_base_font_size,
     set_base_font_size,
+    reset_window_geometry,
+    reset_all_preferences,
     get_lotro_root,
     set_lotro_root,
     get_default_lotro_root,
@@ -462,8 +464,59 @@ class SettingsView(QWidget):
                 self.base_font_default_check.setChecked(False)
                 self.base_font_size_spin.setValue(max(8, min(16, saved)))
         self.base_font_size_spin.valueChanged.connect(self._on_base_font_size_changed)
+        reset_geom_row = QHBoxLayout()
+        reset_geom_btn = QPushButton("Reset window geometry")
+        reset_geom_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        reset_geom_btn.setToolTip("Clear saved window position and size")
+        reset_geom_btn.clicked.connect(self._on_reset_window_geometry)
+        reset_geom_row.addWidget(reset_geom_btn)
+        reset_geom_row.addStretch()
+        v.addLayout(reset_geom_row)
+        reset_row = QHBoxLayout()
+        reset_btn = QPushButton("Reset all preferences")
+        reset_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        reset_btn.setToolTip("Clear all preferences to defaults (equivalent to deleting preferences.json)")
+        reset_btn.clicked.connect(self._on_reset_all_preferences)
+        reset_row.addWidget(reset_btn)
+        reset_row.addStretch()
+        v.addLayout(reset_row)
         v.addStretch()
         return w
+
+    def _on_reset_window_geometry(self) -> None:
+        """Clear saved window geometry and apply default size immediately."""
+        reset_window_geometry()
+        main = self.window()
+        if main and main.isWidgetType():
+            from PySide6.QtCore import Qt, QRect
+            main.setWindowState(main.windowState() & ~Qt.WindowState.WindowMaximized)
+            main.setGeometry(QRect(100, 100, 1000, 700))
+        QMessageBox.information(
+            self,
+            "Window geometry reset",
+            "Window geometry has been reset to default size and position.",
+        )
+
+    def _on_reset_all_preferences(self) -> None:
+        """Reset all preferences to defaults and restart the app."""
+        import subprocess
+        import sys
+
+        if QMessageBox.question(
+            self,
+            "Reset all preferences",
+            "This will clear all preferences (window position, paths, filters, playback, etc.) "
+            "to their default values. A restart is required and will be performed immediately.\n\nContinue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) != QMessageBox.StandardButton.Yes:
+            return
+        reset_all_preferences()
+        main = self.window()
+        if main and hasattr(main, "_disable_saving_and_prepare_restart"):
+            main._disable_saving_and_prepare_restart()
+        subprocess.Popen([sys.executable] + sys.argv)
+        QApplication.quit()
 
     def _build_default_filters_tab(self) -> QWidget:
         """Settings tab for default library filter values (used on startup and when Reset Filters is clicked)."""
