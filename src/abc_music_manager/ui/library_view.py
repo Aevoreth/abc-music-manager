@@ -426,7 +426,7 @@ class LibraryTableModel(QAbstractTableModel):
             if c == 7:
                 return None  # Painted by delegate (rating stars)
             if c == 8:
-                return "•" if row.in_upcoming_set else ""
+                return "\u2713" if row.in_upcoming_set else ""  # ✓
             if c == 9:
                 return row.status_name or self._default_status_name or "—"
             if c == 10:
@@ -520,7 +520,7 @@ class LibraryDelegate(QStyledItemDelegate):
             return
         if col == 8:
             if row_data and row_data.in_upcoming_set:
-                self._paint_bullet(painter, option)
+                self._paint_checkmark(painter, option)
             return
         if col == 9 and row_data:
             self._paint_status(painter, option, row_data, index)
@@ -583,13 +583,12 @@ class LibraryDelegate(QStyledItemDelegate):
             painter.setPen(QPen(color))
             painter.drawText(star_x + (i - 1) * 14, star_y, 14, line_h, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, char)
 
-    def _paint_bullet(self, painter: QPainter, option: QStyleOptionViewItem) -> None:
+    def _paint_checkmark(self, painter: QPainter, option: QStyleOptionViewItem) -> None:
         rect = option.rect
         cx = rect.x() + 8
         cy = rect.center().y()
-        painter.setBrush(QBrush(option.palette.text().color()))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(cx - 3, cy - 3, 6, 6)
+        painter.setPen(QPen(option.palette.text().color()))
+        painter.drawText(cx - 8, cy - 8, 16, 16, Qt.AlignmentFlag.AlignCenter, "\u2713")  # ✓
 
     def _paint_status(self, painter: QPainter, option: QStyleOptionViewItem, row: LibrarySongRow, index: QModelIndex) -> None:
         rect = option.rect.adjusted(2, 0, -2, 0)
@@ -805,10 +804,13 @@ class LibraryView(QWidget):
         # Column 5: Play/Set/History buttons — explicit width (model has no text so ResizeToContents would collapse it)
         hh.setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
         hh.resizeSection(5, 140)  # Wide enough for ▶ + Set… + History
-        # Columns 6 (Parts), 7 (Rating), 8 (Set) size to contents; 10 (Transcriber) user-resizable
-        hh.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
-        hh.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+        # Columns 6 (Parts), 7 (Rating), 8 (Set) user-resizable; 10 (Transcriber) user-resizable
+        hh.setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive)
+        hh.resizeSection(6, 52)
+        hh.setSectionResizeMode(7, QHeaderView.ResizeMode.Interactive)
+        hh.resizeSection(7, 90)
+        hh.setSectionResizeMode(8, QHeaderView.ResizeMode.Interactive)
+        hh.resizeSection(8, 44)
         hh.setSectionResizeMode(10, QHeaderView.ResizeMode.Interactive)
         hh.resizeSection(10, 120)
         hh.setSectionsClickable(True)
