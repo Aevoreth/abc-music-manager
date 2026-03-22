@@ -124,6 +124,51 @@ def get_setlists_containing_song(conn: sqlite3.Connection, song_id: int) -> list
     return [(r[0], r[1]) for r in cur.fetchall()]
 
 
+@dataclass
+class SetlistLayoutForSongRow:
+    """Setlist that has a defined layout for the song (set has band_layout, song has SongLayout for that band)."""
+
+    setlist_id: int
+    setlist_name: str
+    setlist_item_id: int
+    band_layout_id: int
+    song_layout_id: int
+
+
+def get_setlists_with_layout_for_song(conn: sqlite3.Connection, song_id: int) -> list[SetlistLayoutForSongRow]:
+    """Return setlists that contain this song and have a defined band layout where the song has a SongLayout."""
+    cur = conn.execute(
+        """SELECT sl.id, sl.name, si.id, sl.band_layout_id,
+               COALESCE(
+                 CASE WHEN si.song_layout_id IS NOT NULL AND slayout.band_layout_id = sl.band_layout_id
+                   THEN si.song_layout_id ELSE NULL END,
+                 (SELECT slo.id FROM SongLayout slo
+                  WHERE slo.song_id = ? AND slo.band_layout_id = sl.band_layout_id
+                  ORDER BY slo.name LIMIT 1)
+               ) AS song_layout_id
+           FROM Setlist sl
+           JOIN SetlistItem si ON si.setlist_id = sl.id AND si.song_id = ?
+           LEFT JOIN SongLayout slayout ON slayout.id = si.song_layout_id
+           WHERE sl.band_layout_id IS NOT NULL
+           AND EXISTS (
+             SELECT 1 FROM SongLayout slo WHERE slo.song_id = ? AND slo.band_layout_id = sl.band_layout_id
+           )
+           ORDER BY sl.name""",
+        (song_id, song_id, song_id),
+    )
+    return [
+        SetlistLayoutForSongRow(
+            setlist_id=r[0],
+            setlist_name=r[1],
+            setlist_item_id=r[2],
+            band_layout_id=r[3],
+            song_layout_id=r[4],
+        )
+        for r in cur.fetchall()
+        if r[4] is not None
+    ]
+
+
 def add_setlist(conn: sqlite3.Connection, name: str, folder_id: int | None = None) -> int:
     from datetime import date
     now = _now()

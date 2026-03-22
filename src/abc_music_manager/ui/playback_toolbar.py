@@ -1,6 +1,6 @@
 """
 Playback toolbar: prev/play/stop/next, volume, tempo, parts+playlist dropdown,
-elapsed/total meter, scrub, stereo effect, stereo format.
+elapsed/total meter, scrub, stereo effect, stereo format, band layout selection.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
     QSizeGrip,
 )
 from PySide6.QtCore import Qt, Signal, QTimer, QPoint, QObject, QEvent, QRect, QMimeData
-from PySide6.QtGui import QMouseEvent, QDrag
+from PySide6.QtGui import QMouseEvent, QDrag, QStandardItemModel, QStandardItem
 
 from ..services.playback_state import PlaybackState, PlaylistEntry
 from ..services import preferences
@@ -340,7 +340,7 @@ class ClickableScrubSlider(QSlider):
 class PlaybackToolbar(QToolBar):
     """
     Persistent playback toolbar.
-    Order: Prev | Play | Stop | Next | Vol | Tempo | Dropdown (parts+playlist) | Meter | Scrub | Stereo slider | Stereo format
+    Order: Prev | Play | Stop | Next | Vol | Tempo | Dropdown (parts+playlist) | Meter | Scrub | Stereo slider | Stereo format | Layout
     """
 
     playlistExportedAsSet = Signal(int)  # setlist_id
@@ -439,14 +439,32 @@ class PlaybackToolbar(QToolBar):
         )
         self._stereo_combo.currentIndexChanged.connect(self._on_stereo_changed)
         self.addWidget(self._stereo_combo)
+        self.addSeparator()
+
+        self._band_layout_combo = QComboBox()
+        self._band_layout_combo.setMinimumWidth(140)
+        self._band_layout_combo.setObjectName("band_layout_combo")
+        v = self._band_layout_combo.view()
+        if v:
+            v.setStyleSheet("QAbstractItemView::item { padding: 2px 4px; }")
+        self._band_layout_combo.setToolTip(
+            "Which band layout to use for stereo positions (when Pan = Band layout). "
+            "(none) falls back to user-pan or Maestro default."
+        )
+        self._band_layout_combo.currentIndexChanged.connect(self._on_band_layout_changed)
+        self.addWidget(QLabel("Layout"))
+        self.addWidget(self._band_layout_combo)
 
         self._dropdown_panel: QWidget | None = None
         self._dropdown_popup: QWidget | None = None
 
         playback_state.position_changed.connect(self._on_position_changed)
         playback_state.state_changed.connect(self._update_ui)
+        playback_state.state_changed.connect(self._refresh_band_layout_combo)
+        playback_state.playlist_changed.connect(self._refresh_band_layout_combo)
 
         self._install_stop_double_click()
+        self._refresh_band_layout_combo()
 
     def _install_stop_double_click(self) -> None:
         """Install filter so double-click = panic, single-click = stop.
@@ -816,6 +834,168 @@ class PlaybackToolbar(QToolBar):
         mode = self._stereo_combo.currentData()
         if mode:
             self._state.stereo_mode = mode
+
+    def _refresh_band_layout_combo(self) -> None:
+        """Rebuild band layout dropdown: (none), Bands section, Sets section. Set default by priority."""
+        if getattr(self, "_in_band_layout_refresh", False):
+            return
+        self._in_band_layout_refresh = True
+        try:
+            self._refresh_band_layout_combo_impl()
+        finally:
+            self._in_band_layout_refresh = False
+
+    def _refresh_band_layout_combo_impl(self) -> None:
+        """Implementation of band layout combo refresh."""
+        combo = self._band_layout_combo
+        combo.blockSignals(True)
+        combo.clear()
+        model = QStandardItemModel()
+
+        def add_selectable(text: str, data: tuple) -> int:
+            item = QStandardItem(text)
+            item.setData(data, Qt.ItemDataRole.UserRole)
+            model.appendRow(item)
+            return model.rowCount() - 1
+
+        def add_header(text: str) -> None:
+            item = QStandardItem(text)
+            item.setEnabled(False)
+            model.appendRow(item)
+
+        # (none)
+        add_selectable("(none) (falls back on defaults)", ())
+        add_header("Bands")
+        band_indices: list[int] = []
+        set_indices: list[int] = []
+
+        song_id = self._state.current_song_id
+        current_bl_id = None
+        current_sl_id = None
+        current_item_id = None
+        if 0 <= self._state.current_index < len(self._state.playlist):
+            entry = self._state.playlist[self._state.current_index]
+            current_bl_id = entry.band_layout_id or self._state.active_band_layout_id
+            current_sl_id = entry.song_layout_id or self._state.active_song_layout_id
+            current_item_id = entry.setlist_item_id
+
+        ov = self._state.get_layout_override()
+        last_key = preferences.get_playback_last_band_layout_key()
+
+        if not self._app_state or not song_id:
+            combo.setModel(model)
+            combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+            if self._state.get_layout_override() != ():
+                self._state.set_layout_override(())
+            return
+
+        from ..db.song_layout_repo import list_song_layouts_for_song
+        from ..db.setlist_repo import get_setlists_with_layout_for_song
+        from ..db.band_repo import get_band_layout_display_name
+
+        bands = list_song_layouts_for_song(self._app_state.conn, song_id)
+        sets = get_setlists_with_layout_for_song(self._app_state.conn, song_id)
+
+        for sl_row, bl_name in bands:
+            idx = add_selectable(
+                get_band_layout_display_name(self._app_state.conn, sl_row.band_layout_id),
+                (sl_row.band_layout_id, sl_row.id, None),
+            )
+            band_indices.append(idx)
+        add_header("Sets")
+        for s in sets:
+            idx = add_selectable(s.setlist_name, (s.band_layout_id, s.song_layout_id, s.setlist_item_id))
+            set_indices.append(idx)
+
+        combo.setModel(model)
+
+        # Priority: current set layout > most recent > first band > (none)
+        select_idx = 0
+        if ov is not None and ov != ():
+            for i in range(model.rowCount()):
+                item = model.item(i)
+                if item and item.isEnabled():
+                    d = item.data(Qt.ItemDataRole.UserRole)
+                    if isinstance(d, tuple) and len(d) >= 2 and d[0] == ov[0] and d[1] == ov[1]:
+                        if len(ov) >= 3 and ov[2] is not None:
+                            # Override is a set: must match setlist_item_id
+                            if len(d) >= 3 and d[2] == ov[2]:
+                                select_idx = i
+                                break
+                        else:
+                            # Override is a band: match band row (d[2] is None)
+                            if len(d) < 3 or d[2] is None:
+                                select_idx = i
+                                break
+        elif current_bl_id is not None:
+            # When from setlist (current_item_id set), prefer set over band: search sets first
+            indices = (set_indices + band_indices) if current_item_id else (band_indices + set_indices)
+            for i in indices:
+                item = model.item(i)
+                if item:
+                    d = item.data(Qt.ItemDataRole.UserRole)
+                    if isinstance(d, tuple) and len(d) >= 1 and d[0] == current_bl_id:
+                        if current_item_id is not None and len(d) >= 3 and d[2] == current_item_id:
+                            select_idx = i
+                            break
+                        elif current_item_id is None and (len(d) < 3 or d[2] is None):
+                            select_idx = i
+                            break
+            else:
+                for i in band_indices + set_indices:
+                    item = model.item(i)
+                    if item:
+                        d = item.data(Qt.ItemDataRole.UserRole)
+                        if isinstance(d, tuple) and len(d) >= 1 and d[0] == current_bl_id:
+                            select_idx = i
+                            break
+        elif last_key:
+            for i in band_indices + set_indices:
+                item = model.item(i)
+                if item:
+                    d = item.data(Qt.ItemDataRole.UserRole)
+                    if isinstance(d, tuple) and len(d) >= 2:
+                        key = f"band|{d[0]}" if len(d) < 3 or d[2] is None else f"set|{d[0]}|item|{d[2]}"
+                        if key == last_key:
+                            select_idx = i
+                            break
+        elif band_indices:
+            select_idx = band_indices[0]
+
+        combo.setCurrentIndex(select_idx)
+        combo.blockSignals(False)
+
+        # Sync derived selection to state so playback uses it (avoids mismatch when no explicit user choice)
+        sel_item = model.item(combo.currentIndex()) if combo.currentIndex() >= 0 else None
+        sel_data = sel_item.data(Qt.ItemDataRole.UserRole) if sel_item else None
+        new_override = sel_data if isinstance(sel_data, tuple) else (() if sel_data is not None else None)
+        # Only set if different to avoid redundant state_changed (which would trigger re-entry despite guard)
+        if new_override is not None and new_override != self._state.get_layout_override():
+            self._state.set_layout_override(new_override)
+
+    def _on_band_layout_changed(self, index: int) -> None:
+        model = self._band_layout_combo.model()
+        if not model or index < 0 or index >= model.rowCount():
+            return
+        item = model.item(index)
+        if not item or not item.isEnabled():
+            return
+        data = item.data(Qt.ItemDataRole.UserRole)
+        if data == ():
+            self._state.set_layout_override(())
+            preferences.set_playback_last_band_layout_key(None)
+        elif isinstance(data, tuple) and len(data) >= 2:
+            self._state.set_layout_override(data)
+            key = f"band|{data[0]}" if len(data) < 3 or data[2] is None else f"set|{data[0]}|item|{data[2]}"
+            preferences.set_playback_last_band_layout_key(key)
+        if self._state.stereo_mode == "band_layout" and (self._state.is_playing or self._state.is_paused):
+            pos = self._state.position_sec
+            was_paused = self._state.is_paused
+            self._state.stop()
+            self._state._pending_seek_sec = pos
+            self._state._pending_was_paused = was_paused
+            self._state.play()
 
     def _on_position_changed(self, position_sec: float) -> None:
         dur = self._state.duration_sec

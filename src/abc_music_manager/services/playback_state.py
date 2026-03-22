@@ -111,6 +111,8 @@ class PlaybackState(QObject):
         self._part_mutes: dict[int, bool] = {}  # part_number -> muted
         self._active_band_layout_id: Optional[int] = None
         self._active_song_layout_id: Optional[int] = None
+        # User-selected layout from toolbar dropdown. None=use context; () = (none)/fallback; (bl_id, sl_id, item_id?) = use this
+        self._layout_override: Optional[tuple] = None
         self._position_timer = QTimer(self)
         self._position_timer.timeout.connect(self._on_position_tick)
         self._position_timer.setInterval(100)  # 10 Hz
@@ -306,6 +308,23 @@ class PlaybackState(QObject):
         self._active_song_layout_id = value
         self.state_changed.emit()
 
+    def set_layout_override(
+        self,
+        override: Optional[tuple] | None,
+    ) -> None:
+        """
+        Set user-selected layout from toolbar dropdown.
+        None = use context (entry/active).
+        () = user chose (none), fall back to user-pan/maestro.
+        (band_layout_id, song_layout_id, setlist_item_id?) = use this layout.
+        """
+        self._layout_override = override
+        self.state_changed.emit()
+
+    def get_layout_override(self) -> Optional[tuple]:
+        """Current layout override: None, (), or (bl_id, sl_id, item_id?)."""
+        return self._layout_override
+
     def replace_playlist(self, entries: list[PlaylistEntry], start_index: int = 0) -> None:
         """Replace playlist and optionally start playing at start_index."""
         self.stop()
@@ -365,9 +384,19 @@ class PlaybackState(QObject):
         # Always compute part_pan_map when we have setlist layout data, so switching
         # to band_layout mid-song (reconvert) produces correct pan.
         if self._get_part_pan_map is not None:
-            sl_id = entry.song_layout_id or self._active_song_layout_id
-            bl_id = entry.band_layout_id or self._active_band_layout_id
-            setlist_item_id = entry.setlist_item_id
+            ov = self._layout_override
+            if ov == ():
+                # User chose (none) in dropdown: fall back to user-pan/maestro
+                bl_id = None
+                sl_id = None
+                setlist_item_id = None
+            elif ov is not None and len(ov) >= 2:
+                bl_id, sl_id = ov[0], ov[1]
+                setlist_item_id = ov[2] if len(ov) > 2 else None
+            else:
+                sl_id = entry.song_layout_id or self._active_song_layout_id
+                bl_id = entry.band_layout_id or self._active_band_layout_id
+                setlist_item_id = entry.setlist_item_id
             if bl_id:
                 part_pan_map = self._get_part_pan_map(sl_id, bl_id, setlist_item_id)
             if part_pan_map is None and bl_id:

@@ -687,6 +687,23 @@ def set_playback_stereo_slider(value: int) -> None:
     save_preferences(prefs)
 
 
+def get_playback_last_band_layout_key() -> str | None:
+    """Last band layout selection key for dropdown default. Format: 'band'|<bl_id> or 'set'|<setlist_id>|item|<item_id>. None if not set."""
+    prefs = load_preferences()
+    v = prefs.get("playback_last_band_layout_key")
+    return str(v) if isinstance(v, str) and v else None
+
+
+def set_playback_last_band_layout_key(key: str | None) -> None:
+    """Save last band layout selection key for dropdown default."""
+    prefs = load_preferences()
+    if key:
+        prefs["playback_last_band_layout_key"] = key
+    else:
+        prefs.pop("playback_last_band_layout_key", None)
+    save_preferences(prefs)
+
+
 def resolve_music_path(relative_or_absolute: str) -> str:
     """
     If path is relative, resolve against the Music folder and return absolute path.
