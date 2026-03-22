@@ -870,15 +870,6 @@ class PlaybackToolbar(QToolBar):
         set_indices: list[int] = []
 
         song_id = self._state.current_song_id
-        current_bl_id = None
-        current_sl_id = None
-        current_item_id = None
-        if 0 <= self._state.current_index < len(self._state.playlist):
-            entry = self._state.playlist[self._state.current_index]
-            current_bl_id = entry.band_layout_id or self._state.active_band_layout_id
-            current_sl_id = entry.song_layout_id or self._state.active_song_layout_id
-            current_item_id = entry.setlist_item_id
-
         ov = self._state.get_layout_override()
         last_key = preferences.get_playback_last_band_layout_key()
 
@@ -893,9 +884,28 @@ class PlaybackToolbar(QToolBar):
         from ..db.song_layout_repo import list_song_layouts_for_song
         from ..db.setlist_repo import get_setlists_with_layout_for_song
         from ..db.band_repo import get_band_layout_display_name
+        from ..db.song_repo import get_song_last_layout
 
         bands = list_song_layouts_for_song(self._app_state.conn, song_id)
         sets = get_setlists_with_layout_for_song(self._app_state.conn, song_id)
+
+        # When from library (no entry layout), use song's last-used layout; when from setlist, use entry's layout
+        if 0 <= self._state.current_index < len(self._state.playlist):
+            entry = self._state.playlist[self._state.current_index]
+            if entry.band_layout_id is not None or entry.setlist_item_id is not None:
+                current_bl_id = entry.band_layout_id or self._state.active_band_layout_id
+                current_sl_id = entry.song_layout_id or self._state.active_song_layout_id
+                current_item_id = entry.setlist_item_id
+            else:
+                last = get_song_last_layout(self._app_state.conn, song_id)
+                if last:
+                    current_bl_id, current_sl_id, _ = last
+                    # From Library: prefer band (song) layout, not setlist - so ignore setlist_item_id for selection
+                    current_item_id = None
+                else:
+                    current_bl_id = current_sl_id = current_item_id = None
+        else:
+            current_bl_id = current_sl_id = current_item_id = None
 
         for sl_row, bl_name in bands:
             idx = add_selectable(
@@ -929,27 +939,56 @@ class PlaybackToolbar(QToolBar):
                                 select_idx = i
                                 break
         elif current_bl_id is not None:
-            # When from setlist (current_item_id set), prefer set over band: search sets first
-            indices = (set_indices + band_indices) if current_item_id else (band_indices + set_indices)
-            for i in indices:
-                item = model.item(i)
-                if item:
-                    d = item.data(Qt.ItemDataRole.UserRole)
-                    if isinstance(d, tuple) and len(d) >= 1 and d[0] == current_bl_id:
-                        if current_item_id is not None and len(d) >= 3 and d[2] == current_item_id:
-                            select_idx = i
-                            break
-                        elif current_item_id is None and (len(d) < 3 or d[2] is None):
-                            select_idx = i
-                            break
-            else:
-                for i in band_indices + set_indices:
+            if current_item_id is not None:
+                # From setlist: 1) setlist variant, 2) song's last layout (band), 3) defaults
+                for i in set_indices:
                     item = model.item(i)
                     if item:
                         d = item.data(Qt.ItemDataRole.UserRole)
-                        if isinstance(d, tuple) and len(d) >= 1 and d[0] == current_bl_id:
+                        if isinstance(d, tuple) and len(d) >= 3 and d[0] == current_bl_id and d[2] == current_item_id:
                             select_idx = i
                             break
+                else:
+                    # Setlist variant not found; fall back to song's last-used band layout, then defaults
+                    last = get_song_last_layout(self._app_state.conn, song_id)
+                    if last:
+                        last_bl_id, last_sl_id, _ = last
+                        for i in band_indices:
+                            item = model.item(i)
+                            if item:
+                                d = item.data(Qt.ItemDataRole.UserRole)
+                                if isinstance(d, tuple) and len(d) >= 2 and d[0] == last_bl_id and d[1] == last_sl_id:
+                                    select_idx = i
+                                    break
+                    if select_idx == 0 and last_key:
+                        for i in band_indices + set_indices:
+                            item = model.item(i)
+                            if item:
+                                d = item.data(Qt.ItemDataRole.UserRole)
+                                if isinstance(d, tuple) and len(d) >= 2:
+                                    key = f"band|{d[0]}" if len(d) < 3 or d[2] is None else f"set|{d[0]}|item|{d[2]}"
+                                    if key == last_key:
+                                        select_idx = i
+                                        break
+                    if select_idx == 0 and band_indices:
+                        select_idx = band_indices[0]
+            else:
+                # From library: prefer song's last layout (band) - current_* already set above
+                for i in band_indices:
+                    item = model.item(i)
+                    if item:
+                        d = item.data(Qt.ItemDataRole.UserRole)
+                        if isinstance(d, tuple) and len(d) >= 2 and d[0] == current_bl_id and d[1] == current_sl_id:
+                            select_idx = i
+                            break
+                else:
+                    for i in band_indices + set_indices:
+                        item = model.item(i)
+                        if item:
+                            d = item.data(Qt.ItemDataRole.UserRole)
+                            if isinstance(d, tuple) and len(d) >= 1 and d[0] == current_bl_id:
+                                select_idx = i
+                                break
         elif last_key:
             for i in band_indices + set_indices:
                 item = model.item(i)
@@ -989,6 +1028,12 @@ class PlaybackToolbar(QToolBar):
             self._state.set_layout_override(data)
             key = f"band|{data[0]}" if len(data) < 3 or data[2] is None else f"set|{data[0]}|item|{data[2]}"
             preferences.set_playback_last_band_layout_key(key)
+            song_id = self._state.current_song_id
+            if self._app_state and song_id:
+                from ..db.song_repo import update_song_last_layout
+                update_song_last_layout(
+                    self._app_state.conn, song_id, data[0], data[1], data[2] if len(data) >= 3 else None
+                )
         if self._state.stereo_mode == "band_layout" and (self._state.is_playing or self._state.is_paused):
             pos = self._state.position_sec
             was_paused = self._state.is_paused

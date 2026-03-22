@@ -79,6 +79,7 @@ from ..db.song_layout_repo import (
     get_song_layout_assignments,
     get_or_create_song_layout_for_band,
 )
+from ..db.song_repo import update_song_last_layout
 from ..db.band_repo import list_all_band_layouts, list_layout_slots, list_band_members, get_band_layout_display_name
 from ..db.setlist_folder_repo import add_folder, update_folder, delete_folder, list_folders, reorder_folders
 from ..db.player_repo import list_player_instruments_bulk
@@ -1274,6 +1275,11 @@ class SetlistsView(QWidget):
                 )
         if not entries:
             return
+        for e in entries:
+            if sl.band_layout_id and e.song_layout_id:
+                update_song_last_layout(
+                    self.app_state.conn, e.song_id, sl.band_layout_id, e.song_layout_id, e.setlist_item_id
+                )
         self.playback_state.active_band_layout_id = sl.band_layout_id
         self.playback_state.replace_playlist(entries, start_index=start_index)
 

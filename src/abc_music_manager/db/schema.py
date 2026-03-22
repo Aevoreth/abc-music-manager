@@ -437,6 +437,21 @@ def _migrate_player_level_class(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_song_last_layout(conn: sqlite3.Connection) -> None:
+    """Add last-used layout columns to Song for layout preference when playing from Library."""
+    cur = conn.execute("PRAGMA table_info(Song)")
+    columns = [row[1] for row in cur.fetchall()]
+    if "last_band_layout_id" not in columns:
+        conn.execute("ALTER TABLE Song ADD COLUMN last_band_layout_id INTEGER REFERENCES BandLayout(id)")
+        conn.commit()
+    if "last_song_layout_id" not in columns:
+        conn.execute("ALTER TABLE Song ADD COLUMN last_song_layout_id INTEGER REFERENCES SongLayout(id)")
+        conn.commit()
+    if "last_setlist_item_id" not in columns:
+        conn.execute("ALTER TABLE Song ADD COLUMN last_setlist_item_id INTEGER REFERENCES SetlistItem(id)")
+        conn.commit()
+
+
 def seed_player_instruments(conn: sqlite3.Connection) -> None:
     """Ensure all 24 LOTRO player instruments exist in Instrument table."""
     from datetime import datetime, timezone
@@ -467,6 +482,7 @@ def init_database(db_path: Path | None = None) -> sqlite3.Connection:
     _migrate_setlist_folders(conn)
     _migrate_band_layout_export_column_order(conn)
     _migrate_player_level_class(conn)
+    _migrate_song_last_layout(conn)
     seed_defaults(conn)
     seed_player_instruments(conn)
     _backfill_song_status_ids(conn)

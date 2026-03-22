@@ -95,6 +95,7 @@ class MainWindow(QMainWindow):
         )
         self.playback_state.soundfont_missing.connect(self._on_soundfont_missing)
         self.playback_state.playback_failed.connect(self._on_playback_failed)
+        self.playback_state.layout_used.connect(self._on_layout_used)
         self.playback_state.state_changed.connect(self._update_window_title)
         self._update_window_title()
         self.setMinimumSize(900, 600)
@@ -369,6 +370,16 @@ class MainWindow(QMainWindow):
         """Show dialog when soundfont is not found. User can locate or download."""
         from .soundfont_dialog import show_soundfont_dialog
         show_soundfont_dialog(self)
+
+    def _on_layout_used(
+        self, song_id: int, band_layout_id: int, song_layout_id: int, setlist_item_id: object
+    ) -> None:
+        """Update song's last-used layout when playback starts with a layout."""
+        from ..db.song_repo import update_song_last_layout
+        update_song_last_layout(
+            self.app_state.conn, song_id, band_layout_id, song_layout_id,
+            setlist_item_id if isinstance(setlist_item_id, int) else None,
+        )
 
     def _on_about(self) -> None:
         QMessageBox.about(

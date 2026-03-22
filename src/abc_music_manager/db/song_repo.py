@@ -242,6 +242,40 @@ def relocate_song_file(
     conn.commit()
 
 
+def get_song_last_layout(
+    conn: sqlite3.Connection, song_id: int
+) -> tuple[int, int, int | None] | None:
+    """
+    Return (band_layout_id, song_layout_id, setlist_item_id) for this song's last-used layout.
+    setlist_item_id may be None for band layouts. Returns None if song has no stored layout.
+    """
+    cur = conn.execute(
+        """SELECT last_band_layout_id, last_song_layout_id, last_setlist_item_id
+           FROM Song WHERE id = ? AND last_band_layout_id IS NOT NULL AND last_song_layout_id IS NOT NULL""",
+        (song_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    return (row[0], row[1], row[2])
+
+
+def update_song_last_layout(
+    conn: sqlite3.Connection,
+    song_id: int,
+    band_layout_id: int,
+    song_layout_id: int,
+    setlist_item_id: int | None = None,
+) -> None:
+    """Update song's last-used layout (for layout preference when playing from Library)."""
+    conn.execute(
+        """UPDATE Song SET last_band_layout_id = ?, last_song_layout_id = ?, last_setlist_item_id = ?, updated_at = ?
+           WHERE id = ?""",
+        (band_layout_id, song_layout_id, setlist_item_id, _now(), song_id),
+    )
+    conn.commit()
+
+
 def update_song_app_metadata(
     conn: sqlite3.Connection,
     song_id: int,

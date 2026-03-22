@@ -92,6 +92,7 @@ class PlaybackState(QObject):
     playlist_changed = Signal()
     soundfont_missing = Signal()  # prompt user to locate/download
     playback_failed = Signal(str)  # error message when conversion fails
+    layout_used = Signal(int, int, int, object)  # song_id, band_layout_id, song_layout_id, setlist_item_id|None
 
     def __init__(
         self,
@@ -380,6 +381,8 @@ class PlaybackState(QObject):
         self._playlist = list(entries)
         self._current_index = min(start_index, len(self._playlist) - 1) if self._playlist else -1
         self._part_mutes.clear()
+        # Clear layout override so toolbar derives layout from source (Library vs setlist) on next refresh
+        self._layout_override = None
         self.playlist_changed.emit()
         self.state_changed.emit()
         if self._playlist and self._current_index >= 0:
@@ -448,6 +451,8 @@ class PlaybackState(QObject):
                 setlist_item_id = entry.setlist_item_id
             if bl_id:
                 part_pan_map = self._get_part_pan_map(sl_id, bl_id, setlist_item_id)
+                if bl_id and sl_id:
+                    self.layout_used.emit(entry.song_id, bl_id, sl_id, setlist_item_id)
             if part_pan_map is None and bl_id:
                 import os
                 import sys
