@@ -325,6 +325,60 @@ class PlaybackState(QObject):
         """Current layout override: None, (), or (bl_id, sl_id, item_id?)."""
         return self._layout_override
 
+    def get_active_band_layout_id(self) -> Optional[int]:
+        """Band layout ID currently used for stereo pan (when stereo_mode is band_layout). None if not using band layout."""
+        if self._stereo_mode != "band_layout":
+            return None
+        if not self._playlist or self._current_index < 0:
+            return None
+        entry = self._playlist[self._current_index]
+        ov = self._layout_override
+        if ov == ():
+            return None
+        if ov is not None and len(ov) >= 1:
+            return ov[0]
+        return entry.band_layout_id or self._active_band_layout_id
+
+    def get_active_song_layout_id(self) -> Optional[int]:
+        """Song layout ID currently used for stereo pan (when stereo_mode is band_layout). None if not using band layout."""
+        if self._stereo_mode != "band_layout":
+            return None
+        if not self._playlist or self._current_index < 0:
+            return None
+        entry = self._playlist[self._current_index]
+        ov = self._layout_override
+        if ov == ():
+            return None
+        if ov is not None and len(ov) >= 2:
+            return ov[1]
+        return entry.song_layout_id or self._active_song_layout_id
+
+    def get_active_setlist_item_id(self) -> Optional[int]:
+        """Setlist item ID currently used for stereo pan (when playing from setlist with band_layout). None otherwise."""
+        if self._stereo_mode != "band_layout":
+            return None
+        if not self._playlist or self._current_index < 0:
+            return None
+        entry = self._playlist[self._current_index]
+        ov = self._layout_override
+        if ov == ():
+            return None
+        if ov is not None and len(ov) >= 3 and ov[2] is not None:
+            return ov[2]
+        return entry.setlist_item_id
+
+    def restart_current_with_new_stereo(self) -> None:
+        """Restart current track to pick up new stereo/pan (e.g. after band layout slots changed)."""
+        if not self._playlist or self._current_index < 0:
+            return
+        if self._player and (self.is_playing or self.is_paused):
+            pos = self._player.get_position_sec()
+            was_paused = self._player.is_paused()
+            self.stop()
+            self._pending_seek_sec = pos
+            self._pending_was_paused = was_paused
+            self.play()
+
     def replace_playlist(self, entries: list[PlaylistEntry], start_index: int = 0) -> None:
         """Replace playlist and optionally start playing at start_index."""
         self.stop()

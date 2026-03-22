@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPlainTextEdit,
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 
 from ..services.app_state import AppState
 from ..services.preferences import get_bands_splitter_state, set_bands_splitter_state
@@ -59,6 +59,10 @@ from .add_player_dialog import open_add_player_dialog
 
 
 class BandsView(QWidget):
+    """Emits when a band layout's slots are updated (affects stereo pan)."""
+
+    band_layout_updated = Signal(int)  # band_layout_id
+
     def __init__(self, app_state: AppState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.app_state = app_state
@@ -352,6 +356,7 @@ class BandsView(QWidget):
         self._loaded_band_notes = self.band_notes_edit.toPlainText().strip() or ""
         self._refresh_band_list()
         self._load_grid_from_layout()
+        self.band_layout_updated.emit(self._selected_layout_id)
 
     def has_unsaved_changes(self) -> bool:
         """Return True if the Bands tab has unsaved edits (name or notes)."""
@@ -394,17 +399,20 @@ class BandsView(QWidget):
             set_layout_slot(self.app_state.conn, self._selected_layout_id, pid, SPAWN_X, SPAWN_Y)
             card = LayoutCard(player_id=pid, player_name=pname, x=SPAWN_X, y=SPAWN_Y)
             self.layout_grid.add_card(card)
+            self.band_layout_updated.emit(self._selected_layout_id)
 
     def _on_card_moved(self, player_id: int, new_x: int, new_y: int) -> None:
         if self._selected_layout_id is None:
             return
         set_layout_slot(self.app_state.conn, self._selected_layout_id, player_id, new_x, new_y)
+        self.band_layout_updated.emit(self._selected_layout_id)
 
     def _on_card_deleted(self, player_id: int) -> None:
         if self._selected_layout_id is None:
             return
         remove_layout_slot(self.app_state.conn, self._selected_layout_id, player_id)
         self.layout_grid.remove_card(player_id)
+        self.band_layout_updated.emit(self._selected_layout_id)
 
     def _on_card_edit_requested(self, player_id: int) -> None:
         players = list_players(self.app_state.conn)

@@ -1719,8 +1719,14 @@ class LibraryView(QWidget):
     def _open_song_detail(self, song_id: int) -> None:
         from .song_detail import SongDetailDialog
         dlg = SongDetailDialog(self.app_state, song_id, self)
+        dlg.song_layout_updated.connect(self._on_song_layout_updated)
         dlg.exec()
         self.model.refresh()
+
+    def _on_song_layout_updated(self, song_layout_id: int) -> None:
+        """When a song layout is edited, restart playback if it's the active layout."""
+        if self.playback_state and self.playback_state.get_active_song_layout_id() == song_layout_id:
+            self.playback_state.restart_current_with_new_stereo()
 
     def refresh(self) -> None:
         self.model.refresh()

@@ -590,7 +590,9 @@ def _convert(
                     offset = pan_val - CENTER
                     pan_val = CENTER + int(offset * stereo / 100.0)
                     pan_val = max(0, min(127, pan_val))
-            elif stereo_mode == "maestro_user_pan":
+            elif stereo_mode in ("maestro_user_pan", "band_layout"):
+                # User-pan from ABC first; fall back to Maestro default.
+                # band_layout: parts not in layout get this fallback; maestro_user_pan: always.
                 user_pan = abc_info.get_part_user_pan(i)
                 if user_pan and user_pan != "auto":
                     try:

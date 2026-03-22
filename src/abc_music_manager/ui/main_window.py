@@ -128,6 +128,7 @@ class MainWindow(QMainWindow):
         self.stacked.addWidget(SettingsView(app_state, self.playback_state))
         self.library_view.navigateToSetlist.connect(self._on_navigate_to_setlist)
         self._playback_toolbar.playlistExportedAsSet.connect(self._on_navigate_to_setlist)
+        self.bands_view.band_layout_updated.connect(self._on_band_layout_updated)
 
         self.nav_list = QListWidget()
         self.nav_list.setObjectName("nav_list")
@@ -270,6 +271,11 @@ class MainWindow(QMainWindow):
     def _on_navigate_to_setlist(self, setlist_id: int) -> None:
         self._go_to_page(self.PAGES.index("Setlists"))
         self.setlists_view.select_setlist_by_id(setlist_id)
+
+    def _on_band_layout_updated(self, band_layout_id: int) -> None:
+        """When a band layout's slots change, restart playback if it's the active layout."""
+        if self.playback_state.get_active_band_layout_id() == band_layout_id:
+            self.playback_state.restart_current_with_new_stereo()
 
     def _on_scan_library(self) -> None:
         from ..scanning.scanner import run_scan

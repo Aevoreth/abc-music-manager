@@ -812,6 +812,7 @@ class SetlistsView(QWidget):
 
         self.assignment_panel = SetlistBandAssignmentPanel(app_state)
         self.assignment_panel.assignment_changed.connect(self._on_assignment_changed)
+        self.assignment_panel.setlist_item_updated.connect(self._on_setlist_item_updated)
 
         self.editor_splitter = QSplitter(Qt.Orientation.Vertical)
         self.editor_splitter.addWidget(self.top_split)
@@ -1300,6 +1301,11 @@ class SetlistsView(QWidget):
     def _on_assignment_changed(self) -> None:
         self._refresh_assignment_panel()
         self._refresh_error_column_only()
+
+    def _on_setlist_item_updated(self, setlist_item_id: int) -> None:
+        """When setlist band assignment changes, restart playback if it's the active item."""
+        if self.playback_state and self.playback_state.get_active_setlist_item_id() == setlist_item_id:
+            self.playback_state.restart_current_with_new_stereo()
 
     def _refresh_error_column_only(self) -> None:
         if not self._selected_setlist_id:

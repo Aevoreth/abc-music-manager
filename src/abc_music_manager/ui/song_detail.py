@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QStyleOptionViewItem,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush
 
 from ..services.app_state import AppState
@@ -124,6 +124,8 @@ class StatusComboDelegate(QStyledItemDelegate):
 
 class SongDetailDialog(QDialog):
     """View and edit song metadata; optional raw ABC tab with conflict handling."""
+
+    song_layout_updated = Signal(int)  # song_layout_id
 
     def __init__(self, app_state: AppState, song_id: int, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -347,6 +349,7 @@ class SongDetailDialog(QDialog):
             band_layout_id=None,
             parent=self,
         )
+        dlg.song_layout_updated.connect(self.song_layout_updated.emit)
         if dlg.exec():
             self._load_song()
 
@@ -363,6 +366,7 @@ class SongDetailDialog(QDialog):
             band_layout_id=band_layout_id,
             parent=self,
         )
+        dlg.song_layout_updated.connect(self.song_layout_updated.emit)
         if dlg.exec():
             self._load_song()
 

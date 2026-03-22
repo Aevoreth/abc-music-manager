@@ -129,6 +129,7 @@ class SetlistBandAssignmentPanel(QWidget):
     """Band layout with clickable cards for part assignment (saved to setlist)."""
 
     assignment_changed = Signal()
+    setlist_item_updated = Signal(int)  # setlist_item_id
 
     def __init__(self, app_state: AppState, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -264,3 +265,5 @@ class SetlistBandAssignmentPanel(QWidget):
         else:
             upsert_setlist_band_assignment(conn, self._item_id, player_id, part_number)
         self.assignment_changed.emit()
+        if self._item_id is not None:
+            self.setlist_item_updated.emit(self._item_id)

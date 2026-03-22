@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QWidget,
 )
+from PySide6.QtCore import Signal
 
 from ..services.app_state import AppState
 from ..db.band_repo import list_all_band_layouts
@@ -26,6 +27,8 @@ from .song_layout_assignment_panel import SongLayoutAssignmentPanel
 
 class SongLayoutEditorDialog(QDialog):
     """Create or edit a song layout for a band."""
+
+    song_layout_updated = Signal(int)  # song_layout_id
 
     def __init__(
         self,
@@ -71,6 +74,7 @@ class SongLayoutEditorDialog(QDialog):
         layout.addWidget(self.band_layout_combo)
 
         self.assignment_panel = SongLayoutAssignmentPanel(app_state, self)
+        self.assignment_panel.assignment_changed.connect(self._on_assignment_changed)
         layout.addWidget(self.assignment_panel, 1)
 
         btn_layout = QHBoxLayout()
@@ -84,6 +88,10 @@ class SongLayoutEditorDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self._on_band_layout_changed()
+
+    def _on_assignment_changed(self) -> None:
+        if self._song_layout_id:
+            self.song_layout_updated.emit(self._song_layout_id)
 
     def _on_band_layout_changed(self) -> None:
         bid = self.band_layout_combo.currentData()
