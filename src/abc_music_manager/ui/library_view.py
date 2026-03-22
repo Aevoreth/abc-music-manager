@@ -531,18 +531,26 @@ class LibraryDelegate(QStyledItemDelegate):
         super().paint(painter, option, index)
 
     def _paint_play_button(self, painter: QPainter, option: QStyleOptionViewItem) -> None:
-        """Paint a single play (▶) button for the play column."""
+        """Paint play (▶) and add-to-queue (+) buttons for the play column."""
         rect = option.rect.adjusted(2, 1, -2, -1)
-        btn_w, btn_h = 32, 26
+        play_w, add_w, btn_h = 32, 24, 26
+        gap = 4
+        total_w = play_w + gap + add_w
         line_h = option.fontMetrics.lineSpacing()
         btn_y = rect.y() + (2 * line_h - btn_h) // 2
-        btn_x = rect.x() + (rect.width() - btn_w) // 2
-        r = QRect(btn_x, btn_y, btn_w, btn_h)
-        painter.setPen(QPen(option.palette.color(option.palette.currentColorGroup(), option.palette.ColorRole.Mid)))
-        painter.setBrush(QBrush(option.palette.button()))
-        painter.drawRoundedRect(r, 4, 4)
+        group_x = rect.x() + (rect.width() - total_w) // 2
+        play_rect = QRect(group_x, btn_y, play_w, btn_h)
+        add_rect = QRect(group_x + play_w + gap, btn_y, add_w, btn_h)
+        for r in (play_rect, add_rect):
+            painter.setPen(QPen(option.palette.color(option.palette.currentColorGroup(), option.palette.ColorRole.Mid)))
+            painter.setBrush(QBrush(option.palette.button()))
+            painter.drawRoundedRect(r, 4, 4)
         painter.setPen(QPen(option.palette.color(option.palette.currentColorGroup(), option.palette.ColorRole.ButtonText)))
-        painter.drawText(r, Qt.AlignmentFlag.AlignCenter, "▶")
+        painter.drawText(play_rect, Qt.AlignmentFlag.AlignCenter, "▶")
+        bold_font = QFont(option.font)
+        bold_font.setWeight(QFont.Weight.ExtraBold)
+        painter.setFont(bold_font)
+        painter.drawText(add_rect, Qt.AlignmentFlag.AlignCenter, "+")
 
     def _paint_last_played(self, painter: QPainter, option: QStyleOptionViewItem, row: LibrarySongRow) -> None:
         rect = option.rect.adjusted(2, 1, -2, -1)
@@ -800,9 +808,9 @@ class LibraryView(QWidget):
         self._header_save_timer.setSingleShot(True)
         self._header_save_timer.timeout.connect(self._save_library_table_header_state)
         hh.setMinimumSectionSize(20)
-        # Column 0: Play button — fixed width
-        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        hh.resizeSection(0, 44)
+        # Column 0: Play and add-to-queue buttons — resizable, default fits both
+        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        hh.resizeSection(0, 68)
         hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
         hh.resizeSection(1, 280)
         # Column 5: Play/Set/History buttons — explicit width (model has no text so ResizeToContents would collapse it)
@@ -830,7 +838,7 @@ class LibraryView(QWidget):
                 if isinstance(sizes, list):
                     # Migrate old 10-column layout: prepend play column width
                     if len(sizes) == 10 and hh.count() == 11:
-                        sizes = [44] + [int(w) for w in sizes if isinstance(w, (int, float))]
+                        sizes = [68] + [int(w) for w in sizes if isinstance(w, (int, float))]
                     for i, w in enumerate(sizes):
                         if i < hh.count() and isinstance(w, (int, float)):
                             hh.resizeSection(i, int(w))
@@ -941,13 +949,21 @@ class LibraryView(QWidget):
                 x = pos.x() - rect.x()
                 y = pos.y() - rect.y()
                 if col == 0:
-                    # Play button: centered, 32x26
-                    btn_w, btn_h = 32, 26
+                    # Play and add-to-queue buttons: play 32x26, gap 4, add 24x26
+                    play_w, add_w, btn_h = 32, 24, 26
+                    gap = 4
+                    total_w = play_w + gap + add_w
                     line_h = self.table.fontMetrics().lineSpacing()
                     btn_y = (2 * line_h - btn_h) // 2
-                    btn_x = (rect.width() - btn_w) // 2
-                    if btn_x <= x <= btn_x + btn_w and btn_y <= y <= btn_y + btn_h:
+                    group_x = (rect.width() - total_w) // 2
+                    play_x, add_x = group_x, group_x + play_w + gap
+                    if play_x <= x <= play_x + play_w and btn_y <= y <= btn_y + btn_h:
                         self._on_play_song(song_id, row_data.title)
+                        return True
+                    if add_x <= x <= add_x + add_w and btn_y <= y <= btn_y + btn_h:
+                        fp = get_primary_file_path_for_song(self.app_state.conn, song_id)
+                        if fp:
+                            self._add_to_queue(song_id, fp, row_data.title)
                         return True
                 if col == 5:
                     # Buttons from right: History w=52, gap 4, Set w=40, gap 4, Now w=36, margin 4
