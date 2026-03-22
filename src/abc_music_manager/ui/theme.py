@@ -353,6 +353,36 @@ def dark_stylesheet() -> str:
             background-color: transparent;
             border: none;
         }}
+        /* Transcriber filter: same as status filter */
+        QPushButton#transcriber_filter_btn {{
+            min-width: 100px;
+            min-height: 22px;
+            padding: 4px 12px;
+            border-radius: 6px;
+            text-align: left;
+        }}
+        QPushButton#transcriber_filter_btn:hover {{
+            border-color: {COLOR_PRIMARY};
+        }}
+        QFrame#transcriber_filter_popup {{
+            background-color: {COLOR_SURFACE};
+            border: 1px solid {COLOR_OUTLINE};
+            border-radius: 10px;
+            padding: 0;
+        }}
+        QWidget#transcriber_filter_header {{
+            background-color: {COLOR_SURFACE};
+            border-bottom: 1px solid {COLOR_OUTLINE};
+        }}
+        QLabel#transcriber_filter_title {{
+            color: {COLOR_TEXT_HEADER};
+            font-weight: bold;
+            font-size: 13px;
+        }}
+        QScrollArea#transcriber_filter_list {{
+            background-color: transparent;
+            border: none;
+        }}
         /* Side tabs: rounded on left only, selected tab connects to content on the right */
         QListWidget#nav_list {{
             background-color: {COLOR_TITLE_BAR};

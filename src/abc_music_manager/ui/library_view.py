@@ -32,8 +32,6 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
     QStyle,
     QFrame,
-    QListWidget,
-    QListWidgetItem,
     QScrollArea,
     QApplication,
 )
@@ -85,6 +83,11 @@ def _status_chip_style(left_color: str, selected: bool) -> str:
         f"border-radius: 8px; background: {bg}; color: {text}; "
         f"}} QPushButton:hover {{ background: {COLOR_OUTLINE_VARIANT}; color: {COLOR_ON_SURFACE}; }}"
     )
+
+
+def _transcriber_chip_style(selected: bool) -> str:
+    """Transcriber filter chip style (no per-item color)."""
+    return _status_chip_style(COLOR_OUTLINE_VARIANT, selected)
 
 # Last-played time-range options: (label, seconds_ago). "Never" = no upper bound (songs never played).
 def _last_played_time_options() -> list[tuple[str, Optional[int]]]:
@@ -764,7 +767,8 @@ class LibraryView(QWidget):
         more_row2.addWidget(self.parts_max_combo)
         more_row2.addSpacing(16)
         more_row2.addWidget(QLabel("Transcriber:"))
-        self.transcriber_btn = QPushButton("All")
+        self.transcriber_btn = QPushButton("All transcribers")
+        self.transcriber_btn.setObjectName("transcriber_filter_btn")
         self.transcriber_btn.setCheckable(True)
         self.transcriber_btn.clicked.connect(self._on_transcriber_filter_clicked)
         more_row2.addWidget(self.transcriber_btn)
@@ -1055,7 +1059,7 @@ class LibraryView(QWidget):
             self.model.refresh()
 
     def _on_status_filter_clicked(self) -> None:
-        if self._status_popup is not None and self._status_popup.isVisible():
+        if self._status_popup is not None:
             self._status_popup.close()
             self.status_btn.setChecked(False)
             return
@@ -1077,12 +1081,6 @@ class LibraryView(QWidget):
         title_label.setObjectName("status_filter_title")
         header_layout.addWidget(title_label)
         header_layout.addStretch()
-        all_btn = QPushButton("All")
-        all_btn.setObjectName("status_filter_header_btn")
-        clear_btn = QPushButton("Clear")
-        clear_btn.setObjectName("status_filter_header_btn")
-        header_layout.addWidget(all_btn)
-        header_layout.addWidget(clear_btn)
         layout.addWidget(header)
 
         # Chip buttons instead of QListWidget to avoid model/view crash on toggle
@@ -1158,15 +1156,6 @@ class LibraryView(QWidget):
         scroll.setWidget(content)
         layout.addWidget(scroll)
         update_chip_styles()
-
-        def reset_to_all() -> None:
-            self._selected_status_ids = []
-            update_chip_styles()
-            update_button_text()
-            QTimer.singleShot(0, self._apply_filters)
-
-        all_btn.clicked.connect(reset_to_all)
-        clear_btn.clicked.connect(reset_to_all)
 
         popup.move(self.status_btn.mapToGlobal(self.status_btn.rect().bottomLeft()))
         popup.show()
@@ -1297,8 +1286,8 @@ class LibraryView(QWidget):
         self.parts_max_combo.setCurrentIndex(max(0, min(23, parts_max - 1)))
 
         self._selected_transcribers = []
-        self.transcriber_btn.setText("All")
-        if self._transcriber_popup is not None and self._transcriber_popup.isVisible():
+        self.transcriber_btn.setText("All transcribers")
+        if self._transcriber_popup is not None:
             self._transcriber_popup.close()
             self.transcriber_btn.setChecked(False)
 
@@ -1459,57 +1448,102 @@ class LibraryView(QWidget):
         self._apply_filters()
 
     def _on_transcriber_filter_clicked(self) -> None:
-        if self._transcriber_popup is not None and self._transcriber_popup.isVisible():
+        if self._transcriber_popup is not None:
             self._transcriber_popup.close()
             self.transcriber_btn.setChecked(False)
             return
+
         popup = QFrame(self, Qt.WindowType.Popup)
+        popup.setObjectName("transcriber_filter_popup")
         popup.setFrameShape(QFrame.Shape.StyledPanel)
+        popup.setMaximumWidth(260)
         layout = QVBoxLayout(popup)
-        list_widget = QListWidget()
-        list_widget.setMaximumHeight(220)
-        list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        header = QWidget()
+        header.setObjectName("transcriber_filter_header")
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(12, 10, 12, 8)
+        header_layout.setSpacing(12)
+        title_label = QLabel("Filter by transcriber")
+        title_label.setObjectName("transcriber_filter_title")
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+        layout.addWidget(header)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("transcriber_filter_list")
+        scroll.setMaximumHeight(280)
+        scroll.setMaximumWidth(240)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(12, 8, 12, 12)
+        content_layout.setSpacing(4)
+
         transcribers = list_unique_transcribers(self.app_state.conn)
-        all_item = QListWidgetItem("[All]")
-        all_item.setData(Qt.ItemDataRole.UserRole, None)
-        list_widget.addItem(all_item)
+        chips: list[tuple[QPushButton, str | None]] = []
+
+        def update_chip_styles() -> None:
+            for btn, t in chips:
+                selected = (t is None and not self._selected_transcribers) or (
+                    t is not None and t in self._selected_transcribers
+                )
+                btn.setStyleSheet(_transcriber_chip_style(selected))
+
+        def update_button_text() -> None:
+            n = len(self._selected_transcribers)
+            self.transcriber_btn.setText(
+                "All transcribers" if n == 0 else ("1 transcriber" if n == 1 else f"{n} transcribers")
+            )
+
+        def on_chip_clicked(transcriber: str | None) -> None:
+            if transcriber is None:
+                self._selected_transcribers = []
+            else:
+                if transcriber in self._selected_transcribers:
+                    self._selected_transcribers = [x for x in self._selected_transcribers if x != transcriber]
+                else:
+                    self._selected_transcribers = self._selected_transcribers + [transcriber]
+            update_chip_styles()
+            update_button_text()
+            QTimer.singleShot(0, self._apply_filters)
+
+        all_chip = QPushButton("All transcribers")
+        all_chip.setObjectName("transcriber_filter_chip")
+        all_chip.setCursor(Qt.CursorShape.PointingHandCursor)
+        chips.append((all_chip, None))
+        content_layout.addWidget(all_chip)
+        all_chip.clicked.connect(lambda: on_chip_clicked(None))
+
         for t in transcribers:
-            item = QListWidgetItem(t)
-            item.setData(Qt.ItemDataRole.UserRole, t)
-            list_widget.addItem(item)
+            chip = QPushButton(t)
+            chip.setObjectName("transcriber_filter_chip")
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chips.append((chip, t))
+            content_layout.addWidget(chip)
+            chip.clicked.connect(lambda checked=False, tr=t: on_chip_clicked(tr))
 
-        if not self._selected_transcribers:
-            list_widget.item(0).setSelected(True)
-        else:
-            for i in range(1, list_widget.count()):
-                if list_widget.item(i).data(Qt.ItemDataRole.UserRole) in self._selected_transcribers:
-                    list_widget.item(i).setSelected(True)
+        content_layout.addStretch()
+        scroll.setWidget(content)
+        layout.addWidget(scroll)
+        update_chip_styles()
 
-        def on_selection_changed() -> None:
-            selected = list_widget.selectedItems()
-            has_all = any(it.data(Qt.ItemDataRole.UserRole) is None for it in selected)
-            values = [] if has_all else [it.data(Qt.ItemDataRole.UserRole) for it in selected if it.data(Qt.ItemDataRole.UserRole) is not None]
-            if not selected and list_widget.count():
-                list_widget.blockSignals(True)
-                list_widget.item(0).setSelected(True)
-                list_widget.blockSignals(False)
-                values = []
-            self._selected_transcribers = values
-            self.transcriber_btn.setText("All" if not self._selected_transcribers else f"Transcriber ({len(self._selected_transcribers)})")
-            self._apply_filters()
-
-        list_widget.itemSelectionChanged.connect(on_selection_changed)
         popup.move(self.transcriber_btn.mapToGlobal(self.transcriber_btn.rect().bottomLeft()))
         popup.show()
+        self._transcriber_popup = popup
 
-        def on_popup_closed():
+        def on_popup_destroyed() -> None:
             self._transcriber_popup = None
             try:
                 self.transcriber_btn.setChecked(False)
             except RuntimeError:
                 pass
-        popup.destroyed.connect(on_popup_closed)
-        self._transcriber_popup = popup
+
+        popup.destroyed.connect(on_popup_destroyed)
 
     def _apply_filters(self) -> None:
         title = self.title_composer_edit.text()

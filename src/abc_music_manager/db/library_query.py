@@ -80,10 +80,12 @@ def list_library_songs(
     args = []
 
     if title_or_composer_substring:
-        sub = "%" + title_or_composer_substring.lower() + "%"
-        conditions.append("(LOWER(s.title) LIKE ? OR LOWER(s.composers) LIKE ?)")
-        args.append(sub)
-        args.append(sub)
+        tokens = [t for t in title_or_composer_substring.lower().split() if t]
+        for token in tokens:
+            sub = "%" + token + "%"
+            conditions.append("(LOWER(s.title) LIKE ? OR LOWER(s.composers) LIKE ?)")
+            args.append(sub)
+            args.append(sub)
     if transcriber_substring:
         conditions.append("(s.transcriber IS NOT NULL AND LOWER(s.transcriber) LIKE ?)")
         args.append("%" + transcriber_substring.lower() + "%")
