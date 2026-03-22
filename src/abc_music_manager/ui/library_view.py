@@ -551,13 +551,13 @@ class LibraryDelegate(QStyledItemDelegate):
         btn_h = 26
         line_h = option.fontMetrics.lineSpacing()
         btn_y = rect.y() + (2 * line_h - btn_h) // 2
-        play_w, set_w, history_w = 28, 40, 52
+        play_w, set_w, history_w = 36, 40, 52
         gap = 4
         margin = 4
         history_rect = QRect(rect.right() - margin - history_w, btn_y, history_w, btn_h)
         set_rect = QRect(history_rect.left() - gap - set_w, btn_y, set_w, btn_h)
         play_rect = QRect(set_rect.left() - gap - play_w, btn_y, play_w, btn_h)
-        for r, label in [(play_rect, "▶"), (set_rect, "Set…"), (history_rect, "History")]:
+        for r, label in [(play_rect, "Now"), (set_rect, "Set…"), (history_rect, "History")]:
             painter.setPen(QPen(option.palette.color(option.palette.currentColorGroup(), option.palette.ColorRole.Mid)))
             painter.setBrush(QBrush(option.palette.button()))
             painter.drawRoundedRect(r, 3, 3)
@@ -944,7 +944,7 @@ class LibraryView(QWidget):
                         self._on_play_song(song_id, row_data.title)
                         return True
                 if col == 5:
-                    # Buttons from right: History w=52, gap 4, Set w=40, gap 4, Play w=28, margin 4
+                    # Buttons from right: History w=52, gap 4, Set w=40, gap 4, Now w=36, margin 4
                     rx = rect.width() - x
                     if 4 <= rx <= 56:
                         self._on_play_history(song_id, row_data.title)
@@ -952,8 +952,8 @@ class LibraryView(QWidget):
                     if 60 <= rx <= 100:
                         self._on_set_play_time(song_id)
                         return True
-                    if 104 <= rx <= 132:
-                        self._on_play_song(song_id, row_data.title)
+                    if 104 <= rx <= 140:
+                        self._on_played_now(song_id)
                         return True
                 if col == 7:
                     # Rating: star hit test, 5 stars each 14px wide
