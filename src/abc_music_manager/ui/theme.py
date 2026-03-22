@@ -311,6 +311,17 @@ def dark_stylesheet() -> str:
             border: none;
             border-bottom: 1px solid {COLOR_OUTLINE};
         }}
+        /* Song detail status combo: match status filter styling (single-select, no All statuses), width fits longest status */
+        QComboBox#song_detail_status_combo {{
+            min-width: 60px;
+            min-height: 22px;
+            padding: 4px 12px;
+            border-radius: 6px;
+            text-align: left;
+        }}
+        QComboBox#song_detail_status_combo:hover {{
+            border-color: {COLOR_PRIMARY};
+        }}
         /* Status filter: dropdown-style trigger button */
         QPushButton#status_filter_btn {{
             min-width: 100px;
