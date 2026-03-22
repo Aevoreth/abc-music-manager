@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .setlist_folder_repo import SetlistFolderRow, list_folders
-from .song_layout_repo import get_or_create_song_layout_for_band
+from .song_layout_repo import get_or_create_song_layout_for_band, delete_song_layout
 
 
 def _now() -> str:
@@ -246,12 +246,28 @@ def update_setlist(
 
 
 def delete_setlist(conn: sqlite3.Connection, setlist_id: int) -> None:
+    # Collect song_layout_ids from this setlist's items (before deletion)
+    cur = conn.execute(
+        "SELECT song_layout_id FROM SetlistItem WHERE setlist_id = ? AND song_layout_id IS NOT NULL",
+        (setlist_id,),
+    )
+    song_layout_ids = [r[0] for r in cur.fetchall()]
+
     conn.execute(
         "DELETE FROM SetlistBandAssignment WHERE setlist_item_id IN (SELECT id FROM SetlistItem WHERE setlist_id = ?)",
         (setlist_id,),
     )
     conn.execute("DELETE FROM SetlistItem WHERE setlist_id = ?", (setlist_id,))
     conn.execute("DELETE FROM Setlist WHERE id = ?", (setlist_id,))
+
+    # Delete song layouts that were only used by this setlist (now orphaned)
+    for song_layout_id in song_layout_ids:
+        cur = conn.execute(
+            "SELECT 1 FROM SetlistItem WHERE song_layout_id = ? LIMIT 1", (song_layout_id,)
+        )
+        if cur.fetchone() is None:
+            delete_song_layout(conn, song_layout_id)
+
     conn.commit()
 
 

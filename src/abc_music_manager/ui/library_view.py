@@ -44,7 +44,7 @@ from ..services.playback_state import PlaybackState, PlaylistEntry
 from ..db.library_query import get_primary_file_path_for_song
 from ..services.preferences import resolve_music_path
 from ..services.preferences import get_default_filters, get_library_table_header_state, set_library_table_header_state
-from ..db import list_library_songs, list_unique_transcribers, get_status_list, LibrarySongRow
+from ..db import list_library_songs, list_unique_transcribers, get_status_list, get_song_for_detail, LibrarySongRow
 from ..db.status_repo import list_statuses
 from ..db.setlist_repo import (
     list_setlists,
@@ -52,9 +52,11 @@ from ..db.setlist_repo import (
     list_setlist_items,
     get_setlists_containing_song,
 )
-from ..db.song_layout_repo import list_song_layouts_for_song_and_band
+from ..db.song_layout_repo import list_song_layouts_for_song, list_song_layouts_for_song_and_band
+from ..db.band_repo import get_band_layout_display_name, list_all_band_layouts
 from ..db.play_log import log_play, log_play_at
 from .play_history_dialog import open_play_history_dialog
+from .song_layout_editor_dialog import SongLayoutEditorDialog
 from ..db.song_repo import update_song_app_metadata
 from .theme import (
     STATUS_CIRCLE_DIAMETER,
@@ -462,7 +464,7 @@ class LibraryTableModel(QAbstractTableModel):
                 if sets_list:
                     return "In sets:\n" + "\n".join(name for _, name in sets_list)
             if c == 11:
-                return "Edit song"
+                return "Edit song / Edit layout"
         return None
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):
@@ -626,17 +628,22 @@ class LibraryDelegate(QStyledItemDelegate):
         painter.drawText(rect.adjusted(STATUS_CIRCLE_DIAMETER + 4, 0, 0, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name)
 
     def _paint_edit_button(self, painter: QPainter, option: QStyleOptionViewItem) -> None:
+        """Paint Edit and Edit layout buttons in Actions column."""
         rect = option.rect.adjusted(2, 1, -2, -1)
-        btn_w, btn_h = 44, 26
+        edit_w, layout_w, btn_h, gap = 44, 75, 26, 4
         line_h = option.fontMetrics.lineSpacing()
         btn_y = rect.y() + (2 * line_h - btn_h) // 2
-        btn_x = rect.x() + (rect.width() - btn_w) // 2
-        btn_rect = QRect(btn_x, btn_y, btn_w, btn_h)
-        painter.setPen(QPen(option.palette.color(option.palette.currentColorGroup(), option.palette.ColorRole.Mid)))
-        painter.setBrush(QBrush(option.palette.button()))
-        painter.drawRoundedRect(btn_rect, 4, 4)
+        group_w = edit_w + gap + layout_w
+        group_x = rect.x() + (rect.width() - group_w) // 2
+        edit_rect = QRect(group_x, btn_y, edit_w, btn_h)
+        layout_rect = QRect(group_x + edit_w + gap, btn_y, layout_w, btn_h)
+        for r in (edit_rect, layout_rect):
+            painter.setPen(QPen(option.palette.color(option.palette.currentColorGroup(), option.palette.ColorRole.Mid)))
+            painter.setBrush(QBrush(option.palette.button()))
+            painter.drawRoundedRect(r, 4, 4)
         painter.setPen(QPen(option.palette.color(option.palette.currentColorGroup(), option.palette.ColorRole.ButtonText)))
-        painter.drawText(btn_rect, Qt.AlignmentFlag.AlignCenter, "Edit")
+        painter.drawText(edit_rect, Qt.AlignmentFlag.AlignCenter, "Edit")
+        painter.drawText(layout_rect, Qt.AlignmentFlag.AlignCenter, "Layout \u25BC")
 
 
 class LibraryView(QWidget):
@@ -847,7 +854,7 @@ class LibraryView(QWidget):
         hh.setSectionResizeMode(10, QHeaderView.ResizeMode.Interactive)
         hh.resizeSection(10, 120)
         hh.setSectionResizeMode(11, QHeaderView.ResizeMode.Interactive)
-        hh.resizeSection(11, 64)
+        hh.resizeSection(11, 130)
         hh.setSectionsClickable(True)
         hh.setSortIndicatorShown(True)
         hh.sectionClicked.connect(self._on_header_clicked)
@@ -864,7 +871,7 @@ class LibraryView(QWidget):
                         sizes = [68] + [int(w) for w in sizes if isinstance(w, (int, float))]
                     # Migrate 11-column layout: append Actions column width
                     elif len(sizes) == 11 and hh.count() == 12:
-                        sizes = [int(w) for w in sizes if isinstance(w, (int, float))] + [64]
+                        sizes = [int(w) for w in sizes if isinstance(w, (int, float))] + [130]
                     for i, w in enumerate(sizes):
                         if i < hh.count() and isinstance(w, (int, float)):
                             hh.resizeSection(i, int(w))
@@ -1038,13 +1045,18 @@ class LibraryView(QWidget):
                     menu.exec(self.table.viewport().mapToGlobal(pos))
                     return True
                 if col == 11:
-                    # Edit button: 44x26, centered
-                    btn_w, btn_h = 44, 26
+                    # Edit (44) + gap (4) + Layout (75) buttons
+                    edit_w, layout_w, btn_h, gap = 44, 75, 26, 4
                     line_h = self.table.fontMetrics().lineSpacing()
                     btn_y = (2 * line_h - btn_h) // 2
-                    btn_x = (rect.width() - btn_w) // 2
-                    if btn_x <= x <= btn_x + btn_w and btn_y <= y <= btn_y + btn_h:
+                    group_w = edit_w + gap + layout_w
+                    group_x = (rect.width() - group_w) // 2
+                    edit_x, layout_x = group_x, group_x + edit_w + gap
+                    if edit_x <= x <= edit_x + edit_w and btn_y <= y <= btn_y + btn_h:
                         self._open_song_detail(song_id)
+                        return True
+                    if layout_x <= x <= layout_x + layout_w and btn_y <= y <= btn_y + btn_h:
+                        self._open_edit_layout_menu(song_id, row_data.title, pos)
                         return True
         return False
 
@@ -1720,8 +1732,52 @@ class LibraryView(QWidget):
         from .song_detail import SongDetailDialog
         dlg = SongDetailDialog(self.app_state, song_id, self)
         dlg.song_layout_updated.connect(self._on_song_layout_updated)
-        dlg.exec()
-        self.model.refresh()
+        dlg.finished.connect(lambda: self.model.refresh())
+        dlg.show()
+
+    def _open_edit_layout_menu(self, song_id: int, song_title: str, viewport_pos) -> None:
+        """Show Edit layout dropdown: New Layout... plus existing layouts."""
+        data = get_song_for_detail(self.app_state.conn, song_id)
+        parts_json = json.dumps(data.get("parts", [])) if data else "[]"
+        layouts = list_song_layouts_for_song(self.app_state.conn, song_id)
+        existing_band_layout_ids = {sl.band_layout_id for sl, _ in layouts}
+        band_layouts = list_all_band_layouts(self.app_state.conn)
+        has_new_band_layout = any(
+            layout_id not in existing_band_layout_ids for layout_id, _, _ in band_layouts
+        )
+        menu = QMenu(self)
+        new_act = menu.addAction("New Layout...")
+        new_act.setEnabled(has_new_band_layout)
+        if not has_new_band_layout:
+            new_act.setToolTip("No band layouts to assign new song layout to")
+        new_act.triggered.connect(
+            lambda: self._open_layout_editor(song_id, parts_json, None, None)
+        )
+        if layouts:
+            menu.addSeparator()
+            for sl, _ in layouts:
+                label = get_band_layout_display_name(self.app_state.conn, sl.band_layout_id)
+                act = menu.addAction(label)
+                act.triggered.connect(
+                    lambda checked=False, slid=sl.id, blid=sl.band_layout_id: self._open_layout_editor(
+                        song_id, parts_json, slid, blid
+                    )
+                )
+        gpos = self.table.viewport().mapToGlobal(viewport_pos)
+        menu.exec(gpos)
+
+    def _open_layout_editor(self, song_id: int, parts_json: str, song_layout_id: int | None, band_layout_id: int | None) -> None:
+        dlg = SongLayoutEditorDialog(
+            self.app_state,
+            song_id,
+            parts_json,
+            song_layout_id=song_layout_id,
+            band_layout_id=band_layout_id,
+            parent=self,
+        )
+        dlg.song_layout_updated.connect(self._on_song_layout_updated)
+        dlg.finished.connect(lambda: self.model.refresh())
+        dlg.show()
 
     def _on_song_layout_updated(self, song_layout_id: int) -> None:
         """When a song layout is edited, restart playback if it's the active layout."""

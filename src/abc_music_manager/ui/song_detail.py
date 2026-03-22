@@ -32,7 +32,7 @@ from PySide6.QtGui import QColor, QPainter, QPen, QBrush
 from ..services.app_state import AppState
 from ..db import get_song_for_detail
 from ..db.library_query import get_primary_file_path_for_song
-from ..db.band_repo import get_band_layout_display_name
+from ..db.band_repo import get_band_layout_display_name, list_all_band_layouts
 from ..db.status_repo import list_statuses
 from ..db.song_layout_repo import (
     list_song_layouts_for_song,
@@ -134,6 +134,8 @@ class SongDetailDialog(QDialog):
         self._file_path: str | None = None
         self._file_mtime_when_loaded: str | None = None
         self.setWindowTitle("Song detail")
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        self.setWindowModality(Qt.WindowModality.NonModal)
         self.setMinimumSize(620, 520)
         layout = QVBoxLayout(self)
 
@@ -215,9 +217,9 @@ class SongDetailDialog(QDialog):
         self.layout_combo.setMinimumWidth(200)
         self.layout_combo.currentIndexChanged.connect(self._on_layout_combo_changed)
         layout_row.addWidget(self.layout_combo)
-        new_layout_btn = QPushButton("New song layout")
-        new_layout_btn.clicked.connect(self._on_new_layout)
-        layout_row.addWidget(new_layout_btn)
+        self.new_layout_btn = QPushButton("New song layout")
+        self.new_layout_btn.clicked.connect(self._on_new_layout)
+        layout_row.addWidget(self.new_layout_btn)
         self.edit_layout_btn = QPushButton("Edit song layout")
         self.edit_layout_btn.clicked.connect(self._on_edit_layout)
         layout_row.addWidget(self.edit_layout_btn)
@@ -280,6 +282,15 @@ class SongDetailDialog(QDialog):
             self.title_label.setText("(not found)")
             self._parts_json = "[]"
             self._layouts_list = []
+            existing_band_layout_ids = set()
+            band_layouts = list_all_band_layouts(self.app_state.conn)
+            has_new_band_layout = any(
+                layout_id not in existing_band_layout_ids for layout_id, _, _ in band_layouts
+            )
+            self.new_layout_btn.setEnabled(has_new_band_layout)
+            self.new_layout_btn.setToolTip(
+                "No band layouts to assign new song layout to" if not has_new_band_layout else ""
+            )
             return
         self.title_label.setText(data["title"])
         self.composers_label.setText(data["composers"])
@@ -293,12 +304,25 @@ class SongDetailDialog(QDialog):
         self._layouts_list = list_song_layouts_for_song(self.app_state.conn, self.song_id)
         self._fill_parts_table(self.parts_table, parts)
         self.layout_combo.clear()
-        self.layout_combo.addItem("(none)", None)
-        for sl, _ in self._layouts_list:
-            label = get_band_layout_display_name(self.app_state.conn, sl.band_layout_id)
-            self.layout_combo.addItem(label, (sl.id, sl.band_layout_id))
+        if not self._layouts_list:
+            self.layout_combo.addItem("(none)", None)
+        else:
+            for sl, _ in self._layouts_list:
+                label = get_band_layout_display_name(self.app_state.conn, sl.band_layout_id)
+                self.layout_combo.addItem(label, (sl.id, sl.band_layout_id))
         self.layout_combo.setCurrentIndex(0)
         self._on_layout_combo_changed()
+
+        # Disable New when no band layouts exist that don't already have a song layout
+        existing_band_layout_ids = {sl.band_layout_id for sl, _ in self._layouts_list}
+        band_layouts = list_all_band_layouts(self.app_state.conn)
+        has_new_band_layout = any(
+            layout_id not in existing_band_layout_ids for layout_id, _, _ in band_layouts
+        )
+        self.new_layout_btn.setEnabled(has_new_band_layout)
+        self.new_layout_btn.setToolTip(
+            "No band layouts to assign new song layout to" if not has_new_band_layout else ""
+        )
 
         rating = data.get("rating")
         idx = int(rating) if rating is not None else 0
@@ -350,8 +374,8 @@ class SongDetailDialog(QDialog):
             parent=self,
         )
         dlg.song_layout_updated.connect(self.song_layout_updated.emit)
-        if dlg.exec():
-            self._load_song()
+        dlg.finished.connect(self._load_song)
+        dlg.show()
 
     def _on_edit_layout(self) -> None:
         data = self.layout_combo.currentData()
@@ -367,8 +391,8 @@ class SongDetailDialog(QDialog):
             parent=self,
         )
         dlg.song_layout_updated.connect(self.song_layout_updated.emit)
-        if dlg.exec():
-            self._load_song()
+        dlg.finished.connect(self._load_song)
+        dlg.show()
 
     def _on_delete_layout(self) -> None:
         data = self.layout_combo.currentData()

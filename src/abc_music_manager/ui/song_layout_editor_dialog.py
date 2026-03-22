@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QWidget,
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 
 from ..services.app_state import AppState
 from ..db.band_repo import list_all_band_layouts
@@ -46,6 +46,8 @@ class SongLayoutEditorDialog(QDialog):
         self._song_layout_id = song_layout_id
         self._band_layout_id = band_layout_id
         self.setWindowTitle("Edit song layout" if song_layout_id else "New song layout")
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        self.setWindowModality(Qt.WindowModality.NonModal)
         # Size to fit 6 cards wide × 3 cards deep (CARD 9×7 units @ 15px/unit + padding)
         self.setMinimumSize(950, 520)
         self.resize(950, 520)
@@ -56,11 +58,14 @@ class SongLayoutEditorDialog(QDialog):
         self.band_layout_combo = QComboBox()
         existing_bids = {sl.band_layout_id for sl, _ in list_song_layouts_for_song(app_state.conn, song_id)}
         for layout_id, layout_name, band_name in list_all_band_layouts(app_state.conn):
-            label = f"{band_name} — {layout_name}"
-            self.band_layout_combo.addItem(label, layout_id)
-            if layout_id in existing_bids and not song_layout_id:
-                idx = self.band_layout_combo.count() - 1
-                self.band_layout_combo.model().item(idx).setEnabled(False)
+            if song_layout_id:
+                # Edit mode: show all band layouts
+                label = f"{band_name} — {layout_name}"
+                self.band_layout_combo.addItem(label, layout_id)
+            elif layout_id not in existing_bids:
+                # New mode: only show band layouts that don't already have a song layout
+                label = f"{band_name} — {layout_name}"
+                self.band_layout_combo.addItem(label, layout_id)
         self.band_layout_combo.currentIndexChanged.connect(self._on_band_layout_changed)
 
         if band_layout_id:
