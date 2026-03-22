@@ -295,6 +295,7 @@ class LibraryTableModel(QAbstractTableModel):
         "Set",
         "Status",
         "Transcriber",
+        "Actions",
     ]
 
     def __init__(self, conn, parent=None) -> None:
@@ -434,6 +435,8 @@ class LibraryTableModel(QAbstractTableModel):
                 return row.status_name or self._default_status_name or "—"
             if c == 10:
                 return row.transcriber or "—"
+            if c == 11:
+                return None  # Painted by delegate (Edit button)
         if role == SortRole:
             if c == 3:
                 return row.duration_seconds if row.duration_seconds is not None else -1
@@ -458,6 +461,8 @@ class LibraryTableModel(QAbstractTableModel):
                 sets_list = get_setlists_containing_song(self._conn, row.song_id)
                 if sets_list:
                     return "In sets:\n" + "\n".join(name for _, name in sets_list)
+            if c == 11:
+                return "Edit song"
         return None
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):
@@ -503,7 +508,7 @@ class LibraryDelegate(QStyledItemDelegate):
         option.state &= ~(QStyle.StateFlag.State_MouseOver | QStyle.StateFlag.State_HasFocus)
         col = index.column()
         row_data = index.data(RowDataRole)
-        if row_data is None and col not in (0, 4, 5, 6, 7, 8, 9):
+        if row_data is None and col not in (0, 4, 5, 6, 7, 8, 9, 11):
             return super().paint(painter, option, index)
 
         if col == 0 and row_data:
@@ -527,6 +532,9 @@ class LibraryDelegate(QStyledItemDelegate):
             return
         if col == 9 and row_data:
             self._paint_status(painter, option, row_data, index)
+            return
+        if col == 11 and row_data:
+            self._paint_edit_button(painter, option)
             return
         super().paint(painter, option, index)
 
@@ -616,6 +624,19 @@ class LibraryDelegate(QStyledItemDelegate):
         painter.drawEllipse(rect.x(), cy - r, STATUS_CIRCLE_DIAMETER, STATUS_CIRCLE_DIAMETER)
         painter.setPen(QPen(option.palette.text().color()))
         painter.drawText(rect.adjusted(STATUS_CIRCLE_DIAMETER + 4, 0, 0, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, name)
+
+    def _paint_edit_button(self, painter: QPainter, option: QStyleOptionViewItem) -> None:
+        rect = option.rect.adjusted(2, 1, -2, -1)
+        btn_w, btn_h = 44, 26
+        line_h = option.fontMetrics.lineSpacing()
+        btn_y = rect.y() + (2 * line_h - btn_h) // 2
+        btn_x = rect.x() + (rect.width() - btn_w) // 2
+        btn_rect = QRect(btn_x, btn_y, btn_w, btn_h)
+        painter.setPen(QPen(option.palette.color(option.palette.currentColorGroup(), option.palette.ColorRole.Mid)))
+        painter.setBrush(QBrush(option.palette.button()))
+        painter.drawRoundedRect(btn_rect, 4, 4)
+        painter.setPen(QPen(option.palette.color(option.palette.currentColorGroup(), option.palette.ColorRole.ButtonText)))
+        painter.drawText(btn_rect, Qt.AlignmentFlag.AlignCenter, "Edit")
 
 
 class LibraryView(QWidget):
@@ -816,7 +837,7 @@ class LibraryView(QWidget):
         # Column 5: Play/Set/History buttons — explicit width (model has no text so ResizeToContents would collapse it)
         hh.setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
         hh.resizeSection(5, 140)  # Wide enough for ▶ + Set… + History
-        # Columns 6 (Parts), 7 (Rating), 8 (Set) user-resizable; 10 (Transcriber) user-resizable
+        # Columns 6 (Parts), 7 (Rating), 8 (Set) user-resizable; 10 (Transcriber), 11 (Actions) user-resizable
         hh.setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive)
         hh.resizeSection(6, 52)
         hh.setSectionResizeMode(7, QHeaderView.ResizeMode.Interactive)
@@ -825,6 +846,8 @@ class LibraryView(QWidget):
         hh.resizeSection(8, 44)
         hh.setSectionResizeMode(10, QHeaderView.ResizeMode.Interactive)
         hh.resizeSection(10, 120)
+        hh.setSectionResizeMode(11, QHeaderView.ResizeMode.Interactive)
+        hh.resizeSection(11, 64)
         hh.setSectionsClickable(True)
         hh.setSortIndicatorShown(True)
         hh.sectionClicked.connect(self._on_header_clicked)
@@ -839,6 +862,9 @@ class LibraryView(QWidget):
                     # Migrate old 10-column layout: prepend play column width
                     if len(sizes) == 10 and hh.count() == 11:
                         sizes = [68] + [int(w) for w in sizes if isinstance(w, (int, float))]
+                    # Migrate 11-column layout: append Actions column width
+                    elif len(sizes) == 11 and hh.count() == 12:
+                        sizes = [int(w) for w in sizes if isinstance(w, (int, float))] + [64]
                     for i, w in enumerate(sizes):
                         if i < hh.count() and isinstance(w, (int, float)):
                             hh.resizeSection(i, int(w))
@@ -1011,6 +1037,15 @@ class LibraryView(QWidget):
                             act.setChecked(True)
                     menu.exec(self.table.viewport().mapToGlobal(pos))
                     return True
+                if col == 11:
+                    # Edit button: 44x26, centered
+                    btn_w, btn_h = 44, 26
+                    line_h = self.table.fontMetrics().lineSpacing()
+                    btn_y = (2 * line_h - btn_h) // 2
+                    btn_x = (rect.width() - btn_w) // 2
+                    if btn_x <= x <= btn_x + btn_w and btn_y <= y <= btn_y + btn_h:
+                        self._open_song_detail(song_id)
+                        return True
         return False
 
     def _go_to_setlist(self, setlist_id: int) -> None:
