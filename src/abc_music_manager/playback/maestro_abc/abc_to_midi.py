@@ -15,7 +15,11 @@ import mido
 from mido import MetaMessage
 
 from .. import lotro_instruments
-from ..lotro_instruments import is_non_sustained_instrument
+from ..lotro_instruments import (
+    get_instrument_db_volume_adjust,
+    is_non_sustained_instrument,
+    scale_velocity_by_db,
+)
 from ..pan_generator import get_pan as get_maestro_pan
 from .abc_constants import (
     DEFAULT_NOTE_TICKS,
@@ -502,6 +506,10 @@ def _convert(
                 ]
 
                 velocity = info.get_dynamics().get_vol(use_lotro_instruments)
+                if use_lotro_instruments:
+                    prog = info.get_instrument_midi_program()
+                    db = get_instrument_db_volume_adjust(prog)
+                    velocity = scale_velocity_by_db(velocity, db)
                 if note_id not in tied_notes:
                     if info.get_ppqn() != ppqn:
                         raise AbcParseError(

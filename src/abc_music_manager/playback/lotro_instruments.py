@@ -114,6 +114,50 @@ _NON_SUSTAINED_MIDI_PROGRAMS: frozenset[int] = frozenset({
 })
 
 
+# Per-instrument dB volume adjustment (from Maestro LotroInstrument.dBVolumeAdjust).
+# Positive = louder, negative = quieter relative to baseline.
+# Lute of Ages uses -4 dB (sounds too loud in some arrangements; Maestro baseline is 0).
+_MIDI_PROGRAM_TO_DB: dict[int, float] = {
+    9: 2.0,      # Jaunty Hand-knells
+    24: -4.0,     # Lute of Ages (attenuated; Maestro 0)
+    25: -19.0,    # Basic Lute
+    27: -12.5,    # Misty Mountain Harp
+    32: -12.0,    # Basic Theorbo
+    40: 6.0,      # Bardic Fiddle
+    41: 6.25,     # Basic Fiddle
+    45: -3.0,     # Traveller's Trusty Fiddle
+    46: 6.0,      # Basic Harp
+    51: 5.5,      # Lonely Mountain Fiddle
+    63: 5.0,      # Lonely Mountain Bassoon
+    68: 5.0,      # Brusque Bassoon
+    69: -2.0,     # Basic Horn
+    70: 5.0,      # Basic Bassoon
+    71: -2.0,     # Basic Clarinet
+    73: -3.5,     # Basic Flute
+    84: -3.5,     # Basic Pibgorn
+    109: -1.5,    # Basic Bagpipe
+    110: -10.0,   # Sprightly Fiddle
+    114: 0.0,     # Moor Cowbell
+    115: 0.0,     # Basic Cowbell
+    118: 4.5,     # Basic Drum
+    120: 0.0,     # Student's Fiddle
+}
+
+
+def get_instrument_db_volume_adjust(midi_program: int) -> float:
+    """Return dB volume adjustment for a MIDI program. 0 = no change."""
+    return _MIDI_PROGRAM_TO_DB.get(midi_program, 0.0)
+
+
+def scale_velocity_by_db(velocity: int, db: float) -> int:
+    """Scale velocity by dB: positive dB = louder, negative = quieter. Clamped to 0-127."""
+    if db == 0:
+        return velocity
+    import math
+    mult = 10.0 ** (db / 20.0)
+    return max(0, min(127, round(velocity * mult)))
+
+
 def is_non_sustained_instrument(midi_program: int) -> bool:
     """True if instrument has natural decay (plucked, percussive) and benefits from extended note hold."""
     return midi_program in _NON_SUSTAINED_MIDI_PROGRAMS
