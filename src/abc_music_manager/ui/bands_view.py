@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPlainTextEdit,
+    QAbstractItemView,
+    QMenu,
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 
@@ -36,10 +38,12 @@ from ..db.band_repo import (
     add_band,
     update_band,
     delete_band,
+    duplicate_band,
     list_band_members,
     add_band_member,
     list_band_layouts,
     add_band_layout,
+    reorder_bands,
     list_layout_slots,
     set_layout_slot,
     remove_layout_slot,
@@ -56,6 +60,23 @@ from .player_dialog import open_new_character_dialog, open_edit_character_dialog
 from .diagonal_header import DiagonalHeaderView
 from .band_layout_grid import BandLayoutGridWidget, LayoutCard, SPAWN_X, SPAWN_Y, MAX_CARDS
 from .add_player_dialog import open_add_player_dialog
+
+
+class BandListWidget(QListWidget):
+    """List of bands with drag-drop reordering, similar to setlist editor's list of sets."""
+
+    itemsReordered = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDropIndicatorShown(True)
+        self._drop_line = None  # Optional: add orange drop line like set_export_dialog
+
+    def dropEvent(self, event) -> None:
+        super().dropEvent(event)
+        self.itemsReordered.emit()
 
 
 class BandsView(QWidget):
@@ -83,22 +104,41 @@ class BandsView(QWidget):
         w = QWidget()
         v = QVBoxLayout(w)
 
-        # Top row: Add Band button
+        # Top row: Add Band, Duplicate buttons
+        btn_row = QHBoxLayout()
         add_band_btn = QPushButton("Add Band")
         fm = add_band_btn.fontMetrics()
         add_band_btn.setFixedWidth(fm.horizontalAdvance("Add Band") + 24)
         add_band_btn.clicked.connect(self._add_band)
-        v.addWidget(add_band_btn)
+        btn_row.addWidget(add_band_btn)
+        self.duplicate_band_btn = QPushButton("Duplicate")
+        self.duplicate_band_btn.setFixedWidth(fm.horizontalAdvance("Duplicate") + 24)
+        self.duplicate_band_btn.clicked.connect(self._duplicate_selected_band)
+        self.duplicate_band_btn.setEnabled(False)
+        btn_row.addWidget(self.duplicate_band_btn)
+        btn_row.addStretch()
+        v.addLayout(btn_row)
 
-        # Splitter: left = band list, right = band editor
+        # Splitter: left = band list (drag to reorder), right = band editor
         self.bands_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        self.band_list = QListWidget()
+        band_list_container = QWidget()
+        bl_v = QVBoxLayout(band_list_container)
+        bl_v.setContentsMargins(0, 0, 0, 0)
+        bl_v.addWidget(QLabel("Bands (drag to reorder):"))
+        self.band_list = BandListWidget()
         self.band_list.setWordWrap(True)
         self.band_list.setMinimumWidth(120)
         self.band_list.setMaximumWidth(300)
+        tree_font = self.band_list.font()
+        tree_font.setPointSize(tree_font.pointSize() + 2)
+        self.band_list.setFont(tree_font)
         self.band_list.currentRowChanged.connect(self._on_band_selected)
-        self.bands_splitter.addWidget(self.band_list)
+        self.band_list.itemsReordered.connect(self._on_band_list_reordered)
+        self.band_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.band_list.customContextMenuRequested.connect(self._on_band_list_context_menu)
+        bl_v.addWidget(self.band_list)
+        self.bands_splitter.addWidget(band_list_container)
 
         self.band_editor = QWidget()
         editor_layout = QVBoxLayout(self.band_editor)
@@ -270,6 +310,7 @@ class BandsView(QWidget):
             self._loaded_band_name = ""
             self._loaded_band_notes = ""
             self.band_editor.setEnabled(False)
+            self.duplicate_band_btn.setEnabled(False)
             return
         item = self.band_list.item(row)
         if not item:
@@ -283,6 +324,7 @@ class BandsView(QWidget):
         self._loaded_band_name = band.name
         self._loaded_band_notes = band.notes or ""
         self.band_editor.setEnabled(True)
+        self.duplicate_band_btn.setEnabled(True)
         self.band_name_edit.setText(band.name)
         self.band_notes_edit.setPlainText(band.notes or "")
 
@@ -310,6 +352,49 @@ class BandsView(QWidget):
             for s in slots
         ]
         self.layout_grid.set_cards(cards)
+
+    def _on_band_list_reordered(self) -> None:
+        """Persist band order after drag-drop."""
+        ids: list[int] = []
+        for i in range(self.band_list.count()):
+            it = self.band_list.item(i)
+            if it:
+                val = it.data(Qt.ItemDataRole.UserRole)
+                if val is not None and isinstance(val, int):
+                    ids.append(val)
+        if ids:
+            reorder_bands(self.app_state.conn, ids)
+
+    def _on_band_list_context_menu(self, pos) -> None:
+        """Show context menu for band list (e.g. Duplicate)."""
+        item = self.band_list.itemAt(pos)
+        if not item:
+            return
+        band_id = item.data(Qt.ItemDataRole.UserRole)
+        if band_id is None:
+            return
+        menu = QMenu(self)
+        dup_act = menu.addAction("Duplicate")
+        dup_act.triggered.connect(lambda: self._duplicate_band_by_id(band_id))
+        menu.exec(self.band_list.mapToGlobal(pos))
+
+    def _duplicate_selected_band(self) -> None:
+        """Duplicate the currently selected band (from Duplicate button)."""
+        if self._selected_band_id is None:
+            return
+        self._duplicate_band_by_id(self._selected_band_id)
+
+    def _duplicate_band_by_id(self, band_id: int) -> None:
+        """Create a copy of the band and select it."""
+        try:
+            new_id = duplicate_band(self.app_state.conn, band_id)
+            self._refresh_band_list()
+            for i in range(self.band_list.count()):
+                if self.band_list.item(i).data(Qt.ItemDataRole.UserRole) == new_id:
+                    self.band_list.setCurrentRow(i)
+                    break
+        except ValueError:
+            QMessageBox.warning(self, "Duplicate", "Could not duplicate band.")
 
     def _add_band(self) -> None:
         bands = list_bands(self.app_state.conn)

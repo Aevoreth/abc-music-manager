@@ -57,15 +57,13 @@ class SongLayoutEditorDialog(QDialog):
         layout.addWidget(QLabel("Band layout:"))
         self.band_layout_combo = QComboBox()
         existing_bids = {sl.band_layout_id for sl, _ in list_song_layouts_for_song(app_state.conn, song_id)}
-        for layout_id, layout_name, band_name in list_all_band_layouts(app_state.conn):
+        for layout_id, _layout_name, band_name in list_all_band_layouts(app_state.conn):
             if song_layout_id:
                 # Edit mode: show all band layouts
-                label = f"{band_name} — {layout_name}"
-                self.band_layout_combo.addItem(label, layout_id)
+                self.band_layout_combo.addItem(band_name, layout_id)
             elif layout_id not in existing_bids:
                 # New mode: only show band layouts that don't already have a song layout
-                label = f"{band_name} — {layout_name}"
-                self.band_layout_combo.addItem(label, layout_id)
+                self.band_layout_combo.addItem(band_name, layout_id)
         self.band_layout_combo.currentIndexChanged.connect(self._on_band_layout_changed)
 
         if band_layout_id:

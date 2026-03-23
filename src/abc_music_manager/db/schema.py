@@ -335,6 +335,19 @@ def _migrate_band_notes(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_band_sort_order(conn: sqlite3.Connection) -> None:
+    """Add sort_order column to Band if missing; backfill from id order."""
+    cur = conn.execute("PRAGMA table_info(Band)")
+    columns = [row[1] for row in cur.fetchall()]
+    if "sort_order" in columns:
+        return
+    conn.execute("ALTER TABLE Band ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+    conn.execute(
+        "UPDATE Band SET sort_order = (SELECT COUNT(*) FROM Band b2 WHERE b2.id < Band.id)"
+    )
+    conn.commit()
+
+
 def _migrate_setlist_notes(conn: sqlite3.Connection) -> None:
     """Add notes column to Setlist table if missing."""
     cur = conn.execute("PRAGMA table_info(Setlist)")
@@ -425,6 +438,23 @@ def _migrate_band_layout_export_column_order(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _migrate_band_layout_sort_order(conn: sqlite3.Connection) -> None:
+    """Add sort_order column to BandLayout if missing; backfill from id order."""
+    cur = conn.execute("PRAGMA table_info(BandLayout)")
+    columns = [row[1] for row in cur.fetchall()]
+    if "sort_order" in columns:
+        return
+    conn.execute("ALTER TABLE BandLayout ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+    # Backfill: assign 0, 1, 2... by id order per band
+    conn.execute(
+        """UPDATE BandLayout SET sort_order = (
+            SELECT COUNT(*) FROM BandLayout bl2
+            WHERE bl2.band_id = BandLayout.band_id AND bl2.id < BandLayout.id
+        )"""
+    )
+    conn.commit()
+
+
 def _migrate_player_level_class(conn: sqlite3.Connection) -> None:
     """Add level and class columns to Player table if missing."""
     cur = conn.execute("PRAGMA table_info(Player)")
@@ -477,10 +507,12 @@ def init_database(db_path: Path | None = None) -> sqlite3.Connection:
     _migrate_status_drop_is_active(conn)
     _migrate_folder_rule_include_in_export(conn)
     _migrate_band_notes(conn)
+    _migrate_band_sort_order(conn)
     _migrate_setlist_notes(conn)
     _migrate_setlist_date_time_target(conn)
     _migrate_setlist_folders(conn)
     _migrate_band_layout_export_column_order(conn)
+    _migrate_band_layout_sort_order(conn)
     _migrate_player_level_class(conn)
     _migrate_song_last_layout(conn)
     seed_defaults(conn)

@@ -1062,8 +1062,8 @@ class SetlistsView(QWidget):
         self.band_layout_combo.blockSignals(True)
         self.band_layout_combo.clear()
         self.band_layout_combo.addItem("(none — draft)", None)
-        for layout_id, layout_name, band_name in list_all_band_layouts(self.app_state.conn):
-            self.band_layout_combo.addItem(f"{band_name} — {layout_name}", layout_id)
+        for layout_id, _layout_name, band_name in list_all_band_layouts(self.app_state.conn):
+            self.band_layout_combo.addItem(band_name, layout_id)
         self.band_layout_combo.blockSignals(False)
 
     def _on_band_layout_combo_changed(self) -> None:
