@@ -1,5 +1,7 @@
 """
 ABC to MIDI conversion. Port of AbcToMidi.java.
+Source: https://github.com/NikolaiVChr/maestro (fork of digero/maestro).
+Port © 2026 Willow Aevoreth Rowan.
 """
 
 from __future__ import annotations

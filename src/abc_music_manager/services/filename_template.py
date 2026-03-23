@@ -1,6 +1,7 @@
 """
 Format ABC filenames from a pattern string with variables.
 Mimics Maestro's SetFilenameTemplate for set export.
+Inspired by: https://github.com/NikolaiVChr/maestro.
 """
 
 from __future__ import annotations

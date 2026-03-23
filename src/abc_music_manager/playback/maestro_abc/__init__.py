@@ -1,6 +1,7 @@
 """
 Maestro ABC-to-MIDI port: self-contained ABC conversion engine.
 Handles complex time signatures that music21 cannot.
+Source: https://github.com/NikolaiVChr/maestro (fork of digero/maestro).
 """
 
 from .abc_to_midi import abc_to_midi as maestro_abc_to_midi

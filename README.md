@@ -3,7 +3,7 @@
 ABC Music Manager is a local-first desktop application designed specifically for player musicians in *The Lord of the Rings Online* who manage and perform ABC music libraries. It helps you organize a large ABC library, build and run event setlists, model band layouts, preview multi-part playback, and generate `SongbookData.plugindata` for selected accounts.
 
 > **Status:** Early design / in active development. The UI is being rebuilt with **PySide6 (Qt)**; previous Flet code is in `/old/` (see DECISIONS 026).  
-> **License:** TBD (to be chosen by project owner — DECISIONS 024)
+> **License:** MIT (see [LICENSE](LICENSE))
 > **Disclaimer:** Not affiliated with or endorsed by the creators/publishers of *The Lord of the Rings Online*.
 
 ---
@@ -130,3 +130,8 @@ Contribution guidelines, issue templates, and dev setup instructions will be add
 ABC Music Manager is a community tool created for use with *The Lord of the Rings Online* player music system.
 It is **not affiliated with, endorsed by, or sponsored by** the game's publisher/developer or the owners of any related trademarks.
 All trademarks are the property of their respective owners.
+
+**Open source and third-party components:**
+- **Qt / PySide6** — LGPL-3.0 (see [NOTICE](NOTICE))
+- **Maestro** — ABC-to-MIDI logic, LOTRO instrument mappings, and compatibility features ported from [NikolaiVChr/maestro](https://github.com/NikolaiVChr/maestro). Original by [digero](https://github.com/digero/maestro) (MIT License).
+- **LotroInstruments.sf2** — Optional soundfont from [NikolaiVChr/mver](https://github.com/NikolaiVChr/mver) when user does not configure their own.

@@ -184,7 +184,7 @@
 
 ## 024 — License and Maestro tag exact patterns
 
-- **License:** Left as **TBD**; to be chosen by the project owner. README continues to list "License: TBD" until a license is selected.
+- **License:** **MIT** (Copyright (c) 2026 Willow Aevoreth Rowan). See [LICENSE](LICENSE).
 - **Maestro tag exact patterns:** Tags are `%%tag-name` (two percent signs, tag name with hyphen, optional space, then value). Tag names are **case-sensitive** (e.g. %%song-title). Leading/trailing whitespace on the value is trimmed. Exact patterns are specified in docs/FILE_FORMATS.md.
 
 ## 025 — Theme definition
@@ -203,7 +203,7 @@
 ---
 
 ## Resolved open decisions
-Previously open items have been resolved in ADRs 015–026 above. The only remaining TBD is **License** (024), to be chosen by the project owner.
+Previously open items have been resolved in ADRs 015–027 above, including **License** (024): MIT.
 
 ---
 

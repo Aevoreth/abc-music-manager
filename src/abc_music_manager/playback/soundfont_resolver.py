@@ -1,6 +1,7 @@
 """
 Resolve LotroInstruments.sf2 path: user config, MaestroCommon, download.
-Based on Maestro SoundFontDownloader (java24 branch).
+Based on Maestro SoundFontDownloader.
+Source: https://github.com/NikolaiVChr/maestro. SF2 from NikolaiVChr/mver.
 """
 
 from __future__ import annotations

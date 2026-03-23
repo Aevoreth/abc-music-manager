@@ -1,5 +1,5 @@
 """
-Main window: menu bar, navigation (Library | Setlists | Bands | Set Playback | Settings), stacked pages.
+Main window: menu bar, navigation (Library | Setlists | Bands | Settings), stacked pages.
 """
 
 from __future__ import annotations
@@ -81,7 +81,8 @@ class PlaceholderPage(QWidget):
 class MainWindow(QMainWindow):
     """Main application window with navigation and stacked content."""
 
-    PAGES = ["Library", "Setlists", "Bands", "Set Playback", "Settings"]
+    # Set Playback temporarily disabled (half-baked, not functional yet)
+    PAGES = ["Library", "Setlists", "Bands", "Settings"]
 
     def __init__(self, app_state: AppState) -> None:
         super().__init__()
@@ -117,7 +118,7 @@ class MainWindow(QMainWindow):
         from .library_view import LibraryView
         from .setlists_view import SetlistsView
         from .bands_view import BandsView
-        from .set_playback_view import SetPlaybackView
+        # from .set_playback_view import SetPlaybackView  # disabled
         from .settings_view import SettingsView
         self.library_view = LibraryView(app_state, self.playback_state)
         self.setlists_view = SetlistsView(app_state, self.playback_state)
@@ -125,7 +126,7 @@ class MainWindow(QMainWindow):
         self.stacked.addWidget(self.library_view)
         self.stacked.addWidget(self.setlists_view)
         self.stacked.addWidget(self.bands_view)
-        self.stacked.addWidget(SetPlaybackView(app_state, self.playback_state))
+        # self.stacked.addWidget(SetPlaybackView(app_state, self.playback_state))  # disabled
         self.stacked.addWidget(SettingsView(app_state, self.playback_state))
         self.library_view.navigateToSetlist.connect(self._on_navigate_to_setlist)
         self._playback_toolbar.playlistExportedAsSet.connect(self._on_navigate_to_setlist)
@@ -401,8 +402,16 @@ class MainWindow(QMainWindow):
         )
 
     def _on_about(self) -> None:
-        QMessageBox.about(
-            self,
-            "About ABC Music Manager",
-            "ABC Music Manager\n\nLocal-first desktop app for ABC music library and setlist management.",
+        msg = (
+            "ABC Music Manager\n\n"
+            "Local-first desktop app for ABC music library and setlist management.\n\n"
+            "Copyright (c) 2026 Willow Aevoreth Rowan\n"
+            "Licensed under the MIT License. See LICENSE.\n\n"
+            "Third-party components:\n"
+            "• Qt / PySide6 — LGPL-3.0 (The Qt Company Ltd.)\n"
+            "• Maestro — ABC-to-MIDI, instrument mappings (digero, NikolaiVChr); MIT\n"
+            "• LotroInstruments.sf2 — Optional soundfont (NikolaiVChr/mver)\n"
+            "• superqt, Send2Trash, tinysoundfont, PyAudio, mido — permissive licenses\n\n"
+            "See NOTICE for full license and attribution details."
         )
+        QMessageBox.about(self, "About ABC Music Manager", msg)

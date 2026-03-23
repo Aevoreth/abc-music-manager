@@ -7,7 +7,10 @@ a = Analysis(
     ['main.py'],
     pathex=['src'],
     binaries=[],
-    datas=[],
+    datas=[
+        ('NOTICE', '.'),
+        ('licenses/LGPL-3.0.txt', 'licenses'),
+    ],
     hiddenimports=['tinysoundfont', 'pyaudio'],
     hookspath=[],
     hooksconfig={},

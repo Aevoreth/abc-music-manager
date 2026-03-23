@@ -1,6 +1,7 @@
 """
 Maestro-style pan: instrument-based offsets + part-title keywords (left/right/center).
 From PanGenerator.java.
+Source: https://github.com/NikolaiVChr/maestro (fork of digero/maestro).
 """
 
 from __future__ import annotations

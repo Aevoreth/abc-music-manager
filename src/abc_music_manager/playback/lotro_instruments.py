@@ -1,6 +1,7 @@
 """
 Map LOTRO instrument names (%%part-name, %%made-for) to MIDI program numbers.
 Based on Maestro LotroInstrument and MidiInstrument enums.
+Source: https://github.com/NikolaiVChr/maestro (fork of digero/maestro).
 """
 
 from __future__ import annotations

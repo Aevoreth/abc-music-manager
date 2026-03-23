@@ -1,0 +1,38 @@
+ABC Music Manager
+Copyright (c) 2026 Willow Aevoreth Rowan
+Licensed under the MIT License. See LICENSE.
+
+-----------------------------------------------------------------------------
+This software uses the following open-source components:
+-----------------------------------------------------------------------------
+
+PySide6 (Qt for Python) and Qt
+  Copyright (C) The Qt Company Ltd.
+  Licensed under the GNU Lesser General Public License v3.0 (LGPL-3.0).
+  See licenses/LGPL-3.0.txt or https://www.gnu.org/licenses/lgpl-3.0.html
+
+  To obtain the source code for Qt and PySide6 used in this application:
+    Qt: https://code.qt.io/cgit/qt/qt5.git/
+    PySide6: https://code.qt.io/cgit/pyside/pyside-setup.git/
+    Or: https://pypi.org/project/PySide6/
+
+-----------------------------------------------------------------------------
+
+Maestro
+  ABC-to-MIDI logic, LOTRO instrument mappings, pan behavior, and soundfont
+  lookup are ported from Maestro (LOTRO ABC transcription tool).
+  Original: https://github.com/digero/maestro (digero)
+  Port source: https://github.com/NikolaiVChr/maestro (NikolaiVChr)
+  Licensed under the MIT License.
+
+-----------------------------------------------------------------------------
+
+LotroInstruments.sf2
+  Optional soundfont used when the user does not configure their own.
+  Source: https://github.com/NikolaiVChr/mver (NikolaiVChr)
+
+-----------------------------------------------------------------------------
+
+Other runtime dependencies (permissive licenses):
+  superqt (BSD-3-Clause), Send2Trash (BSD-3-Clause), tinysoundfont (MIT),
+  PyAudio (MIT), mido (MIT)
