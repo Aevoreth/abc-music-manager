@@ -1,7 +1,10 @@
 # -*- mode: python ; coding: utf-8 -*-
 # ABC Music Manager — PyInstaller spec for bundling with TinySoundFont and PyAudio.
 
+import os
 block_cipher = None
+docs_datas = [(os.path.join('docs', f), 'docs') for f in os.listdir('docs')
+              if os.path.isfile(os.path.join('docs', f))]
 
 a = Analysis(
     ['main.py'],
@@ -11,9 +14,12 @@ a = Analysis(
         ('NOTICE', '.'),
         ('README.md', '.'),  # For Help > User Guide when frozen
         ('LICENSE', '.'),
-        ('docs/DEVELOPER.md', 'docs'),
+        ('PROJECT_BRIEF.md', '.'),
+        ('REQUIREMENTS.md', '.'),
+        ('DATA_MODEL.md', '.'),
+        ('DECISIONS.md', '.'),
         ('licenses/LGPL-3.0.txt', 'licenses'),
-    ],
+    ] + docs_datas,
     hiddenimports=['tinysoundfont', 'pyaudio'],
     hookspath=[],
     hooksconfig={},

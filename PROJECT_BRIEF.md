@@ -43,9 +43,5 @@ The app is local-first, indexes ABC files from user-selected folders, and provid
 - Cross-platform (Windows/Mac/Linux)
 - Portable or installable distribution
 
-## Open Questions / Decisions Needed
-See DECISIONS.md for "Open decisions" and "Decisions that need to be made". Key open items include (many design choices are already in DECISIONS.md):
-- Client connection model for Set Playback mode (LAN only? localhost? websockets? — DECISIONS 015)
-- ABC parsing expectations (what metadata is read from files vs. derived vs. user-entered)
-- Source of truth rules when ABC file changes on disk (merge strategy vs. overwrite)
-- Compatibility scope: which games/tools/formats are explicitly supported vs “best effort”
+## Design Decisions
+Architecture and design decisions are documented in [DECISIONS.md](DECISIONS.md) (ADRs 001–027). Key areas covered include: Set Playback protocol (015), compatibility matrix (016), ABC parsing and storage rules (004–010), duplicate handling (011, 020), and UI framework (026). Remaining work is primarily implementation—see [docs/DEVELOPER.md](docs/DEVELOPER.md) for the roadmap.
