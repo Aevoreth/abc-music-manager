@@ -523,7 +523,7 @@ class SetlistSongsTable(QTableWidget):
         self.viewport().setAcceptDrops(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDragDropOverwriteMode(False)
-        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
         self.setDropIndicatorShown(True)
         self._drag_row: int = -1
 
@@ -541,7 +541,8 @@ class SetlistSongsTable(QTableWidget):
             mime = model_mime
         drag = QDrag(self)
         drag.setMimeData(mime)
-        drag.exec(Qt.DropAction.MoveAction)
+        # Use CopyAction so Qt does not remove source rows; we move them ourselves in dragMoveEvent.
+        drag.exec(Qt.DropAction.CopyAction)
         self._drag_row = -1
 
     def _move_row_visually(self, from_row: int, to_row: int) -> None:
@@ -560,7 +561,8 @@ class SetlistSongsTable(QTableWidget):
             to_row -= 1
         self.insertRow(to_row)
         for c, it in enumerate(items):
-            self.setItem(to_row, c, it)
+            if c != 6:
+                self.setItem(to_row, c, it)
         if w:
             self.setCellWidget(to_row, 6, w)
         self._drag_row = to_row
@@ -599,6 +601,7 @@ class SetlistSongsTable(QTableWidget):
             event.ignore()
             return
         event.acceptProposedAction()
+        event.setDropAction(Qt.DropAction.CopyAction)
         if self.rowReordered:
             QTimer.singleShot(0, self.rowReordered)
 
