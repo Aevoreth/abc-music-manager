@@ -36,7 +36,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QStackedWidget,
 )
-from PySide6.QtCore import Qt, QTime, QDateTime, QDate, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QRect, QSize, Signal, QTimer
+from PySide6.QtCore import Qt, QTime, QDateTime, QDate, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QRect, QSize, Signal, QTimer, QObject, QEvent
 from PySide6.QtCore import QByteArray
 from PySide6.QtGui import QColor, QAction, QPainter, QFont, QBrush, QPen, QIcon, QPixmap
 
@@ -96,6 +96,21 @@ def _status_chip_style(left_color: str, selected: bool) -> str:
 def _transcriber_chip_style(selected: bool) -> str:
     """Transcriber filter chip style (no per-item color)."""
     return _status_chip_style(COLOR_OUTLINE_VARIANT, selected)
+
+
+class _PopupHideFilter(QObject):
+    """Event filter for dropdown popups: on Hide, run callback (clear ref, set just-closed flag, etc)."""
+
+    def __init__(self, popup: QWidget, on_hidden: object, parent: QObject | None = None) -> None:  # noqa: ANN001
+        super().__init__(parent)
+        self._popup = popup
+        self._on_hidden = on_hidden
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if obj is self._popup and event.type() == QEvent.Type.Hide:
+            self._on_hidden()
+        return False
+
 
 # Last-played time-range options: (label, seconds_ago). "Never" = no upper bound (songs never played).
 def _last_played_time_options() -> list[tuple[str, Optional[int]]]:
@@ -931,8 +946,12 @@ class LibraryView(QWidget):
 
         self._selected_status_ids: list[int] = []
         self._status_popup: QWidget | None = None
+        self._status_just_closed: bool = False
+        self._status_just_closed_timer: QTimer | None = None
         self._selected_transcribers: list[str] = []
         self._transcriber_popup: QWidget | None = None
+        self._transcriber_just_closed: bool = False
+        self._transcriber_just_closed_timer: QTimer | None = None
         self._apply_default_filters()
         self._update_empty_state()
 
@@ -1174,10 +1193,22 @@ class LibraryView(QWidget):
             self.model.refresh()
 
     def _on_status_filter_clicked(self) -> None:
+        # #region agent log
+        _lp = Path(__file__).resolve().parents[3] / "debug-8e0fd8.log"
+        _d = {"popup_is_none": self._status_popup is None, "popup_visible": self._status_popup.isVisible() if self._status_popup else False, "status_just_closed": self._status_just_closed, "hypothesisId": "A"}
+        open(_lp, "a").write(json.dumps({"sessionId": "8e0fd8", "location": "library_view.py:_on_status_filter_clicked:entry", "message": "Status filter clicked", "data": _d, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}) + "\n")
+        # #endregion
+        if self._status_just_closed:
+            return  # Popup just closed (e.g. by click-outside); don't reopen
         if self._status_popup is not None:
-            self._status_popup.close()
-            self.status_btn.setChecked(False)
-            return
+            if self._status_popup.isVisible():
+                # #region agent log
+                open(_lp, "a").write(json.dumps({"sessionId": "8e0fd8", "location": "library_view.py:_on_status_filter_clicked:close_branch", "message": "Taking close branch", "data": {"hypothesisId": "A"}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}) + "\n")
+                # #endregion
+                self._status_popup.close()
+                self.status_btn.setChecked(False)
+                return
+            self._status_popup = None  # Stale: popup was hidden (e.g. click-outside) but not destroyed
 
         popup = QFrame(self, Qt.WindowType.Popup)
         popup.setObjectName("status_filter_popup")
@@ -1272,18 +1303,30 @@ class LibraryView(QWidget):
         layout.addWidget(scroll)
         update_chip_styles()
 
-        popup.move(self.status_btn.mapToGlobal(self.status_btn.rect().bottomLeft()))
-        popup.show()
-        self._status_popup = popup
-
-        def on_popup_destroyed() -> None:
+        def on_status_popup_hidden() -> None:
             self._status_popup = None
             try:
                 self.status_btn.setChecked(False)
             except RuntimeError:
                 pass
+            self._status_just_closed = True
+            if self._status_just_closed_timer is not None:
+                self._status_just_closed_timer.stop()
+            self._status_just_closed_timer = QTimer(self)
+            self._status_just_closed_timer.setSingleShot(True)
+            self._status_just_closed_timer.timeout.connect(lambda: setattr(self, "_status_just_closed", False))
+            self._status_just_closed_timer.start(300)
 
-        popup.destroyed.connect(on_popup_destroyed)
+        popup.installEventFilter(_PopupHideFilter(popup, on_status_popup_hidden, self))
+
+        popup.move(self.status_btn.mapToGlobal(self.status_btn.rect().bottomLeft()))
+        popup.show()
+        self._status_popup = popup
+        self._status_just_closed = False
+        # #region agent log
+        _lp2 = Path(__file__).resolve().parents[3] / "debug-8e0fd8.log"
+        open(_lp2, "a").write(json.dumps({"sessionId": "8e0fd8", "location": "library_view.py:_on_status_filter_clicked:create", "message": "Created and showed new popup", "data": {"hypothesisId": "A"}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}) + "\n")
+        # #endregion
 
     def _on_more_filters_toggled(self, checked: bool) -> None:
         self.more_filters_panel.setVisible(checked)
@@ -1563,10 +1606,14 @@ class LibraryView(QWidget):
         self._apply_filters()
 
     def _on_transcriber_filter_clicked(self) -> None:
-        if self._transcriber_popup is not None:
-            self._transcriber_popup.close()
-            self.transcriber_btn.setChecked(False)
+        if self._transcriber_just_closed:
             return
+        if self._transcriber_popup is not None:
+            if self._transcriber_popup.isVisible():
+                self._transcriber_popup.close()
+                self.transcriber_btn.setChecked(False)
+                return
+            self._transcriber_popup = None  # Stale: popup was hidden (e.g. click-outside) but not destroyed
 
         popup = QFrame(self, Qt.WindowType.Popup)
         popup.setObjectName("transcriber_filter_popup")
@@ -1647,18 +1694,26 @@ class LibraryView(QWidget):
         layout.addWidget(scroll)
         update_chip_styles()
 
-        popup.move(self.transcriber_btn.mapToGlobal(self.transcriber_btn.rect().bottomLeft()))
-        popup.show()
-        self._transcriber_popup = popup
-
-        def on_popup_destroyed() -> None:
+        def on_transcriber_popup_hidden() -> None:
             self._transcriber_popup = None
             try:
                 self.transcriber_btn.setChecked(False)
             except RuntimeError:
                 pass
+            self._transcriber_just_closed = True
+            if self._transcriber_just_closed_timer is not None:
+                self._transcriber_just_closed_timer.stop()
+            self._transcriber_just_closed_timer = QTimer(self)
+            self._transcriber_just_closed_timer.setSingleShot(True)
+            self._transcriber_just_closed_timer.timeout.connect(lambda: setattr(self, "_transcriber_just_closed", False))
+            self._transcriber_just_closed_timer.start(300)
 
-        popup.destroyed.connect(on_popup_destroyed)
+        popup.installEventFilter(_PopupHideFilter(popup, on_transcriber_popup_hidden, self))
+
+        popup.move(self.transcriber_btn.mapToGlobal(self.transcriber_btn.rect().bottomLeft()))
+        popup.show()
+        self._transcriber_popup = popup
+        self._transcriber_just_closed = False
 
     def _apply_filters(self) -> None:
         title = self.title_composer_edit.text()
