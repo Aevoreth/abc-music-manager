@@ -83,7 +83,7 @@ ABC Music Manager is a local-first desktop application designed specifically for
 2. **Install dependencies:** `pip install -r requirements.txt` (PySide6 and other deps)
 3. **Run from repo root:** `python main.py`
 
-The database is created automatically on first run at `~/.abc_music_manager/abc_music_manager.sqlite` (or `$HOME/.abc_music_manager` on macOS/Linux). Override with the `ABC_MUSIC_MANAGER_DATA` environment variable to use a custom data directory. Run unit tests with `pytest tests/ -v`.
+The database is created automatically on first run at `~/.abc_music_manager/abc_music_manager.sqlite` (or `$HOME/.abc_music_manager` on macOS/Linux). Schema and migration details: [SCHEMA.md](../SCHEMA.md). Override with the `ABC_MUSIC_MANAGER_DATA` environment variable to use a custom data directory. Run unit tests with `pytest tests/ -v`.
 
 ### Building (Distribution)
 
@@ -103,6 +103,7 @@ The spec bundles TinySoundFont and PyAudio for MIDI playback. The soundfont is u
 - [PROJECT_BRIEF.md](../PROJECT_BRIEF.md) — product goals, scope, modules
 - [REQUIREMENTS.md](../REQUIREMENTS.md) — user stories + acceptance criteria
 - [DATA_MODEL.md](../DATA_MODEL.md) — entities/relationships
+- [SCHEMA.md](../SCHEMA.md) — SQLite schema, tables, and migration system
 - [DECISIONS.md](../DECISIONS.md) — major architectural decisions (ADRs 001–027; previously open items resolved)
 - [FILE_FORMATS.md](FILE_FORMATS.md) — Maestro tags, ABCP playlist spec
 - [SKINS.md](SKINS.md) — skinpack behavior and theme overrides

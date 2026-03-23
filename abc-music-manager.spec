@@ -18,6 +18,7 @@ a = Analysis(
         ('REQUIREMENTS.md', '.'),
         ('DATA_MODEL.md', '.'),
         ('DECISIONS.md', '.'),
+        ('SCHEMA.md', '.'),
         ('licenses/LGPL-3.0.txt', 'licenses'),
     ] + docs_datas,
     hiddenimports=['tinysoundfont', 'pyaudio'],
