@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QScrollArea,
     QApplication,
+    QStackedWidget,
 )
 from PySide6.QtCore import Qt, QTime, QDateTime, QDate, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QRect, QSize, Signal, QTimer
 from PySide6.QtCore import QByteArray
@@ -59,6 +60,7 @@ from ..db.song_layout_repo import list_song_layouts_for_song, list_song_layouts_
 from ..db.band_repo import get_band_layout_display_name, list_all_band_layouts
 from ..db.play_log import log_play, log_play_at
 from .play_history_dialog import open_play_history_dialog
+from .readme_viewer_dialog import open_readme_viewer
 from .song_layout_editor_dialog import SongLayoutEditorDialog
 from ..db.song_repo import update_song_app_metadata
 from .theme import (
@@ -68,6 +70,7 @@ from .theme import (
     COLOR_OUTLINE,
     COLOR_OUTLINE_VARIANT,
     COLOR_PRIMARY,
+    COLOR_TEXT_SECONDARY,
     COLOR_TEXT_HEADER,
     COLOR_TEXT_SECONDARY,
     COLOR_ON_SURFACE,
@@ -916,13 +919,59 @@ class LibraryView(QWidget):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._on_context_menu)
         self.table.viewport().installEventFilter(self)
-        layout.addWidget(self.table)
+
+        # Empty state shown when library has no songs
+        self._empty_state = self._build_empty_state_widget()
+        self._library_stack = QStackedWidget()
+        self._library_stack.addWidget(self.table)
+        self._library_stack.addWidget(self._empty_state)
+        layout.addWidget(self._library_stack)
+
+        self.model.modelReset.connect(self._update_empty_state)
 
         self._selected_status_ids: list[int] = []
         self._status_popup: QWidget | None = None
         self._selected_transcribers: list[str] = []
         self._transcriber_popup: QWidget | None = None
         self._apply_default_filters()
+        self._update_empty_state()
+
+    def _build_empty_state_widget(self) -> QWidget:
+        """Build the empty-library message with 'Open User Guide' button."""
+        container = QFrame()
+        container.setObjectName("library_empty_state")
+        layout = QVBoxLayout(container)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setSpacing(16)
+
+        msg = QLabel(
+            "Your library is empty.\n\n"
+            "To get started:\n"
+            "• Set your LOTRO folder in Settings > Folder Rules\n"
+            "• Run File > Scan Library to index your ABC files\n\n"
+            "See the User Guide for the full setup guide."
+        )
+        msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        msg.setWordWrap(True)
+        msg.setObjectName("library_empty_message")
+        layout.addWidget(msg, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        open_guide_btn = QPushButton("Open User Guide")
+        open_guide_btn.clicked.connect(lambda: open_readme_viewer(self))
+        open_guide_btn.setObjectName("library_empty_open_guide_btn")
+        layout.addWidget(open_guide_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        hint = QLabel("If you've applied filters, try Clear Filters.")
+        hint.setObjectName("library_empty_hint")
+        hint.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; font-size: 0.9em;")
+        layout.addWidget(hint, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        return container
+
+    def _update_empty_state(self) -> None:
+        """Show empty state when no songs are visible, otherwise show the table."""
+        empty = self.proxy.rowCount() == 0
+        self._library_stack.setCurrentIndex(1 if empty else 0)
 
     # Sortable columns: Title, Composer, Duration, Last played, Parts, Rating, Transcriber
     _SORTABLE_COLUMNS = (1, 2, 3, 4, 6, 7, 10)
