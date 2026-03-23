@@ -25,6 +25,9 @@ from ..services.app_state import AppState
 from ..services import preferences
 from ..services.playback_state import PlaybackState, PlaylistEntry
 from ..services.preferences import (
+    DEFAULT_SPLITTER_STATE,
+    DEFAULT_WINDOW_HEIGHT,
+    DEFAULT_WINDOW_WIDTH,
     get_splitter_state,
     set_splitter_state,
     set_bands_splitter_state,
@@ -42,8 +45,8 @@ def _restore_window_geometry(window: QMainWindow) -> None:
         # Human-readable format: {x, y, width, height, maximized}
         x = saved.get("x", 0)
         y = saved.get("y", 0)
-        w = saved.get("width", 1000)
-        h = saved.get("height", 700)
+        w = saved.get("width", DEFAULT_WINDOW_WIDTH)
+        h = saved.get("height", DEFAULT_WINDOW_HEIGHT)
         window.setGeometry(QRect(x, y, w, h))
         if saved.get("maximized"):
             window.setWindowState(window.windowState() | Qt.WindowState.WindowMaximized)
@@ -100,7 +103,7 @@ class MainWindow(QMainWindow):
         self.playback_state.state_changed.connect(self._update_window_title)
         self._update_window_title()
         self.setMinimumSize(900, 600)
-        self.resize(1000, 700)
+        self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         _restore_window_geometry(self)
 
         self._build_menu_bar()
@@ -215,7 +218,11 @@ class MainWindow(QMainWindow):
                     return
             total = self._splitter.width()
             handle_w = self._splitter.handleWidth()
-            nav_w = min(self._nav_preferred_width, max(self.nav_list.minimumWidth(), total - handle_w - 100))
+            left_default, right_default = DEFAULT_SPLITTER_STATE[0], DEFAULT_SPLITTER_STATE[1]
+            total_default = left_default + right_default
+            ratio = left_default / total_default if total_default > 0 else 0.08
+            nav_w = int(total * ratio)
+            nav_w = max(self.nav_list.minimumWidth(), min(self.nav_list.maximumWidth(), nav_w))
             self._splitter.setSizes([nav_w, total - nav_w - handle_w])
 
     def closeEvent(self, event) -> None:

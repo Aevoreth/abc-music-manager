@@ -97,6 +97,21 @@ def set_base_font_size(size: int) -> None:
     save_preferences(prefs)
 
 
+# Default geometry when no preferences saved (e.g. fresh install or after reset)
+DEFAULT_WINDOW_WIDTH = 1583
+DEFAULT_WINDOW_HEIGHT = 903
+DEFAULT_SPLITTER_STATE = [141, 1756]
+DEFAULT_SETLISTS_SPLITTER_STATE = [300, 1440]
+DEFAULT_SETLISTS_EDITOR_SPLITTER_STATE = [400, 425]
+DEFAULT_SETLISTS_TOP_SPLIT_STATE = [470, 950]
+DEFAULT_SETLISTS_SONGS_TABLE_HEADER_STATE = [28, 24, 100, 100, 100, 100, 100]
+DEFAULT_LIBRARY_TABLE_HEADER_STATE: dict[str, Any] = {
+    "section_sizes": [80, 230, 230, 55, 80, 150, 50, 80, 40, 120, 110, 130],
+    "sort_column": 1,
+    "sort_order": "ascending",
+}
+
+
 def get_window_geometry() -> dict[str, Any] | str | None:
     """
     Saved main window geometry. Returns dict with x, y, width, height, maximized (human-readable),

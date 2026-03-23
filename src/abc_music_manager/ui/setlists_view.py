@@ -42,6 +42,10 @@ from PySide6.QtGui import QColor, QFont, QDrag, QMouseEvent, QPixmap, QPainter
 
 from ..services.app_state import AppState
 from ..services.preferences import (
+    DEFAULT_SETLISTS_EDITOR_SPLITTER_STATE,
+    DEFAULT_SETLISTS_SONGS_TABLE_HEADER_STATE,
+    DEFAULT_SETLISTS_SPLITTER_STATE,
+    DEFAULT_SETLISTS_TOP_SPLIT_STATE,
     get_setlists_splitter_state,
     get_setlists_editor_splitter_state,
     get_setlists_top_split_state,
@@ -1889,14 +1893,15 @@ class SetlistsView(QWidget):
                     left_now = max(120, min(320, left_now))  # Clamp to tree min/max
                     self.setlists_splitter.setSizes([left_now, total - left_now])
                 else:
-                    # Saved state invalid (left too small or corrupt); use sensible default
-                    left_default = min(200, total - 120)
-                    left_default = max(120, min(320, left_default))
-                    self.setlists_splitter.setSizes([left_default, total - left_default])
+                    left_d, right_d = DEFAULT_SETLISTS_SPLITTER_STATE[0], DEFAULT_SETLISTS_SPLITTER_STATE[1]
+                    ratio = left_d / (left_d + right_d) if (left_d + right_d) > 0 else 0.17
+                    left_now = max(120, min(320, int(total * ratio)))
+                    self.setlists_splitter.setSizes([left_now, total - left_now])
             else:
-                left_default = min(200, total - 120)
-                left_default = max(120, min(320, left_default))
-                self.setlists_splitter.setSizes([left_default, total - left_default])
+                left_d, right_d = DEFAULT_SETLISTS_SPLITTER_STATE[0], DEFAULT_SETLISTS_SPLITTER_STATE[1]
+                ratio = left_d / (left_d + right_d) if (left_d + right_d) > 0 else 0.17
+                left_now = max(120, min(320, int(total * ratio)))
+                self.setlists_splitter.setSizes([left_now, total - left_now])
         if not self._editor_splitter_restored:
             self._editor_splitter_restored = True
             total_ed = self.editor_splitter.height()
@@ -1908,8 +1913,10 @@ class SetlistsView(QWidget):
                     top_now = max(80, min(total_ed - 80, top_now))
                     self.editor_splitter.setSizes([top_now, total_ed - top_now])
                 else:
-                    top_default = max(80, min(total_ed - 80, int(total_ed * 0.4)))
-                    self.editor_splitter.setSizes([top_default, total_ed - top_default])
+                    top_d, bot_d = DEFAULT_SETLISTS_EDITOR_SPLITTER_STATE[0], DEFAULT_SETLISTS_EDITOR_SPLITTER_STATE[1]
+                    ratio_top = top_d / (top_d + bot_d) if (top_d + bot_d) > 0 else 0.48
+                    top_now = max(80, min(total_ed - 80, int(total_ed * ratio_top)))
+                    self.editor_splitter.setSizes([top_now, total_ed - top_now])
         if not self._top_split_restored:
             self._top_split_restored = True
             total_top = self.top_split.width()
@@ -1921,16 +1928,18 @@ class SetlistsView(QWidget):
                     left_now = max(80, min(total_top - 80, left_now))
                     self.top_split.setSizes([left_now, total_top - left_now])
                 else:
-                    left_default = max(80, min(total_top - 80, int(total_top * 0.35)))
-                    self.top_split.setSizes([left_default, total_top - left_default])
+                    left_d, right_d = DEFAULT_SETLISTS_TOP_SPLIT_STATE[0], DEFAULT_SETLISTS_TOP_SPLIT_STATE[1]
+                    ratio_left = left_d / (left_d + right_d) if (left_d + right_d) > 0 else 0.33
+                    left_now = max(80, min(total_top - 80, int(total_top * ratio_left)))
+                    self.top_split.setSizes([left_now, total_top - left_now])
         if not self._songs_table_header_restored:
             self._songs_table_header_restored = True
             saved = get_setlists_songs_table_header_state()
-            if saved:
-                hh = self.songs_table.horizontalHeader()
-                for i, w in enumerate(saved):
-                    if i < hh.count():
-                        hh.resizeSection(i, w)
+            hh = self.songs_table.horizontalHeader()
+            widths = saved if saved else DEFAULT_SETLISTS_SONGS_TABLE_HEADER_STATE
+            for i, w in enumerate(widths):
+                if i < hh.count():
+                    hh.resizeSection(i, w)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

@@ -42,6 +42,8 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from ..services.app_state import AppState
 from ..services.playback_state import PlaybackState
 from ..services.preferences import (
+    DEFAULT_WINDOW_HEIGHT,
+    DEFAULT_WINDOW_WIDTH,
     get_default_status_id,
     set_default_status_id,
     get_base_font_size,
@@ -490,7 +492,7 @@ class SettingsView(QWidget):
         if main and main.isWidgetType():
             from PySide6.QtCore import Qt, QRect
             main.setWindowState(main.windowState() & ~Qt.WindowState.WindowMaximized)
-            main.setGeometry(QRect(100, 100, 1000, 700))
+            main.setGeometry(QRect(100, 100, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT))
         QMessageBox.information(
             self,
             "Window geometry reset",

@@ -42,7 +42,10 @@ from PySide6.QtGui import QColor, QAction, QPainter, QFont, QBrush, QPen, QIcon,
 from ..services.app_state import AppState
 from ..services.playback_state import PlaybackState, PlaylistEntry
 from ..db.library_query import get_primary_file_path_for_song
-from ..services.preferences import resolve_music_path
+from ..services.preferences import (
+    DEFAULT_LIBRARY_TABLE_HEADER_STATE,
+    resolve_music_path,
+)
 from ..services.preferences import get_default_filters, get_library_table_header_state, set_library_table_header_state
 from ..db import list_library_songs, list_unique_transcribers, get_status_list, get_song_for_detail, LibrarySongRow
 from ..db.status_repo import list_statuses
@@ -836,25 +839,16 @@ class LibraryView(QWidget):
         self._header_save_timer.setSingleShot(True)
         self._header_save_timer.timeout.connect(self._save_library_table_header_state)
         hh.setMinimumSectionSize(20)
-        # Column 0: Play and add-to-queue buttons — resizable, default fits both
-        hh.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-        hh.resizeSection(0, 68)
-        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)
-        hh.resizeSection(1, 280)
-        # Column 5: Play/Set/History buttons — explicit width (model has no text so ResizeToContents would collapse it)
-        hh.setSectionResizeMode(5, QHeaderView.ResizeMode.Interactive)
-        hh.resizeSection(5, 140)  # Wide enough for ▶ + Set… + History
-        # Columns 6 (Parts), 7 (Rating), 8 (Set) user-resizable; 10 (Transcriber), 11 (Actions) user-resizable
-        hh.setSectionResizeMode(6, QHeaderView.ResizeMode.Interactive)
-        hh.resizeSection(6, 52)
-        hh.setSectionResizeMode(7, QHeaderView.ResizeMode.Interactive)
-        hh.resizeSection(7, 90)
-        hh.setSectionResizeMode(8, QHeaderView.ResizeMode.Interactive)
-        hh.resizeSection(8, 44)
-        hh.setSectionResizeMode(10, QHeaderView.ResizeMode.Interactive)
-        hh.resizeSection(10, 120)
-        hh.setSectionResizeMode(11, QHeaderView.ResizeMode.Interactive)
-        hh.resizeSection(11, 130)
+        default_sizes = DEFAULT_LIBRARY_TABLE_HEADER_STATE.get("section_sizes")
+        if isinstance(default_sizes, list):
+            for i, w in enumerate(default_sizes):
+                if i < hh.count() and isinstance(w, (int, float)):
+                    hh.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
+                    hh.resizeSection(i, int(w))
+        else:
+            # Fallback if default format changes
+            for i in range(hh.count()):
+                hh.setSectionResizeMode(i, QHeaderView.ResizeMode.Interactive)
         hh.setSectionsClickable(True)
         hh.setSortIndicatorShown(True)
         hh.sectionClicked.connect(self._on_header_clicked)
@@ -900,6 +894,17 @@ class LibraryView(QWidget):
                         self._sort_column = sc
                         self._sort_order = so
                         self.proxy.sort(self._sort_column, self._sort_order)
+        else:
+            # No saved state: use default sort from DEFAULT_LIBRARY_TABLE_HEADER_STATE
+            sc = DEFAULT_LIBRARY_TABLE_HEADER_STATE.get("sort_column", 1)
+            so_str = DEFAULT_LIBRARY_TABLE_HEADER_STATE.get("sort_order", "ascending")
+            if isinstance(sc, int) and 0 <= sc < len(LibraryTableModel.COLUMNS):
+                self._sort_column = sc
+                self._sort_order = (
+                    Qt.SortOrder.DescendingOrder if so_str == "descending" else Qt.SortOrder.AscendingOrder
+                )
+                hh.setSortIndicator(self._sort_column, self._sort_order)
+                self.proxy.sort(self._sort_column, self._sort_order)
         # Row height: 2 lines of text + padding
         fm = self.table.fontMetrics()
         line_h = fm.lineSpacing()
