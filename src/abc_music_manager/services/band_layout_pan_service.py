@@ -4,7 +4,6 @@ Band layout pan: compute part_number -> pan from song layout + band layout.
 
 from __future__ import annotations
 
-import os
 import sqlite3
 from typing import Optional
 
@@ -58,13 +57,5 @@ def get_part_pan_map(
             result[part_num] = angle_based_pan_for_slot(
                 slot.x, slot.y, listener_x, listener_y
             )
-
-    if os.environ.get("ABC_PAN_DEBUG") == "1" and result:
-        import sys
-        print(
-            f"[pan] song_layout_id={song_layout_id} band_layout_id={band_layout_id} setlist_item_id={setlist_item_id} -> {result}",
-            file=sys.stderr,
-            flush=True,
-        )
 
     return result if result else None

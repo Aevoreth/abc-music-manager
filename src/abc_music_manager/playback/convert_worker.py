@@ -5,7 +5,6 @@ Standalone ABC-to-MIDI conversion for subprocess. Minimal imports to avoid loadi
 from __future__ import annotations
 
 import multiprocessing
-import os
 from pathlib import Path
 from typing import Optional
 
@@ -26,26 +25,10 @@ def run_conversion(
     stereo_mode: 'band_layout', 'maestro_user_pan', or 'maestro'. band_layout uses part_pan_map when provided.
     part_pan_map: part_number (1-based) -> pan (0-127) for band_layout mode.
     """
-    # #region agent log
-    try:
-        import json
-        cp = multiprocessing.current_process()
-        with open(Path.cwd() / "debug-58ac41.log", "a") as f:
-            f.write(json.dumps({"sessionId":"58ac41","location":"convert_worker.py:run_conversion","message":"Child process running conversion","data":{"pid":os.getpid(),"proc_name":cp.name},"hypothesisId":"A","timestamp":__import__("time").time()*1000})+'\n')
-    except Exception:
-        pass
-    # #endregion
     try:
         content = Path(file_path).read_text(encoding="utf-8", errors="replace")
         # abc_to_midi stereo: 100=full spread, 0=all center. UI: 0=full, 100=center
         pan_modifier = 100 - max(0, min(100, stereo))
-        if __debug__ and os.environ.get("ABC_PAN_DEBUG") == "1":
-            import sys
-            print(
-                f"[pan] convert: UI_stereo={stereo} -> pan_modifier={pan_modifier} (100=full spread, 0=all center)",
-                file=sys.stderr,
-                flush=True,
-            )
         midi_bytes = abc_to_midi(
             content,
             file_path=file_path,

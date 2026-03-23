@@ -5,7 +5,6 @@ MIDI utilities: tempo scaling, PPQN normalization, pan extraction for playback.
 from __future__ import annotations
 
 import io
-import os
 from typing import Callable, Optional
 
 import mido
@@ -97,9 +96,6 @@ def extract_pan_per_channel(midi_bytes: bytes) -> dict[int, int]:
                         result[vch] = min(127, max(0, msg.value))
     except Exception:
         pass
-    if os.environ.get("ABC_PAN_DEBUG") == "1":
-        import sys
-        print(f"[pan] midi_player extracted pan per channel: {dict(sorted(result.items())) if result else '(none found)'}", file=sys.stderr, flush=True)
     return result
 
 
@@ -346,9 +342,5 @@ def prepare_midi_for_playback(
         events = []
         pan_map = {}
         duration_sec = 0.0
-
-    if os.environ.get("ABC_PAN_DEBUG") == "1":
-        import sys
-        print(f"[pan] prepared pan per channel: {dict(sorted(pan_map.items())) if pan_map else '(none)'}", file=sys.stderr, flush=True)
 
     return (final_bytes, events, pan_map, duration_sec)
