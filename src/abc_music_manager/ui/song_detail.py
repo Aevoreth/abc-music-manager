@@ -262,6 +262,13 @@ class SongDetailDialog(QDialog):
     def _build_abc_tab(self) -> QWidget:
         w = QWidget()
         layout = QVBoxLayout(w)
+        abc_warning = QLabel(
+            "⚠ Warning: Editing raw ABC data can render a song unplayable or cause other errors. "
+            "Only attempt this if you know what you are doing."
+        )
+        abc_warning.setWordWrap(True)
+        abc_warning.setStyleSheet("color: #ff8080; background-color: #200000; padding: 8px; border-radius: 4px;")
+        layout.addWidget(abc_warning)
         self.abc_edit = QPlainTextEdit()
         self.abc_edit.setPlaceholderText("No primary file for this song, or file not found.")
         layout.addWidget(self.abc_edit)
@@ -280,6 +287,7 @@ class SongDetailDialog(QDialog):
         data = get_song_for_detail(self.app_state.conn, self.song_id)
         if not data:
             self.title_label.setText("(not found)")
+            self.setWindowTitle("Song detail — (not found)")
             self._parts_json = "[]"
             self._layouts_list = []
             existing_band_layout_ids = set()
@@ -297,7 +305,12 @@ class SongDetailDialog(QDialog):
         self.transcriber_label.setText(data.get("transcriber") or "—")
         self.duration_label.setText(_format_duration(data.get("duration_seconds")))
         self.export_ts_label.setText(data.get("export_timestamp") or "—")
-        self.parts_label.setText(str(data.get("part_count", 0)))
+        part_count = data.get("part_count", 0)
+        self.parts_label.setText(str(part_count))
+
+        title = data.get("title") or "(untitled)"
+        composer = (data.get("composers") or "").strip() or "—"
+        self.setWindowTitle(f"Song detail — {title} — {composer} — {part_count} parts")
 
         parts = data.get("parts") or []
         self._parts_json = json.dumps(parts)
