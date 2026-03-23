@@ -2,6 +2,10 @@
 
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
+## Version 0.1.5b
+
+* Further addressing of Setlist item move crash
+
 ## Version 0.1.4b
 
 * Fixed a bug that was causing songs that were dragged and dropped in Setlist Editor to lose action column buttons

@@ -512,9 +512,10 @@ class SetlistTreeWidget(QTreeWidget):
 
 
 class SetlistSongsTable(QTableWidget):
-    """Table with vertical-only drag-drop. Rows move visually during drag."""
+    """Table with vertical-only drag-drop. Rows move visually during drag. Aligned with PlaylistTable pattern."""
 
     rowReordered = None  # Set by parent: callable() -> None, persists current order
+    createActionsWidget = None  # Set by parent: callable(setlist_item_id: int) -> QWidget
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -546,25 +547,25 @@ class SetlistSongsTable(QTableWidget):
         self._drag_row = -1
 
     def _move_row_visually(self, from_row: int, to_row: int) -> None:
-        """Move a row in the table, preserving the cell widget."""
+        """Move a row in the table. Recreate Actions widget to avoid Qt crash when moving cell widgets."""
         if from_row == to_row or from_row < 0 or to_row < 0:
             return
         n = self.rowCount()
         if from_row >= n or to_row > n:
             return
-        w = self.cellWidget(from_row, 6)
-        if w:
-            w.setParent(None)
         items = [self.takeItem(from_row, c) for c in range(self.columnCount())]
-        self.removeRow(from_row)
+        setlist_item_id = None
+        if items[2]:
+            setlist_item_id = items[2].data(Qt.ItemDataRole.UserRole)
+        self.removeRow(from_row)  # Destroys cell widget; we recreate it below
         if to_row > from_row:
             to_row -= 1
         self.insertRow(to_row)
         for c, it in enumerate(items):
             if c != 6:
                 self.setItem(to_row, c, it)
-        if w:
-            self.setCellWidget(to_row, 6, w)
+        if self.createActionsWidget and setlist_item_id is not None and isinstance(setlist_item_id, int):
+            self.setCellWidget(to_row, 6, self.createActionsWidget(setlist_item_id))
         self._drag_row = to_row
         self.selectRow(to_row)
 
@@ -602,6 +603,7 @@ class SetlistSongsTable(QTableWidget):
             return
         event.acceptProposedAction()
         event.setDropAction(Qt.DropAction.CopyAction)
+        # Defer persist so Qt can finish drag-drop cleanup first (avoids native crash with cell widgets).
         if self.rowReordered:
             QTimer.singleShot(0, self.rowReordered)
 
@@ -806,6 +808,7 @@ class SetlistsView(QWidget):
         self.songs_table.verticalHeader().setSectionsMovable(False)
         self.songs_table.verticalHeader().setSectionsClickable(True)
         self.songs_table.rowReordered = self._on_song_row_dragged
+        self.songs_table.createActionsWidget = self._create_actions_widget
         self.songs_table.itemSelectionChanged.connect(self._on_song_selection_changed)
         self.songs_table.horizontalHeader().sectionResized.connect(self._on_songs_header_section_resized)
         songs_scroll = QScrollArea()
@@ -1074,6 +1077,9 @@ class SetlistsView(QWidget):
         self._refresh_assignment_panel()
 
     def _refresh_songs_table(self, select_item_id: int | None = None) -> None:
+        if self._filling_songs:
+            QTimer.singleShot(0, lambda s=select_item_id: self._refresh_songs_table(select_item_id=s))
+            return
         if not self._selected_setlist_id:
             self.songs_table.setRowCount(0)
             self.songs_table.repaint()
@@ -1122,30 +1128,7 @@ class SetlistsView(QWidget):
             art.setFlags(art.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.songs_table.setItem(i, 5, art)
 
-            w = QWidget()
-            h = QHBoxLayout(w)
-            h.setContentsMargins(2, 0, 2, 0)
-            _btn_style = "padding: 0 4px; font-size: 11px; min-height: 0;"
-            fm = self.songs_table.fontMetrics()
-            up_btn = QPushButton("\u2191")
-            up_btn.setStyleSheet(_btn_style)
-            up_btn.setFixedWidth(fm.horizontalAdvance("\u2191") + 8)
-            up_btn.setFixedHeight(18)
-            up_btn.clicked.connect(lambda checked=False, iid=r.item.id: self._move_song(iid, -1))
-            down_btn = QPushButton("\u2193")
-            down_btn.setStyleSheet(_btn_style)
-            down_btn.setFixedWidth(fm.horizontalAdvance("\u2193") + 8)
-            down_btn.setFixedHeight(18)
-            down_btn.clicked.connect(lambda checked=False, iid=r.item.id: self._move_song(iid, 1))
-            rem_btn = QPushButton("Remove")
-            rem_btn.setStyleSheet(_btn_style)
-            rem_btn.setFixedWidth(fm.horizontalAdvance("Remove") + 12)
-            rem_btn.setFixedHeight(18)
-            rem_btn.clicked.connect(lambda checked=False, it=r.item: self._remove_item(it))
-            h.addWidget(up_btn)
-            h.addWidget(down_btn)
-            h.addWidget(rem_btn)
-            self.songs_table.setCellWidget(i, 6, w)
+            self.songs_table.setCellWidget(i, 6, self._create_actions_widget(r.item.id))
 
         self.songs_table.verticalHeader().blockSignals(False)
         self._filling_songs = False
@@ -1163,6 +1146,33 @@ class SetlistsView(QWidget):
             self.songs_table.repaint()
         self.export_btn.setEnabled(len(rows) > 0)
         self._update_duration_computed()
+
+    def _create_actions_widget(self, setlist_item_id: int) -> QWidget:
+        """Create Actions column widget (up/down/remove) for a setlist item. Used by table refresh and drag-move."""
+        w = QWidget()
+        h = QHBoxLayout(w)
+        h.setContentsMargins(2, 0, 2, 0)
+        _btn_style = "padding: 0 4px; font-size: 11px; min-height: 0;"
+        fm = self.songs_table.fontMetrics()
+        up_btn = QPushButton("\u2191")
+        up_btn.setStyleSheet(_btn_style)
+        up_btn.setFixedWidth(fm.horizontalAdvance("\u2191") + 8)
+        up_btn.setFixedHeight(18)
+        up_btn.clicked.connect(lambda checked=False, iid=setlist_item_id: self._move_song(iid, -1))
+        down_btn = QPushButton("\u2193")
+        down_btn.setStyleSheet(_btn_style)
+        down_btn.setFixedWidth(fm.horizontalAdvance("\u2193") + 8)
+        down_btn.setFixedHeight(18)
+        down_btn.clicked.connect(lambda checked=False, iid=setlist_item_id: self._move_song(iid, 1))
+        rem_btn = QPushButton("Remove")
+        rem_btn.setStyleSheet(_btn_style)
+        rem_btn.setFixedWidth(fm.horizontalAdvance("Remove") + 12)
+        rem_btn.setFixedHeight(18)
+        rem_btn.clicked.connect(lambda checked=False, iid=setlist_item_id: self._remove_item(iid))
+        h.addWidget(up_btn)
+        h.addWidget(down_btn)
+        h.addWidget(rem_btn)
+        return w
 
     def _update_duration_computed(self) -> None:
         """Update Set Duration, With Part Switching, and Remaining labels."""
@@ -1291,7 +1301,7 @@ class SetlistsView(QWidget):
         self.playback_state.replace_playlist(entries, start_index=start_index)
 
     def _on_song_row_dragged(self) -> None:
-        """Persist current table order after drag-drop (rows already moved visually)."""
+        """Persist current table order after drag-drop. Table is already correct visually; just save and update side panels."""
         if self._filling_songs or not self._selected_setlist_id:
             return
         ids: list[int] = []
@@ -1303,10 +1313,9 @@ class SetlistsView(QWidget):
                     ids.append(val)
         if len(ids) != self.songs_table.rowCount():
             return
-        cr = self.songs_table.currentRow()
-        sel_id = self.songs_table.item(cr, 2).data(Qt.ItemDataRole.UserRole) if cr >= 0 and self.songs_table.item(cr, 2) else None
         reorder_setlist_items(self.app_state.conn, self._selected_setlist_id, ids)
-        self._refresh_songs_table(select_item_id=sel_id)
+        self._refresh_assignment_panel()
+        self._update_duration_computed()
 
     def _on_song_selection_changed(self) -> None:
         self._refresh_assignment_panel()
@@ -1857,8 +1866,8 @@ class SetlistsView(QWidget):
         )
         self._refresh_songs_table(select_item_id=new_id)
 
-    def _remove_item(self, item) -> None:
-        remove_setlist_item(self.app_state.conn, item.id)
+    def _remove_item(self, item_id: int) -> None:
+        remove_setlist_item(self.app_state.conn, item_id)
         self._refresh_songs_table()
 
     def _on_songs_header_section_resized(self, logical_index: int, old_size: int, new_size: int) -> None:
