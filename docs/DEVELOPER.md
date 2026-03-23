@@ -10,6 +10,7 @@ ABC Music Manager is a local-first desktop application designed specifically for
 
 > **Status:** Beta — feature-complete except Set Playback mode. UI is built with **PySide6 (Qt)**; Flet was replaced per DECISIONS 026.  
 > **License:** MIT (see [LICENSE](../LICENSE))
+> **Source Code:** [Github - Aevoreth/abc-music-manager](https://github.com/Aevoreth/abc-music-manager)
 > **Disclaimer:** Not affiliated with or endorsed by the creators/publishers of *The Lord of the Rings Online*.
 
 ---

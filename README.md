@@ -5,6 +5,7 @@
 ABC Music Manager is a local-first desktop application for *The Lord of the Rings Online* player musicians who manage ABC music libraries. Organize your library, build setlists for events, model band layouts, preview multi-part playback, and generate Songbook data files for your game accounts.
 
 > **License:** MIT (see [LICENSE](LICENSE))  
+> **Source Code:** [Github - Aevoreth/abc-music-manager](https://github.com/Aevoreth/abc-music-manager)  
 > **Disclaimer:** Not affiliated with or endorsed by the creators/publishers of *The Lord of the Rings Online*.
 
 ---
