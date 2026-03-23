@@ -10,6 +10,8 @@ a = Analysis(
     datas=[
         ('NOTICE', '.'),
         ('README.md', '.'),  # For Help > User Guide when frozen
+        ('LICENSE', '.'),
+        ('docs/DEVELOPER.md', 'docs'),
         ('licenses/LGPL-3.0.txt', 'licenses'),
     ],
     hiddenimports=['tinysoundfont', 'pyaudio'],

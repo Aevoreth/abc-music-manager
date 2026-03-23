@@ -26,6 +26,15 @@ def run_conversion(
     stereo_mode: 'band_layout', 'maestro_user_pan', or 'maestro'. band_layout uses part_pan_map when provided.
     part_pan_map: part_number (1-based) -> pan (0-127) for band_layout mode.
     """
+    # #region agent log
+    try:
+        import json
+        cp = multiprocessing.current_process()
+        with open(Path.cwd() / "debug-58ac41.log", "a") as f:
+            f.write(json.dumps({"sessionId":"58ac41","location":"convert_worker.py:run_conversion","message":"Child process running conversion","data":{"pid":os.getpid(),"proc_name":cp.name},"hypothesisId":"A","timestamp":__import__("time").time()*1000})+'\n')
+    except Exception:
+        pass
+    # #endregion
     try:
         content = Path(file_path).read_text(encoding="utf-8", errors="replace")
         # abc_to_midi stereo: 100=full spread, 0=all center. UI: 0=full, 100=center

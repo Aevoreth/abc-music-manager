@@ -4,6 +4,7 @@ Playback state: playlist, part mutes, volume, tempo, stereo. Qt signals for UI.
 
 from __future__ import annotations
 
+import json
 import multiprocessing
 from dataclasses import dataclass
 from pathlib import Path
@@ -145,6 +146,15 @@ class PlaybackState(QObject):
         """
         user_path = preferences.get_playback_soundfont_path()
         path = resolve_soundfont_path(user_path or None)
+        # #region agent log
+        try:
+            from pathlib import Path
+            lp = Path.cwd() / "debug-58ac41.log"
+            with open(lp, "a") as f:
+                f.write(json.dumps({"sessionId":"58ac41","location":"playback_state.py:ensure_soundfont","message":"Soundfont resolution","data":{"resolved":str(path) if path else None,"user_path":user_path},"hypothesisId":"B","timestamp":__import__("time").time()*1000})+'\n')
+        except Exception:
+            pass
+        # #endregion
         if path is None:
             self.soundfont_missing.emit()
         return path
@@ -478,6 +488,15 @@ class PlaybackState(QObject):
         return True
 
     def _on_conversion_done(self, midi_bytes: bytes) -> None:
+        # #region agent log
+        try:
+            import json
+            from pathlib import Path
+            with open(Path.cwd() / "debug-58ac41.log", "a") as f:
+                f.write(json.dumps({"sessionId":"58ac41","location":"playback_state.py:_on_conversion_done","message":"Conversion complete","data":{"len_bytes":len(midi_bytes) if midi_bytes else 0},"hypothesisId":"C","timestamp":__import__("time").time()*1000})+'\n')
+        except Exception:
+            pass
+        # #endregion
         self._conversion_worker = None
         if self._conversion_cancelled or not self._player or not self._playlist or self._current_index < 0:
             return
@@ -514,6 +533,16 @@ class PlaybackState(QObject):
 
     def stop(self) -> None:
         """Stop playback."""
+        # #region agent log
+        try:
+            import json
+            from pathlib import Path
+            w = self._conversion_worker
+            with open(Path.cwd() / "debug-58ac41.log", "a") as f:
+                f.write(json.dumps({"sessionId":"58ac41","location":"playback_state.py:stop","message":"Stop entry","data":{"worker_running":w.isRunning() if w else False},"hypothesisId":"D","timestamp":__import__("time").time()*1000})+'\n')
+        except Exception:
+            pass
+        # #endregion
         self._position_timer.stop()
         if self._conversion_worker is not None:
             self._conversion_cancelled = True
@@ -527,6 +556,15 @@ class PlaybackState(QObject):
                 worker.deleteLater()
         if self._player:
             self._player.stop()
+        # #region agent log
+        try:
+            import json
+            from pathlib import Path
+            with open(Path.cwd() / "debug-58ac41.log", "a") as f:
+                f.write(json.dumps({"sessionId":"58ac41","location":"playback_state.py:stop","message":"Stop exit","data":{},"hypothesisId":"D","timestamp":__import__("time").time()*1000})+'\n')
+        except Exception:
+            pass
+        # #endregion
         self.state_changed.emit()
 
     def pause(self) -> None:
@@ -648,7 +686,25 @@ class PlaybackState(QObject):
 
     def close(self) -> None:
         """Release resources."""
+        # #region agent log
+        try:
+            import json
+            from pathlib import Path
+            with open(Path.cwd() / "debug-58ac41.log", "a") as f:
+                f.write(json.dumps({"sessionId":"58ac41","location":"playback_state.py:close","message":"Close entry","data":{},"hypothesisId":"D","timestamp":__import__("time").time()*1000})+'\n')
+        except Exception:
+            pass
+        # #endregion
         self.stop()
         if self._player:
             self._player.close()
             self._player = None
+        # #region agent log
+        try:
+            import json
+            from pathlib import Path
+            with open(Path.cwd() / "debug-58ac41.log", "a") as f:
+                f.write(json.dumps({"sessionId":"58ac41","location":"playback_state.py:close","message":"Close exit","data":{},"hypothesisId":"D","timestamp":__import__("time").time()*1000})+'\n')
+        except Exception:
+            pass
+        # #endregion

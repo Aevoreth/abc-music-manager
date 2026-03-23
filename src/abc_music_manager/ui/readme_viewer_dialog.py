@@ -7,6 +7,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -57,8 +58,38 @@ def open_readme_viewer(parent=None) -> None:
 
     layout = QVBoxLayout(dlg)
     browser = QTextBrowser()
+    # Set base URL so relative links (LICENSE, NOTICE, docs/DEVELOPER.md) resolve correctly
+    base_dir = path.parent.resolve().as_posix()
+    base_url = QUrl.fromLocalFile(base_dir + "/")
+    browser.document().setBaseUrl(base_url)
     browser.setMarkdown(content)
     browser.setOpenExternalLinks(True)
+
+    def go_home() -> None:
+        browser.document().setBaseUrl(base_url)
+        browser.setMarkdown(content)
+
+    back_btn = QPushButton("← Back")
+    forward_btn = QPushButton("Forward →")
+    home_btn = QPushButton("User Guide")
+    back_btn.clicked.connect(browser.backward)
+    forward_btn.clicked.connect(browser.forward)
+    home_btn.clicked.connect(go_home)
+
+    def update_nav_buttons() -> None:
+        back_btn.setEnabled(browser.isBackwardAvailable())
+        forward_btn.setEnabled(browser.isForwardAvailable())
+
+    browser.backwardAvailable.connect(back_btn.setEnabled)
+    browser.forwardAvailable.connect(forward_btn.setEnabled)
+    update_nav_buttons()
+
+    nav_layout = QHBoxLayout()
+    nav_layout.addWidget(back_btn)
+    nav_layout.addWidget(forward_btn)
+    nav_layout.addWidget(home_btn)
+    nav_layout.addStretch()
+    layout.addLayout(nav_layout)
     layout.addWidget(browser)
 
     btn_layout = QHBoxLayout()

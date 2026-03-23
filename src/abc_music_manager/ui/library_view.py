@@ -1070,7 +1070,6 @@ class LibraryView(QWidget):
     def _on_play_song(self, song_id: int, title: str) -> None:
         """Replace playlist with this song and start playback."""
         if not self.playback_state:
-            log_play(self.app_state.conn, song_id)
             self.model.refresh()
             return
         fp = get_primary_file_path_for_song(self.app_state.conn, song_id)
@@ -1085,7 +1084,6 @@ class LibraryView(QWidget):
             return
         entry = PlaylistEntry(song_id=song_id, file_path=fp, title=title, source="library")
         self.playback_state.replace_playlist([entry], start_index=0)
-        log_play(self.app_state.conn, song_id)
         self.model.refresh()
 
     def _on_played_now(self, song_id: int) -> None:

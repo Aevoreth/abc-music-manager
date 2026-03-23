@@ -353,6 +353,15 @@ class MidiPlayer:
     def close(self) -> None:
         """Release resources."""
         self.stop()
+        # #region agent log
+        try:
+            import json
+            from pathlib import Path
+            with open(Path.cwd() / "debug-58ac41.log", "a") as f:
+                f.write(json.dumps({"sessionId":"58ac41","location":"midi_player.py:close","message":"Before synth.stop","data":{"has_synth":self._synth is not None},"hypothesisId":"E","timestamp":__import__("time").time()*1000})+'\n')
+        except Exception:
+            pass
+        # #endregion
         with self._lock:
             if self._synth:
                 try:
@@ -361,3 +370,12 @@ class MidiPlayer:
                     pass
                 self._synth = None
                 self._seq = None
+        # #region agent log
+        try:
+            import json
+            from pathlib import Path
+            with open(Path.cwd() / "debug-58ac41.log", "a") as f:
+                f.write(json.dumps({"sessionId":"58ac41","location":"midi_player.py:close","message":"After synth.stop","data":{},"hypothesisId":"E","timestamp":__import__("time").time()*1000})+'\n')
+        except Exception:
+            pass
+        # #endregion
