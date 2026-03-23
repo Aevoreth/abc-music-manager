@@ -1,11 +1,17 @@
 """
 SQLite schema for ABC Music Manager.
 Matches DATA_MODEL.md exactly. All tables and fields as specified.
+
+Migration system: schema_version table tracks DB version. init_database() runs pending
+migrations in order to bring any previous-version DB up to CURRENT_SCHEMA_VERSION.
 """
 
 import os
 import sqlite3
 from pathlib import Path
+
+# Current schema version. Increment when adding migrations. See SCHEMA.md.
+CURRENT_SCHEMA_VERSION = 11
 
 
 def get_db_path() -> Path:
@@ -246,6 +252,13 @@ def create_schema(conn: sqlite3.Connection) -> None:
         )
     """)
 
+    # Migration version tracking
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY
+        )
+    """)
+
     # Indexes for common lookups
     conn.execute("CREATE INDEX IF NOT EXISTS idx_songfile_song_id ON SongFile(song_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_song_status_id ON Song(status_id)")
@@ -261,6 +274,40 @@ _DEFAULT_STATUSES = [
     (1, "Testing", "#FF8800"),
     (2, "Ready", "#00FF00"),
 ]
+
+
+def _get_schema_version(conn: sqlite3.Connection) -> int:
+    """Return current schema version (0 if none or table empty)."""
+    try:
+        cur = conn.execute("SELECT version FROM schema_version LIMIT 1")
+        row = cur.fetchone()
+        return row[0] if row else 0
+    except sqlite3.OperationalError:
+        return 0
+
+
+def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
+    """Set schema version (replaces single row)."""
+    conn.execute("DELETE FROM schema_version")
+    conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+    conn.commit()
+
+
+def _get_schema_version(conn: sqlite3.Connection) -> int:
+    """Return current schema version (0 if none or table empty)."""
+    try:
+        cur = conn.execute("SELECT version FROM schema_version LIMIT 1")
+        row = cur.fetchone()
+        return row[0] if row else 0
+    except sqlite3.OperationalError:
+        return 0
+
+
+def _set_schema_version(conn: sqlite3.Connection, version: int) -> None:
+    """Set schema version (replaces single row)."""
+    conn.execute("DELETE FROM schema_version")
+    conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+    conn.commit()
 
 
 def seed_defaults(conn: sqlite3.Connection) -> None:
@@ -482,6 +529,32 @@ def _migrate_song_last_layout(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+# Ordered migrations: (version, migrate_func). Each upgrades from version-1 to version.
+_MIGRATIONS: list[tuple[int, "function"]] = [
+    (1, _migrate_status_drop_is_active),
+    (2, _migrate_folder_rule_include_in_export),
+    (3, _migrate_band_notes),
+    (4, _migrate_band_sort_order),
+    (5, _migrate_setlist_notes),
+    (6, _migrate_setlist_date_time_target),
+    (7, _migrate_setlist_folders),
+    (8, _migrate_band_layout_export_column_order),
+    (9, _migrate_band_layout_sort_order),
+    (10, _migrate_player_level_class),
+    (11, _migrate_song_last_layout),
+]
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """Run any pending migrations to bring DB up to CURRENT_SCHEMA_VERSION."""
+    current = _get_schema_version(conn)
+    for version, migrate_fn in _MIGRATIONS:
+        if current < version:
+            migrate_fn(conn)
+            _set_schema_version(conn, version)
+            current = version
+
+
 def seed_player_instruments(conn: sqlite3.Connection) -> None:
     """Ensure all 24 LOTRO player instruments exist in Instrument table."""
     from datetime import datetime, timezone
@@ -498,23 +571,14 @@ def seed_player_instruments(conn: sqlite3.Connection) -> None:
 
 def init_database(db_path: Path | None = None) -> sqlite3.Connection:
     """
-    Create or open the database at db_path (default: get_db_path()), create schema, run migrations, seed defaults.
+    Create or open the database at db_path (default: get_db_path()), create schema,
+    run migrations to bring DB to CURRENT_SCHEMA_VERSION, seed defaults.
     Returns an open connection (caller is responsible for closing or using as context manager).
     """
     path = db_path or get_db_path()
     conn = sqlite3.connect(str(path))
     create_schema(conn)
-    _migrate_status_drop_is_active(conn)
-    _migrate_folder_rule_include_in_export(conn)
-    _migrate_band_notes(conn)
-    _migrate_band_sort_order(conn)
-    _migrate_setlist_notes(conn)
-    _migrate_setlist_date_time_target(conn)
-    _migrate_setlist_folders(conn)
-    _migrate_band_layout_export_column_order(conn)
-    _migrate_band_layout_sort_order(conn)
-    _migrate_player_level_class(conn)
-    _migrate_song_last_layout(conn)
+    _run_migrations(conn)
     seed_defaults(conn)
     seed_player_instruments(conn)
     _backfill_song_status_ids(conn)
