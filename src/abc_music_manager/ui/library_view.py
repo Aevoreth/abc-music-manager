@@ -1193,18 +1193,10 @@ class LibraryView(QWidget):
             self.model.refresh()
 
     def _on_status_filter_clicked(self) -> None:
-        # #region agent log
-        _lp = Path(__file__).resolve().parents[3] / "debug-8e0fd8.log"
-        _d = {"popup_is_none": self._status_popup is None, "popup_visible": self._status_popup.isVisible() if self._status_popup else False, "status_just_closed": self._status_just_closed, "hypothesisId": "A"}
-        open(_lp, "a").write(json.dumps({"sessionId": "8e0fd8", "location": "library_view.py:_on_status_filter_clicked:entry", "message": "Status filter clicked", "data": _d, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}) + "\n")
-        # #endregion
         if self._status_just_closed:
             return  # Popup just closed (e.g. by click-outside); don't reopen
         if self._status_popup is not None:
             if self._status_popup.isVisible():
-                # #region agent log
-                open(_lp, "a").write(json.dumps({"sessionId": "8e0fd8", "location": "library_view.py:_on_status_filter_clicked:close_branch", "message": "Taking close branch", "data": {"hypothesisId": "A"}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}) + "\n")
-                # #endregion
                 self._status_popup.close()
                 self.status_btn.setChecked(False)
                 return
@@ -1323,10 +1315,6 @@ class LibraryView(QWidget):
         popup.show()
         self._status_popup = popup
         self._status_just_closed = False
-        # #region agent log
-        _lp2 = Path(__file__).resolve().parents[3] / "debug-8e0fd8.log"
-        open(_lp2, "a").write(json.dumps({"sessionId": "8e0fd8", "location": "library_view.py:_on_status_filter_clicked:create", "message": "Created and showed new popup", "data": {"hypothesisId": "A"}, "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000)}) + "\n")
-        # #endregion
 
     def _on_more_filters_toggled(self, checked: bool) -> None:
         self.more_filters_panel.setVisible(checked)
