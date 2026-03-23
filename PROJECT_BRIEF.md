@@ -37,7 +37,7 @@ The app is local-first, indexes ABC files from user-selected folders, and provid
 - Settings (paths, exclusions, plugin data targets, statuses, soundfont config)
 - Filesystem Watcher (quiet background rescan)
 
-## Tech Stack (proposed)
+## Tech Stack
 - **Python + PySide6 (Qt for Python)** — desktop UI with native theming and styling
 - SQLite database
 - Cross-platform (Windows/Mac/Linux)
@@ -45,7 +45,7 @@ The app is local-first, indexes ABC files from user-selected folders, and provid
 
 ## Open Questions / Decisions Needed
 See DECISIONS.md for "Open decisions" and "Decisions that need to be made". Key open items include (many design choices are already in DECISIONS.md):
-- Client connection model for Set Playback mode (LAN only? localhost? websockets? built-in Flet multi-user?)
+- Client connection model for Set Playback mode (LAN only? localhost? websockets? — DECISIONS 015)
 - ABC parsing expectations (what metadata is read from files vs. derived vs. user-entered)
 - Source of truth rules when ABC file changes on disk (merge strategy vs. overwrite)
 - Compatibility scope: which games/tools/formats are explicitly supported vs “best effort”

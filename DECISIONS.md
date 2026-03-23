@@ -146,7 +146,7 @@
 - Use a **tiered** matrix: **Supported** (tested, we fix bugs), **Best effort** (works in practice, not guaranteed), **Out of scope** (explicitly not supported).
 - **Supported:** LOTRO ABC workflow; Maestro-exported tags; Windows, macOS, Linux (PySide6/Qt + SQLite stack); local-first, no cloud required.
 - **Best effort:** Older or non-Maestro ABC; other games' paths; portable vs installer per platform.
-- **Out of scope:** Cloud hosting requirement; other games as primary target. Document tiers in README or a short Compatibility subsection in docs.
+- **Out of scope:** Cloud hosting requirement; other games as primary target. Document tiers in docs/DEVELOPER.md.
 
 ## 017 — PlayerInstrument proficiency (per-instrument, binary)
 
@@ -175,7 +175,7 @@
 
 ## 022 — \*.abcp import/export spec
 
-- Compatibility target remains "ABC Player \*.abcp (Aifel/Elemond)". Spec details will be captured or referenced in docs (e.g. docs/FILE_FORMATS.md or docs/ABCP_SPEC.md) when import/export is implemented. No formal spec in repo until then; REQUIREMENTS/README keep "spec details captured separately" / "exact spec TBD" with a note that the format will be documented when implemented.
+- Compatibility target: "ABC Player \*.abcp (Aifel/Elemond)". Spec is documented in [docs/FILE_FORMATS.md](docs/FILE_FORMATS.md). Import/export is implemented.
 
 ## 023 — Setlist.band_layout_id NULL and FolderRule
 
@@ -195,7 +195,7 @@
 
 ## 026 — UI framework: PySide6 (Qt) instead of Flet
 - **Decision:** Use **PySide6 (Qt for Python)** for the desktop UI instead of Flet.
-- **Rationale:** Flet did not provide the level of theming and visual customization desired (e.g. dark LOTR/LOTRO-inspired scheme). PySide6 offers full Qt theming (QSS, style sheets, palette), native look-and-feel, and broad platform support. The app will be redesigned and rebuilt with Qt; previous Flet-based code is preserved under `/old/` for reference.
+- **Rationale:** Flet did not provide the level of theming and visual customization desired (e.g. dark LOTR/LOTRO-inspired scheme). PySide6 offers full Qt theming (QSS, style sheets, palette), native look-and-feel, and broad platform support. The app was redesigned and rebuilt with Qt; previous Flet-based code was removed.
 
 ## 027 — Setlist part overrides in Set Playback
 - **SetlistBandAssignment** rows override **SongLayoutAssignment** per setlist item and player: if a row exists for `(setlist_item_id, player_id)`, use its `part_number` (NULL means no part for that player on this set); otherwise use the song layout’s assignment for that player. Set Playback and the setlist editor use this merge.

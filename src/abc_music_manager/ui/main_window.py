@@ -245,6 +245,7 @@ class MainWindow(QMainWindow):
         for i, name in enumerate(self.PAGES):
             view_menu.addAction(name, lambda checked=False, idx=i: self._go_to_page(idx))
         help_menu = menubar.addMenu("&Help")
+        help_menu.addAction("&User Guide", self._on_user_guide)
         help_menu.addAction("&About", self._on_about)
 
     def _on_tab_changed(self, index: int) -> None:
@@ -401,9 +402,14 @@ class MainWindow(QMainWindow):
             setlist_item_id if isinstance(setlist_item_id, int) else None,
         )
 
+    def _on_user_guide(self) -> None:
+        from .readme_viewer_dialog import open_readme_viewer
+        open_readme_viewer(self)
+
     def _on_about(self) -> None:
+        from ..version import __version__
         msg = (
-            "ABC Music Manager\n\n"
+            f"ABC Music Manager — Version {__version__}\n\n"
             "Local-first desktop app for ABC music library and setlist management.\n\n"
             "Copyright (c) 2026 Willow Aevoreth Rowan\n"
             "Licensed under the MIT License. See LICENSE.\n\n"

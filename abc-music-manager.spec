@@ -9,6 +9,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('NOTICE', '.'),
+        ('README.md', '.'),  # For Help > User Guide when frozen
         ('licenses/LGPL-3.0.txt', 'licenses'),
     ],
     hiddenimports=['tinysoundfont', 'pyaudio'],

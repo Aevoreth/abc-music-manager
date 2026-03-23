@@ -1,0 +1,145 @@
+# ABC Music Manager — Developer Guide
+
+For developers: build instructions, design docs, and contribution info. End users should see [../README.md](../README.md).
+
+---
+
+# ABC Music Manager
+
+ABC Music Manager is a local-first desktop application designed specifically for player musicians in *The Lord of the Rings Online* who manage and perform ABC music libraries. It helps you organize a large ABC library, build and run event setlists, model band layouts, preview multi-part playback, and generate `SongbookData.plugindata` for selected accounts.
+
+> **Status:** Beta — feature-complete except Set Playback mode. UI is built with **PySide6 (Qt)**; Flet was replaced per DECISIONS 026.  
+> **License:** MIT (see [LICENSE](../LICENSE))
+> **Disclaimer:** Not affiliated with or endorsed by the creators/publishers of *The Lord of the Rings Online*.
+
+---
+
+## What it does
+
+### Compatibility (DECISIONS 016)
+- **Supported:** LOTRO ABC workflow; Maestro-exported tags; Windows, macOS, Linux; local-first, no cloud required.
+- **Best effort:** Older or non-Maestro ABC; other games' paths; portable vs installer per platform.
+- **Out of scope:** Cloud hosting requirement; other games as primary target.
+
+### Library Management
+- Indexes ABC files from user-selected folders
+- Fast, filterable library view with columns like:
+  - Title, composer(s), duration, part count
+  - Last played, play count, play history (from playback log), rating, status badges
+  - Notes and lyrics
+- Song detail/edit screen:
+  - Edit metadata
+  - Optional raw ABC editing
+
+### ABC Playback
+- Playback using a configurable soundfont intended to match common community workflows/tools
+- Shows all parts
+- Mute/solo one or more parts during playback
+
+### Band Management
+- Band roster with player instrument capabilities (possession + per-instrument proficiency: can play instrument class and all variants, e.g. all fiddles, or cannot)
+- Drag/drop band layout editor on a snapped grid
+- Player cards are **7 grid units wide × 5 grid units tall**
+- Band layouts can be reused across songs and setlists; songs can have multiple song layouts (band layout + player→part mapping). A set uses one band layout for the entire set; default part assignments are null (dropdown includes "None").
+
+### Setlist / Playlist Manager
+- Build and edit setlists for events
+- Add songs from Library View via context menu
+- Drag/drop in a compact library view
+- Reorder set entries via drag/drop
+- Lead-in / song change timing:
+  - Default per set
+  - Per-song overrides
+- Import/export:
+  - Open/save `*.abcp` (ABC Player compatibility; spec in [FILE_FORMATS.md](FILE_FORMATS.md))
+  - Export to folder or zip with configurable naming rules
+
+### Set Playback Mode (Live) (DECISIONS 015) — *Not yet released*
+- **v1:** LAN-only; leader runs WebSocket server; clients connect to leader. **Planned:** internet-wide via relay (same message format).
+- Band leader runs the show; clients can connect to view live set status
+- Highlights:
+  - Last played song (green)
+  - Next selected song (blue)
+- Band layout view shows per player:
+  - Name (top), part number (large/bold center), instrument (bottom)
+  - Instrument change indicator (gold) when instrument differs from previous song
+- Per-client highlight: each viewer can highlight selected players
+
+### Compatibility Feature: `SongbookData.plugindata`
+- Manual generation/writing of `SongbookData.plugindata` (JSON) to selected account PluginData directories (where applicable)
+- Intended to replace separate utilities that perform the same operation
+
+---
+
+## Running the app
+
+1. **Create a virtual environment** (recommended):
+   ```bash
+   python -m venv .venv
+   .venv\Scripts\activate   # Windows
+   # source .venv/bin/activate  # macOS/Linux
+   ```
+2. **Install dependencies:** `pip install -r requirements.txt` (PySide6 and other deps)
+3. **Run from repo root:** `python main.py`
+
+The database is created automatically on first run at `~/.abc_music_manager/abc_music_manager.sqlite` (or `$HOME/.abc_music_manager` on macOS/Linux). Override with the `ABC_MUSIC_MANAGER_DATA` environment variable to use a custom data directory. Run unit tests with `pytest tests/ -v`.
+
+### Building (Distribution)
+
+To build a standalone executable with PyInstaller:
+
+1. **Install dependencies:** `pip install -r requirements.txt`
+2. **Install PyInstaller:** `pip install pyinstaller`
+3. **Build:** `pyinstaller abc-music-manager.spec`
+4. **Output:** `dist/ABC Music Manager.exe` (Windows) or equivalent in `dist/`
+
+The spec bundles TinySoundFont and PyAudio for MIDI playback. The soundfont is user-configured at runtime (Settings > Playback).
+
+---
+
+## Design Docs (Source of Truth)
+
+- [PROJECT_BRIEF.md](../PROJECT_BRIEF.md) — product goals, scope, modules
+- [REQUIREMENTS.md](../REQUIREMENTS.md) — user stories + acceptance criteria
+- [DATA_MODEL.md](../DATA_MODEL.md) — entities/relationships
+- [DECISIONS.md](../DECISIONS.md) — major architectural decisions (ADRs 001–027; previously open items resolved)
+- [FILE_FORMATS.md](FILE_FORMATS.md) — Maestro tags, ABCP playlist spec
+- [SKINS.md](SKINS.md) — skinpack behavior and theme overrides
+
+---
+
+## Tech Stack
+- **Python + PySide6 (Qt for Python)** — desktop UI with full theming and native look-and-feel
+- SQLite (database)
+- **Theme:** Dark color scheme inspired by *The Lord of the Rings* / *Lord of the Rings Online* interfaces (DECISIONS 025)
+- Cross-platform: Windows / macOS / Linux
+- Portable or installable distribution
+
+---
+
+## Roadmap (High-Level)
+1. ~~Library scanning + DB indexing + Library View filters~~ ✓
+2. ~~Song detail/edit + raw ABC editor (optional)~~ ✓
+3. ~~Playback engine + part mute/solo~~ ✓
+4. ~~Band layout editor + player/instrument modeling~~ ✓
+5. ~~Setlist manager (drag/drop, timing, export)~~ ✓
+6. Set Playback mode (leader + clients) — *planned*
+7. ~~Manual `SongbookData.plugindata` writer + settings UI~~ ✓
+8. Polish, performance tuning, packaging
+
+---
+
+## Contributing (Future)
+Contribution guidelines, issue templates, and dev setup instructions will be added once the project structure stabilizes.
+
+---
+
+## Legal / Attribution
+ABC Music Manager is a community tool created for use with *The Lord of the Rings Online* player music system.
+It is **not affiliated with, endorsed by, or sponsored by** the game's publisher/developer or the owners of any related trademarks.
+All trademarks are the property of their respective owners.
+
+**Open source and third-party components:**
+- **Qt / PySide6** — LGPL-3.0 (see [NOTICE](../NOTICE))
+- **Maestro** — ABC-to-MIDI logic, LOTRO instrument mappings, and compatibility features ported from [NikolaiVChr/maestro](https://github.com/NikolaiVChr/maestro). Original by [digero](https://github.com/digero/maestro) (MIT License).
+- **LotroInstruments.sf2** — Optional soundfont from [NikolaiVChr/mver](https://github.com/NikolaiVChr/mver) when user does not configure their own.

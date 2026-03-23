@@ -162,7 +162,7 @@ As a band leader, I want to build and edit setlists so I can run live events smo
   - Configurable song-change duration for the set
   - Per-song overrides
 - Import/export:
-  - Open and save `*.abcp` files compatible with ABC Player by Aifel and Elemond (spec to be documented in docs when import/export is implemented — DECISIONS 022)
+  - Open and save `*.abcp` files compatible with ABC Player by Aifel and Elemond (spec in [docs/FILE_FORMATS.md](docs/FILE_FORMATS.md))
   - Export to folder or zip with configurable naming rules
 - Per-set configuration:
   - A set uses a single band layout for the entire set. When a set has no band layout selected (draft), the UI requires selection before play (DECISIONS 023). Song layouts in the set are based on that band layout.

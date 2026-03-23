@@ -1,4 +1,4 @@
-# Data Model (Draft) — ABC Music Manager
+# Data Model — ABC Music Manager
 
 This data model is designed for SQLite and reflects key project decisions:
 - `.abc` files on disk are the source of truth for song content and tag-derived metadata.
