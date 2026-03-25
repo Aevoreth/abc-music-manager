@@ -419,12 +419,12 @@ class MainWindow(QMainWindow):
             f"ABC Music Manager — Version {__version__}\n\n"
             "Local-first desktop app for ABC music library and setlist management.\n\n"
             "Copyright (c) 2026 Willow Aevoreth Rowan\n"
-            "Licensed under the MIT License. See LICENSE.\n\n"
+            "Licensed under the MIT License. See LICENSE.txt.\n\n"
             "Third-party components:\n"
             "• Qt / PySide6 — LGPL-3.0 (The Qt Company Ltd.)\n"
             "• Maestro — ABC-to-MIDI, instrument mappings (digero, NikolaiVChr); MIT\n"
             "• LotroInstruments.sf2 — Optional soundfont (NikolaiVChr/mver)\n"
             "• superqt, Send2Trash, tinysoundfont, PyAudio, mido — permissive licenses\n\n"
-            "See NOTICE for full license and attribution details."
+            "See NOTICE.txt for full license and attribution details."
         )
         QMessageBox.about(self, "About ABC Music Manager", msg)

@@ -56,6 +56,24 @@ ABCP files are XML playlists containing only ordered track paths. No metadata (b
 
 ---
 
+## SongbookData.plugindata (Songbook plugin)
+
+`SongbookData.plugindata` is **UTF-8 text** containing **Lua** data: a top-level `return` statement and a table literal (it is **not** JSON). The LOTRO Songbook plugin reads this file from the account PluginData directory.
+
+### Structure
+
+- Root table keys: `Directories`, `Songs`.
+- **Directories:** array-style table mapping integer → string. Each value is a path relative to the game `\Music\` folder, forward slashes only, with a trailing `/` on directory paths (e.g. `/Band/Sets/`). Includes `/` and every ancestor path that contains at least one listed song.
+- **Songs:** array-style table mapping integer → song table:
+  - `Filepath` — directory part (same rules as Directories)
+  - `Filename` — ABC file stem (no `.abc` suffix in the file)
+  - `Tracks` — array-style table of `{ Id, Name }` (part id string and display name for the Songbook UI)
+  - `Transcriber`, `Artist` — strings
+
+Which ABC files are included follows the app’s music root, set export directory, and Songbook exclude rules. Authoritative builder: `src/abc_music_manager/services/plugindata_writer.py` (`build_plugindata_lua`). Example output: `files/samples/SongbookData/SongbookData.plugindata`.
+
+---
+
 ## Storage rules
 - Musical note bodies from ABC are not stored in the database.
 - The `.abc` file remains the source of truth for song content and tag-derived metadata.

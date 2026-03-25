@@ -202,7 +202,7 @@ As a LOTRO player, I want the app to generate `SongbookData.plugindata` so I can
 ### Acceptance Criteria
 - Settings allow choosing one or more account PluginData target directories.
 - Writing is initiated manually (not automatic).
-- The app writes `SongbookData.plugindata` in JSON format consistent with expected LOTRO plugin consumption.
+- The app writes `SongbookData.plugindata` as Lua table source (Songbook plugin format), not JSON — see [docs/FILE_FORMATS.md](docs/FILE_FORMATS.md).
 
 ---
 

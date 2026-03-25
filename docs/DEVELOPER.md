@@ -9,7 +9,7 @@ For developers: build instructions, design docs, and contribution info. End user
 ABC Music Manager is a local-first desktop application designed specifically for player musicians in *The Lord of the Rings Online* who manage and perform ABC music libraries. It helps you organize a large ABC library, build and run event setlists, model band layouts, preview multi-part playback, and generate `SongbookData.plugindata` for selected accounts.
 
 > **Status:** Beta — feature-complete except Set Playback mode. UI is built with **PySide6 (Qt)**; Flet was replaced per DECISIONS 026.  
-> **License:** MIT (see [LICENSE](../LICENSE))
+> **License:** MIT (see [LICENSE.txt](../LICENSE.txt))
 > **Source Code:** [Github - Aevoreth/abc-music-manager](https://github.com/Aevoreth/abc-music-manager)
 > **Disclaimer:** Not affiliated with or endorsed by the creators/publishers of *The Lord of the Rings Online*.
 
@@ -67,8 +67,8 @@ ABC Music Manager is a local-first desktop application designed specifically for
 - Per-client highlight: each viewer can highlight selected players
 
 ### Compatibility Feature: `SongbookData.plugindata`
-- Manual generation/writing of `SongbookData.plugindata` (JSON) to selected account PluginData directories (where applicable)
-- Intended to replace separate utilities that perform the same operation
+- Manual generation/writing of `SongbookData.plugindata` as **Lua table source** (UTF-8 text: top-level `return` plus a table with `Directories` and `Songs`) to selected account PluginData directories (where applicable). This matches what the Songbook plugin loads; it is **not** JSON.
+- Intended to replace separate utilities that perform the same operation. Structure and fields: [FILE_FORMATS.md](FILE_FORMATS.md) — implementation: `src/abc_music_manager/services/plugindata_writer.py` (`build_plugindata_lua`).
 
 ---
 
@@ -105,7 +105,7 @@ The spec bundles TinySoundFont and PyAudio for MIDI playback. The soundfont is u
 - [DATA_MODEL.md](../DATA_MODEL.md) — entities/relationships
 - [SCHEMA.md](../SCHEMA.md) — SQLite schema, tables, and migration system
 - [DECISIONS.md](../DECISIONS.md) — major architectural decisions (ADRs 001–027; previously open items resolved)
-- [FILE_FORMATS.md](FILE_FORMATS.md) — Maestro tags, ABCP playlist spec
+- [FILE_FORMATS.md](FILE_FORMATS.md) — Maestro tags, ABCP playlist spec, SongbookData.plugindata (Lua)
 - [SKINS.md](SKINS.md) — skinpack behavior and theme overrides
 
 ---
@@ -116,6 +116,12 @@ The spec bundles TinySoundFont and PyAudio for MIDI playback. The soundfont is u
 - **Theme:** Dark color scheme inspired by *The Lord of the Rings* / *Lord of the Rings Online* interfaces (DECISIONS 025)
 - Cross-platform: Windows / macOS / Linux
 - Portable or installable distribution
+
+---
+
+## AI-assisted development
+
+ABC Music Manager was **created and is actively maintained with substantial assistance from AI coding tools** (large language models and similar assistants used for code generation, refactoring, documentation, and debugging). The human maintainers remain responsible for architecture, product decisions, testing, releases, and compliance with licenses and third-party terms. Material produced by AI tools is integrated only after human review and validation; future contributions may likewise be AI-assisted and should be held to the same standard of review before merge.
 
 ---
 
@@ -142,6 +148,6 @@ It is **not affiliated with, endorsed by, or sponsored by** the game's publisher
 All trademarks are the property of their respective owners.
 
 **Open source and third-party components:**
-- **Qt / PySide6** — LGPL-3.0 (see [NOTICE](../NOTICE))
+- **Qt / PySide6** — LGPL-3.0 (see [NOTICE.txt](../NOTICE.txt))
 - **Maestro** — ABC-to-MIDI logic, LOTRO instrument mappings, and compatibility features ported from [NikolaiVChr/maestro](https://github.com/NikolaiVChr/maestro). Original by [digero](https://github.com/digero/maestro) (MIT License).
 - **LotroInstruments.sf2** — Optional soundfont from [NikolaiVChr/mver](https://github.com/NikolaiVChr/mver) when user does not configure their own.

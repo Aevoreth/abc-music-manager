@@ -20,7 +20,7 @@ The app is local-first, indexes ABC files from user-selected folders, and provid
    - Provide a "Set Playback" mode for a band leader to run a show
    - Allow one or more clients to connect and view live set status and band layout updates
 4. **SongbookData.plugindata Generation (Game Compatibility Feature)**
-   - Write SongbookData.plugindata (JSON) to selected game account PluginData directories (where applicable)
+   - Write SongbookData.plugindata (Lua table format) to selected game account PluginData directories (where applicable)
    - Reduce the need for separate external utilities that generate the same file
 
 ## Non-Goals (initially)

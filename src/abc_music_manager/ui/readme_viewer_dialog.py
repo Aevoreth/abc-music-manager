@@ -34,7 +34,7 @@ def _get_readme_path() -> Path | None:
 
 
 class _UserGuideBrowser(QTextBrowser):
-    """QTextBrowser that loads local docs (LICENSE, NOTICE, DEVELOPER.md, etc.) and opens external links in the system browser."""
+    """QTextBrowser that loads local docs (LICENSE.txt, NOTICE.txt, DEVELOPER.md, etc.) and opens external links in the system browser."""
 
     def __init__(self, base_path: Path, readme_url: QUrl, parent=None):
         super().__init__(parent)

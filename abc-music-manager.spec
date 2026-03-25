@@ -11,9 +11,9 @@ a = Analysis(
     pathex=['src'],
     binaries=[],
     datas=[
-        ('NOTICE', '.'),
+        ('NOTICE.txt', '.'),
         ('README.md', '.'),  # For Help > User Guide when frozen
-        ('LICENSE', '.'),
+        ('LICENSE.txt', '.'),
         ('PROJECT_BRIEF.md', '.'),
         ('REQUIREMENTS.md', '.'),
         ('DATA_MODEL.md', '.'),

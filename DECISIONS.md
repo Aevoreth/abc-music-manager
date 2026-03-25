@@ -184,7 +184,7 @@
 
 ## 024 — License and Maestro tag exact patterns
 
-- **License:** **MIT** (Copyright (c) 2026 Willow Aevoreth Rowan). See [LICENSE](LICENSE).
+- **License:** **MIT** (Copyright (c) 2026 Willow Aevoreth Rowan). See [LICENSE.txt](LICENSE.txt).
 - **Maestro tag exact patterns:** Tags are `%%tag-name` (two percent signs, tag name with hyphen, optional space, then value). Tag names are **case-sensitive** (e.g. %%song-title). Leading/trailing whitespace on the value is trimmed. Exact patterns are specified in docs/FILE_FORMATS.md.
 
 ## 025 — Theme definition

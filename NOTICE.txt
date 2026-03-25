@@ -1,6 +1,6 @@
 ABC Music Manager
 Copyright (c) 2026 Willow Aevoreth Rowan
-Licensed under the MIT License. See LICENSE.
+Licensed under the MIT License. See LICENSE.txt.
 
 -----------------------------------------------------------------------------
 This software uses the following open-source components:
