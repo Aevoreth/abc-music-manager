@@ -2,6 +2,10 @@
 
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
+## Version 0.1.6b
+
+* Updated documentation to fix errors and include AI/LLM tool use transparency.
+
 ## Version 0.1.5b
 
 * Further addressing of Setlist item move crash
