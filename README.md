@@ -49,4 +49,3 @@ See [docs/DEVELOPER.md](docs/DEVELOPER.md) for build instructions, design docs, 
 ABC Music Manager is a community tool for use with *The Lord of the Rings Online* player music system. It is **not affiliated with, endorsed by, or sponsored by** the game's publisher/developer or the owners of any related trademarks. All trademarks are the property of their respective owners.
 
 **Third-party components:** Qt/PySide6 (LGPL-3.0), Maestro (MIT), LotroInstruments.sf2, and others. See [NOTICE](NOTICE) for full license and attribution details.
-
