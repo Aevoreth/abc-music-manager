@@ -2,6 +2,10 @@
 
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
+## Version 0.1.7b
+
+* Temporary icon set
+
 ## Version 0.1.6b
 
 * Updated documentation to fix errors and include AI/LLM tool use transparency.
