@@ -91,10 +91,11 @@ To build a standalone executable with PyInstaller:
 
 1. **Install dependencies:** `pip install -r requirements.txt`
 2. **Install PyInstaller:** `pip install pyinstaller`
-3. **Build:** `pyinstaller abc-music-manager.spec`
-4. **Output:** `dist/ABC Music Manager.exe` (Windows) or equivalent in `dist/`
+3. **Icons:** `resources/icons/` contains `app.ico`, `app.icns`, and PNG sizes generated from `files/ABC Music Manager Logo.png`. Regenerate after changing the logo: `pip install pillow` then `python scripts/generate_icons.py` (use `--no-remove-black` if the dark-background removal clips logo edges).
+4. **Build:** `pyinstaller abc-music-manager.spec`
+5. **Output:** `dist/ABC Music Manager.exe` (Windows) or equivalent in `dist/`
 
-The spec bundles TinySoundFont and PyAudio for MIDI playback. The soundfont is user-configured at runtime (Settings > Playback).
+The spec bundles TinySoundFont and PyAudio for MIDI playback. The soundfont is user-configured at runtime (Settings > Playback). The bundled `resources/icons` folder supplies the window icon at runtime; the `icon=` setting sets the executable’s icon (`.ico` on Windows, `.icns` when building on macOS).
 
 ---
 

@@ -2,6 +2,7 @@
 # ABC Music Manager — PyInstaller spec for bundling with TinySoundFont and PyAudio.
 
 import os
+import sys
 block_cipher = None
 docs_datas = [(os.path.join('docs', f), 'docs') for f in os.listdir('docs')
               if os.path.isfile(os.path.join('docs', f))]
@@ -20,6 +21,7 @@ a = Analysis(
         ('DECISIONS.md', '.'),
         ('SCHEMA.md', '.'),
         ('licenses/LGPL-3.0.txt', 'licenses'),
+        ('resources/icons', 'resources/icons'),
     ] + docs_datas,
     hiddenimports=['tinysoundfont', 'pyaudio'],
     hookspath=[],
@@ -30,6 +32,12 @@ a = Analysis(
     win_private_assemblies=False,
     cipher=block_cipher,
     noarchive=False,
+)
+
+_app_icon = os.path.join(
+    'resources',
+    'icons',
+    'app.icns' if sys.platform == 'darwin' else 'app.ico',
 )
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
@@ -53,4 +61,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=_app_icon,
 )
