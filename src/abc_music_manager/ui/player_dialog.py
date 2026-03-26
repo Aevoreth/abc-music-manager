@@ -137,7 +137,7 @@ class PlayerDialog(QDialog):
         top_row.addWidget(self.name_edit)
         top_row.addWidget(QLabel("Level:"))
         self.level_spin = QSpinBox()
-        self.level_spin.setRange(0, 150)
+        self.level_spin.setRange(0, 250)
         self.level_spin.setSpecialValueText("")
         self.level_spin.setValue(0)
         self.level_spin.setToolTip("0 or empty = not set")

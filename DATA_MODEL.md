@@ -211,7 +211,7 @@ Fields:
 Fields:
 - id (INTEGER PK)
 - name (TEXT)
-- level (INTEGER NULL) — optional character level (e.g. LOTRO 1–150)
+- level (INTEGER NULL) — optional character level (e.g. LOTRO 1–250 in-app cap for future-proofing)
 - class (TEXT NULL) — optional character class (e.g. Minstrel, Hunter)
 - created_at (DATETIME)
 - updated_at (DATETIME)
