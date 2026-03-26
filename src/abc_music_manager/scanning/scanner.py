@@ -314,9 +314,14 @@ def _remove_missing_song_files(conn: sqlite3.Connection, current_paths: set[str]
         conn.execute("DELETE FROM SongFile WHERE file_path NOT IN (SELECT path FROM _scan_paths)")
         conn.execute("DROP TABLE IF EXISTS _scan_paths")
 
+    orphan_item_ids = (
+        "SELECT id FROM SetlistItem WHERE song_id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL)"
+    )
     conn.execute(
-        """DELETE FROM SetlistBandAssignment WHERE setlist_item_id IN
-           (SELECT id FROM SetlistItem WHERE song_id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL))"""
+        f"UPDATE Song SET last_setlist_item_id = NULL WHERE last_setlist_item_id IN ({orphan_item_ids})"
+    )
+    conn.execute(
+        f"""DELETE FROM SetlistBandAssignment WHERE setlist_item_id IN ({orphan_item_ids})"""
     )
     conn.execute(
         """DELETE FROM SetlistItem WHERE song_id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL)"""

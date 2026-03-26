@@ -254,6 +254,11 @@ def delete_setlist(conn: sqlite3.Connection, setlist_id: int) -> None:
     song_layout_ids = [r[0] for r in cur.fetchall()]
 
     conn.execute(
+        "UPDATE Song SET last_setlist_item_id = NULL "
+        "WHERE last_setlist_item_id IN (SELECT id FROM SetlistItem WHERE setlist_id = ?)",
+        (setlist_id,),
+    )
+    conn.execute(
         "DELETE FROM SetlistBandAssignment WHERE setlist_item_id IN (SELECT id FROM SetlistItem WHERE setlist_id = ?)",
         (setlist_id,),
     )
@@ -428,6 +433,7 @@ def update_setlist_item(
 
 
 def remove_setlist_item(conn: sqlite3.Connection, item_id: int) -> None:
+    conn.execute("UPDATE Song SET last_setlist_item_id = NULL WHERE last_setlist_item_id = ?", (item_id,))
     conn.execute("DELETE FROM SetlistBandAssignment WHERE setlist_item_id = ?", (item_id,))
     conn.execute("DELETE FROM SetlistItem WHERE id = ?", (item_id,))
     conn.commit()
