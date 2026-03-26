@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QStyledItemDelegate,
     QFrame,
     QFileDialog,
+    QToolButton,
 )
 from PySide6.QtCore import Qt, QDate, QTime, QTimer, QMimeData, QSize, QRect, QPoint
 from PySide6.QtGui import QColor, QFont, QDrag, QMouseEvent, QPixmap, QPainter
@@ -72,6 +73,7 @@ from ..db.setlist_repo import (
     remove_setlist_item,
     reorder_setlist_items,
     merge_setlist_into,
+    duplicate_setlist,
     get_setlist_band_assignments,
     SetlistRow,
     SetlistItemSongMetaRow,
@@ -84,7 +86,7 @@ from ..db.song_layout_repo import (
     get_or_create_song_layout_for_band,
 )
 from ..db.song_repo import update_song_last_layout
-from ..db.band_repo import list_all_band_layouts, list_layout_slots, list_band_members, get_band_layout_display_name
+from ..db.band_repo import list_all_band_layouts, list_layout_slots, list_band_members
 from ..db.setlist_folder_repo import add_folder, update_folder, delete_folder, list_folders, reorder_folders
 from ..db.player_repo import list_player_instruments_bulk
 from ..db.instrument import get_instrument_ids_with_same_name_ci
@@ -648,6 +650,17 @@ class SetlistsView(QWidget):
         fm = add_setlist_btn.fontMetrics()
         add_setlist_btn.setFixedWidth(fm.horizontalAdvance("Add setlist") + 24)
         btn_row.addWidget(add_setlist_btn)
+        self.copy_setlist_menu_btn = QToolButton()
+        self.copy_setlist_menu_btn.setText("Copy...")
+        self.copy_setlist_menu_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
+        self.copy_setlist_menu_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self._copy_setlist_menu = QMenu(self)
+        self.copy_setlist_menu_btn.setMenu(self._copy_setlist_menu)
+        self.copy_setlist_menu_btn.setFixedHeight(add_setlist_btn.sizeHint().height())
+        self.copy_setlist_menu_btn.setFixedWidth(fm.horizontalAdvance("Copy...") + 36)
+        self._copy_setlist_menu.aboutToShow.connect(self._on_toolbar_copy_menu_about_to_show)
+        self.copy_setlist_menu_btn.setEnabled(False)
+        btn_row.addWidget(self.copy_setlist_menu_btn)
         add_folder_btn = QPushButton("Add folder")
         add_folder_btn.clicked.connect(self._add_folder)
         add_folder_btn.setFixedWidth(fm.horizontalAdvance("Add folder") + 24)
@@ -1017,12 +1030,14 @@ class SetlistsView(QWidget):
                     return
         if current is None or current.data(0, _TYPE_ROLE) != "setlist":
             self._selected_setlist_id = None
+            self.copy_setlist_menu_btn.setEnabled(False)
             self._set_editor_enabled(False)
             self._update_duration_computed()
             return
         sid = current.data(0, Qt.ItemDataRole.UserRole)
         self._selected_setlist_id = sid
         s = next(x for x in list_setlists(self.app_state.conn) if x.id == sid)
+        self.copy_setlist_menu_btn.setEnabled(True)
         self._set_editor_enabled(True)
         self.name_edit.setText(s.name)
         self.notes_edit.setPlainText(s.notes or "")
@@ -1571,77 +1586,117 @@ class SetlistsView(QWidget):
             msg += f"\n\n{skipped} song(s) had no file path and were omitted."
         QMessageBox.information(self, "Export to ABCP", msg)
 
-    def _merge_setlist_into(self, target_setlist_id: int, prepend: bool) -> None:
-        """Prepend or append another setlist into the target setlist."""
-        all_setlists = list_setlists(self.app_state.conn)
-        target = next((s for s in all_setlists if s.id == target_setlist_id), None)
-        if not target:
+    def _on_toolbar_copy_menu_about_to_show(self) -> None:
+        self._copy_setlist_menu.clear()
+        sid = self._selected_setlist_id
+        if sid is None:
             return
-        others = [(s, len(list_setlist_items(self.app_state.conn, s.id))) for s in all_setlists if s.id != target_setlist_id]
+        self._add_setlist_copy_actions(self._copy_setlist_menu, sid)
+
+    def _add_setlist_copy_actions(self, menu: QMenu, current_setlist_id: int) -> None:
+        cid = current_setlist_id
+        menu.addAction("Copy Setlist as New").triggered.connect(lambda *_: self._on_copy_setlist_as_new(cid))
+        menu.addAction("Prepend to setlist..").triggered.connect(lambda *_: self._on_prepend_current_to_other(cid))
+        menu.addAction("Prepend from setlist...").triggered.connect(lambda *_: self._on_prepend_other_into_current(cid))
+        menu.addAction("Append to setlist...").triggered.connect(lambda *_: self._on_append_current_to_other(cid))
+        menu.addAction("Append from setlist...").triggered.connect(lambda *_: self._on_append_other_into_current(cid))
+
+    def _pick_other_setlist(self, exclude_id: int, title: str, label: str) -> int | None:
+        all_setlists = list_setlists(self.app_state.conn)
+        others = [
+            (s, len(list_setlist_items(self.app_state.conn, s.id)))
+            for s in all_setlists
+            if s.id != exclude_id
+        ]
         if not others:
             QMessageBox.information(
                 self,
-                "Merge setlist",
-                "No other setlists to merge. Create another setlist first.",
+                title,
+                "No other setlists available. Create another setlist first.",
             )
-            return
+            return None
         titles = [f"{s.name} ({n} songs)" for s, n in others]
-        title, ok = QInputDialog.getItem(
-            self,
-            "Prepend setlist" if prepend else "Append setlist",
-            "Select setlist to merge:",
-            titles,
-            0,
-            False,
-        )
-        if not ok or not title:
+        picked, ok = QInputDialog.getItem(self, title, label, titles, 0, False)
+        if not ok or not picked:
+            return None
+        idx = titles.index(picked)
+        return others[idx][0].id
+
+    def _on_copy_setlist_as_new(self, source_setlist_id: int) -> None:
+        try:
+            new_id = duplicate_setlist(self.app_state.conn, source_setlist_id)
+        except ValueError as e:
+            QMessageBox.critical(self, "Copy Setlist", str(e))
             return
-        idx = titles.index(title)
-        source_setlist_id = others[idx][0].id
-        source_items_count = others[idx][1]
-        if source_items_count == 0:
+        self._refresh_setlist_tree()
+        self.select_setlist_by_id(new_id)
+
+    def _on_prepend_current_to_other(self, current_id: int) -> None:
+        other_id = self._pick_other_setlist(
+            current_id,
+            "Prepend to setlist",
+            "Select setlist to prepend to (current setlist will be copied to its beginning):",
+        )
+        if other_id is None:
+            return
+        self._merge_two_setlists(other_id, current_id, prepend=True)
+
+    def _on_prepend_other_into_current(self, current_id: int) -> None:
+        other_id = self._pick_other_setlist(
+            current_id,
+            "Prepend from setlist",
+            "Select setlist to copy to the beginning of the current setlist:",
+        )
+        if other_id is None:
+            return
+        self._merge_two_setlists(current_id, other_id, prepend=True)
+
+    def _on_append_current_to_other(self, current_id: int) -> None:
+        other_id = self._pick_other_setlist(
+            current_id,
+            "Append to setlist",
+            "Select setlist to append to (current setlist will be copied to its end):",
+        )
+        if other_id is None:
+            return
+        self._merge_two_setlists(other_id, current_id, prepend=False)
+
+    def _on_append_other_into_current(self, current_id: int) -> None:
+        other_id = self._pick_other_setlist(
+            current_id,
+            "Append from setlist",
+            "Select setlist to copy to the end of the current setlist:",
+        )
+        if other_id is None:
+            return
+        self._merge_two_setlists(current_id, other_id, prepend=False)
+
+    def _merge_two_setlists(self, target_setlist_id: int, source_setlist_id: int, prepend: bool) -> None:
+        """Merge a copy of source songs into target (prepend or append). Only song order is copied."""
+        if target_setlist_id == source_setlist_id:
+            return
+        all_setlists = list_setlists(self.app_state.conn)
+        target = next((s for s in all_setlists if s.id == target_setlist_id), None)
+        source_setlist = next((s for s in all_setlists if s.id == source_setlist_id), None)
+        if not target or not source_setlist:
+            return
+        if not list_setlist_items(self.app_state.conn, source_setlist_id):
             QMessageBox.information(
                 self,
-                "Merge setlist",
+                "Copy setlist",
                 "The selected setlist has no songs.",
             )
             return
-        source_setlist = others[idx][0]
-        keep_band_layout_id: int | None = None
-        target_bl = target.band_layout_id
-        source_bl = source_setlist.band_layout_id
-        if target_bl != source_bl:
-            if target_bl is None:
-                keep_band_layout_id = source_bl
-            elif source_bl is None:
-                keep_band_layout_id = target_bl
-            else:
-                target_display = get_band_layout_display_name(self.app_state.conn, target_bl)
-                source_display = get_band_layout_display_name(self.app_state.conn, source_bl)
-                msg_box = QMessageBox(self)
-                msg_box.setWindowTitle("Choose band layout")
-                msg_box.setText("Target and source use different band layouts. Which should the merged setlist use?")
-                msg_box.setInformativeText(f"Target: {target_display}\nSource: {source_display}\n\nSongs using the discarded layout will switch to their setup from the kept layout, or get a blank one if none exists.")
-                btn_target = msg_box.addButton("Keep target's layout", QMessageBox.ButtonRole.ActionRole)
-                btn_source = msg_box.addButton("Keep source's layout", QMessageBox.ButtonRole.ActionRole)
-                msg_box.addButton(QMessageBox.StandardButton.Cancel)
-                msg_box.exec()
-                if msg_box.clickedButton() == btn_target:
-                    keep_band_layout_id = target_bl
-                elif msg_box.clickedButton() == btn_source:
-                    keep_band_layout_id = source_bl
-                else:
-                    return
         try:
             added = merge_setlist_into(
                 self.app_state.conn,
                 target_setlist_id,
                 source_setlist_id,
                 prepend=prepend,
-                keep_band_layout_id=keep_band_layout_id,
+                copy_item_details=False,
             )
         except ValueError as e:
-            QMessageBox.critical(self, "Merge setlist", str(e))
+            QMessageBox.critical(self, "Copy setlist", str(e))
             return
         self._refresh_setlist_tree()
         if self._selected_setlist_id == target_setlist_id:
@@ -1653,7 +1708,7 @@ class SetlistsView(QWidget):
         action = "Prepended" if prepend else "Appended"
         QMessageBox.information(
             self,
-            "Merge setlist",
+            "Copy setlist",
             f"{action} {added} song(s) from '{source_setlist.name}' into '{target.name}'.",
         )
 
@@ -1728,12 +1783,8 @@ class SetlistsView(QWidget):
                     menu.addAction("Export to ABCP...").triggered.connect(
                         lambda: self._export_to_abcp(setlist_id)
                     )
-                    menu.addAction("Prepend setlist...").triggered.connect(
-                        lambda: self._merge_setlist_into(setlist_id, prepend=True)
-                    )
-                    menu.addAction("Append setlist...").triggered.connect(
-                        lambda: self._merge_setlist_into(setlist_id, prepend=False)
-                    )
+                    copy_submenu = menu.addMenu("Copy...")
+                    self._add_setlist_copy_actions(copy_submenu, setlist_id)
                     menu.addAction("Delete set").triggered.connect(
                         lambda: self._delete_setlist_by_id(setlist_id)
                     )

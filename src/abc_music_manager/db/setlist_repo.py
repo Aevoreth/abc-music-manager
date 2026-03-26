@@ -450,19 +450,62 @@ def reorder_setlist_items(conn: sqlite3.Connection, setlist_id: int, item_ids_in
     conn.commit()
 
 
+def _next_duplicate_setlist_name(conn: sqlite3.Connection, source_name: str) -> str:
+    prefix = f"Copy of {source_name.strip()}"
+    existing = {s.name for s in list_setlists(conn)}
+    if prefix not in existing:
+        return prefix
+    n = 2
+    while f"{prefix} ({n})" in existing:
+        n += 1
+    return f"{prefix} ({n})"
+
+
+def duplicate_setlist(conn: sqlite3.Connection, source_setlist_id: int) -> int:
+    """Create a new setlist with the same folder, metadata, and copied items (including layouts and overrides)."""
+    all_s = list_setlists(conn)
+    source = next((s for s in all_s if s.id == source_setlist_id), None)
+    if not source:
+        raise ValueError("Setlist not found")
+    new_name = _next_duplicate_setlist_name(conn, source.name)
+    new_id = add_setlist(conn, new_name, folder_id=source.folder_id)
+    update_setlist(
+        conn,
+        new_id,
+        band_layout_id=source.band_layout_id,
+        locked=source.locked,
+        default_change_duration_seconds=source.default_change_duration_seconds,
+        notes=source.notes,
+        set_date=source.set_date,
+        set_time=source.set_time,
+        target_duration_seconds=source.target_duration_seconds,
+    )
+    if list_setlist_items(conn, source_setlist_id):
+        merge_setlist_into(conn, new_id, source_setlist_id, prepend=False)
+    return new_id
+
+
 def merge_setlist_into(
     conn: sqlite3.Connection,
     target_setlist_id: int,
     source_setlist_id: int,
     prepend: bool,
     keep_band_layout_id: int | None = None,
+    *,
+    copy_item_details: bool = True,
 ) -> int:
     """
-    Merge source setlist into target. Copies items (song, layout, overrides, band assignments).
+    Merge source setlist into target. Copies item rows in order (song_id and position).
+    If copy_item_details is True (default): also copies per-item layout, change-duration override,
+    and band assignments; may update target band layout when layouts differ and keep_band_layout_id
+    is supplied.
+    If copy_item_details is False: only song ids are copied; each new row uses the target setlist's
+    band layout (get_or-create song layout) if the target has one, with no overrides or assignments.
+    Target setlist metadata (name, dates, notes, …) is never modified.
     prepend=True: source items before target items.
     prepend=False: source items after target items.
-    When target and source have different band layouts, keep_band_layout_id must be provided.
-    Songs using the discarded layout switch to their setup from the kept layout, or get a blank one.
+    When copy_item_details is True and target and source have different band layouts,
+    keep_band_layout_id must be provided.
     Returns number of items added.
     """
     all_setlists = {s.id: s for s in list_setlists(conn)}
@@ -470,6 +513,37 @@ def merge_setlist_into(
     source_setlist = all_setlists.get(source_setlist_id)
     if not target_setlist or not source_setlist:
         return 0
+
+    if not copy_item_details:
+        target_items = list_setlist_items(conn, target_setlist_id)
+        source_items = list_setlist_items(conn, source_setlist_id)
+        if not source_items:
+            return 0
+        target_bl = target_setlist.band_layout_id
+        target_item_ids = [item[0].id for item in target_items]
+        new_item_ids: list[int] = []
+        base_pos = 0 if prepend else len(target_item_ids)
+        for i, (item_row, _) in enumerate(source_items):
+            song_layout_id = (
+                get_or_create_song_layout_for_band(conn, item_row.song_id, target_bl)
+                if target_bl is not None
+                else None
+            )
+            new_id = add_setlist_item(
+                conn,
+                target_setlist_id,
+                item_row.song_id,
+                position=base_pos + i,
+                song_layout_id=song_layout_id,
+                override_change_duration_seconds=None,
+            )
+            new_item_ids.append(new_id)
+        if prepend:
+            all_ids = new_item_ids + target_item_ids
+        else:
+            all_ids = target_item_ids + new_item_ids
+        reorder_setlist_items(conn, target_setlist_id, all_ids)
+        return len(new_item_ids)
 
     target_bl = target_setlist.band_layout_id
     source_bl = source_setlist.band_layout_id
