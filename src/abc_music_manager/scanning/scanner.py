@@ -1,6 +1,6 @@
 """
-Filesystem scanner: discover .abc files under FolderRule roots, parse and index.
-REQUIREMENTS §3, DECISIONS 019, 020. Does not implement duplicate-resolution UI (creates separate songs on collision for now).
+Filesystem scanner: discover .abc files under library roots, parse and index.
+Duplicate collisions in the primary library are deferred and resolved via on_duplicates_batch (UI).
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ def _send_to_trash(path: str) -> None:
         except Exception:
             pass
 
+
 from ..parsing.abc_parser import parse_abc_file, ParsedSong
 from ..db.folder_rule import get_enabled_roots
 from ..db.song_repo import (
@@ -33,6 +34,9 @@ from ..db.song_repo import (
     find_song_by_logical_identity,
     relocate_song_file,
 )
+from ..db.songfile_cleanup import cleanup_orphaned_songs_after_songfile_deletion
+from .duplicate_types import DuplicateCandidate, DuplicateDecision
+from .folder_duplicate_detect import FolderDuplicateCluster
 
 
 def _path_is_under(path: str, prefix: str) -> bool:
@@ -120,30 +124,115 @@ def _file_hash(path: Path) -> str | None:
         return None
 
 
-# Duplicate resolution: callback returns (action, existing_song_id).
-# Actions: keep_existing, keep_existing_delete_new, keep_new, keep_new_delete_existing, separate, ignore
-DuplicateResolutionResult = tuple[str, int | None]
+def _apply_duplicate_resolution(
+    conn: sqlite3.Connection,
+    candidate: DuplicateCandidate,
+    action: str,
+    existing_song_id: int | None,
+) -> int:
+    """
+    Apply one duplicate decision. Returns increment to scanned count (0 or 1).
+    """
+    path_str = candidate.new_path
+    parsed = candidate.parsed
+    mtime = candidate.mtime
+    file_hash_val = candidate.file_hash
+    is_primary = candidate.is_primary
+    is_set_copy = candidate.is_set_copy
+    scan_excluded = candidate.scan_excluded
+
+    if action == "keep_existing":
+        return 0
+    if action == "keep_existing_delete_new":
+        _send_to_trash(path_str)
+        return 0
+    if action == "keep_new" and existing_song_id is not None:
+        existing_paths = get_file_paths_for_song(conn, existing_song_id)
+        if existing_paths:
+            relocate_song_file(
+                conn,
+                existing_song_id,
+                existing_paths[0],
+                path_str,
+                parsed,
+                file_mtime=mtime,
+                file_hash=file_hash_val,
+                is_primary_library=is_primary,
+                is_set_copy=is_set_copy,
+                scan_excluded=scan_excluded,
+            )
+            return 1
+        return 0
+    if action == "keep_new_delete_existing" and existing_song_id is not None:
+        existing_paths = get_file_paths_for_song(conn, existing_song_id)
+        if existing_paths:
+            old_path = existing_paths[0]
+            relocate_song_file(
+                conn,
+                existing_song_id,
+                old_path,
+                path_str,
+                parsed,
+                file_mtime=mtime,
+                file_hash=file_hash_val,
+                is_primary_library=is_primary,
+                is_set_copy=is_set_copy,
+                scan_excluded=scan_excluded,
+            )
+            _send_to_trash(old_path)
+            return 1
+        return 0
+    if action == "separate":
+        ensure_song_from_parsed(
+            conn,
+            parsed,
+            path_str,
+            file_mtime=mtime,
+            file_hash=file_hash_val,
+            is_primary_library=is_primary,
+            is_set_copy=is_set_copy,
+            scan_excluded=scan_excluded,
+        )
+        return 1
+    # ignore and unknown: do not index new file
+    return 0
 
 
 def run_scan(
     conn: sqlite3.Connection,
     *,
     progress_callback: Callable[[int, int], None] | None = None,
-    on_duplicate: Callable[
-        [sqlite3.Connection, str, ParsedSong, list[int]], DuplicateResolutionResult
-    ] | None = None,
+    on_duplicates_batch: Callable[
+        [sqlite3.Connection, list[DuplicateCandidate]],
+        list[DuplicateDecision] | None,
+    ]
+    | None = None,
+    on_folder_duplicates_review: Callable[
+        [sqlite3.Connection, list[FolderDuplicateCluster], list[DuplicateCandidate]],
+        set[str],
+    ]
+    | None = None,
 ) -> tuple[int, int, int]:
     """
-    Scan configured library and set roots, parse .abc files, update DB.
+    Scan configured library roots, parse .abc files, update DB.
     When a primary-library file has the same logical identity as an existing song,
-    on_duplicate is called; return ("link", song_id) to link as variant, ("separate", None) to create new song, ("ignore", None) to skip.
+    indexing is deferred until phase 2. If on_duplicates_batch is provided, all true
+    duplicates (after move detection) are passed to it once; the returned decisions
+    are applied in order. If the callback returns None (e.g. user cancelled), each
+    pending duplicate is treated as ignore (new file not indexed).
+    If on_duplicates_batch is None, deferred duplicates are not used—new files are
+    indexed immediately (separate Song rows) like the legacy no-callback behavior.
+
+    If on_folder_duplicates_review is set and there are pending file duplicates, duplicate
+    folder clusters may be detected first; the callback returns normalized paths of folders
+    that were unindexed or trashed so pending file duplicates under those paths are dropped.
+
     Returns (files_found, files_scanned, errors).
     """
     lib, set_r, excl = get_enabled_roots(conn)
     library_roots = [_normalize_path(p) for p in lib]
     set_roots = [_normalize_path(p) for p in set_r]
     exclude_paths = [_normalize_path(p) for p in excl]
-    # Only scan library roots; set export folder is excluded from scanning (used for export only).
     all_roots = library_roots
     if not all_roots:
         _remove_missing_song_files(conn, set())
@@ -154,9 +243,10 @@ def run_scan(
     scanned = 0
     errors = 0
     scanned_paths: set[str] = set()
-    deferred_duplicates: list[tuple[str, ParsedSong, str | None, str | None, bool, bool, bool, list[int]]] = []
+    deferred_duplicates: list[
+        tuple[str, ParsedSong, str | None, str | None, bool, bool, bool, list[int]]
+    ] = []
 
-    # Phase 1: Full scan — update existing paths, add non-duplicates, defer potential duplicates
     for i, path in enumerate(files):
         if progress_callback:
             progress_callback(i + 1, total)
@@ -173,7 +263,6 @@ def run_scan(
         mtime = _file_mtime_str(path)
         file_hash_val = _file_hash(path)
 
-        # Check if this path already exists (update case)
         cur = conn.execute("SELECT 1 FROM SongFile WHERE file_path = ?", (path_str,))
         if cur.fetchone():
             ensure_song_from_parsed(
@@ -189,8 +278,7 @@ def run_scan(
             scanned += 1
             continue
 
-        # New file: check for primary-library duplicate — defer until full scan done
-        if is_primary and on_duplicate:
+        if is_primary and on_duplicates_batch:
             norm_title, composers, part_count = logical_identity(parsed)
             existing_ids = find_song_by_logical_identity(conn, norm_title, composers, part_count)
             if existing_ids:
@@ -211,9 +299,9 @@ def run_scan(
         )
         scanned += 1
 
-    # Phase 2: Duplicate resolution — detect moves (file relocated) vs true duplicates
+    pending_true: list[DuplicateCandidate] = []
+
     for path_str, parsed, mtime, file_hash_val, is_primary, is_set_copy, scan_excluded, existing_ids in deferred_duplicates:
-        # If existing song's file path is not in scanned_paths, it was moved (not a duplicate)
         move_song_id: int | None = None
         move_old_path: str | None = None
         for sid in existing_ids:
@@ -240,60 +328,53 @@ def run_scan(
             scanned += 1
             continue
 
-        # True duplicate: prompt user
-        action, existing_song_id = on_duplicate(conn, path_str, parsed, existing_ids)
-        if action == "keep_existing":
-            # Don't index new file
-            pass
-        elif action == "keep_existing_delete_new":
-            # Don't index new file, move it to recycle bin
-            _send_to_trash(path_str)
-        elif action == "keep_new" and existing_song_id is not None:
-            existing_paths = get_file_paths_for_song(conn, existing_song_id)
-            if existing_paths:
-                relocate_song_file(
-                    conn,
-                    existing_song_id,
-                    existing_paths[0],
-                    path_str,
-                    parsed,
-                    file_mtime=mtime,
-                    file_hash=file_hash_val,
-                    is_primary_library=is_primary,
-                    is_set_copy=is_set_copy,
-                    scan_excluded=scan_excluded,
-                )
-                scanned += 1
-        elif action == "keep_new_delete_existing" and existing_song_id is not None:
-            existing_paths = get_file_paths_for_song(conn, existing_song_id)
-            if existing_paths:
-                old_path = existing_paths[0]
-                relocate_song_file(
-                    conn,
-                    existing_song_id,
-                    old_path,
-                    path_str,
-                    parsed,
-                    file_mtime=mtime,
-                    file_hash=file_hash_val,
-                    is_primary_library=is_primary,
-                    is_set_copy=is_set_copy,
-                    scan_excluded=scan_excluded,
-                )
-                _send_to_trash(old_path)
-                scanned += 1
-        elif action == "separate":
-            ensure_song_from_parsed(
-                conn,
-                parsed,
-                path_str,
-                file_mtime=mtime,
+        pending_true.append(
+            DuplicateCandidate(
+                new_path=path_str,
+                parsed=parsed,
+                mtime=mtime,
                 file_hash=file_hash_val,
-                is_primary_library=is_primary,
+                is_primary=is_primary,
                 is_set_copy=is_set_copy,
                 scan_excluded=scan_excluded,
+                existing_song_ids=list(existing_ids),
             )
-            scanned += 1
+        )
+
+    if (
+        pending_true
+        and on_duplicates_batch
+        and on_folder_duplicates_review
+        and library_roots
+    ):
+        from .folder_duplicate_apply import path_is_under_any_root
+        from .folder_duplicate_detect import detect_duplicate_folder_clusters
+
+        folder_clusters = detect_duplicate_folder_clusters(
+            library_roots, set_roots, exclude_paths
+        )
+        if folder_clusters:
+            losing_roots = on_folder_duplicates_review(conn, folder_clusters, pending_true)
+            if losing_roots:
+                pending_true = [
+                    c
+                    for c in pending_true
+                    if not path_is_under_any_root(c.new_path, losing_roots)
+                ]
+
+    if pending_true and on_duplicates_batch:
+        decisions = on_duplicates_batch(conn, pending_true)
+        if (
+            decisions is None
+            or len(decisions) != len(pending_true)
+            or any(c.new_path != d.new_path for c, d in zip(pending_true, decisions))
+        ):
+            decisions = [DuplicateDecision(c.new_path, "ignore", None) for c in pending_true]
+
+        for cand, dec in zip(pending_true, decisions):
+            scanned += _apply_duplicate_resolution(
+                conn, cand, dec.action, dec.existing_song_id
+            )
 
     _remove_missing_song_files(conn, scanned_paths)
 
@@ -314,29 +395,4 @@ def _remove_missing_song_files(conn: sqlite3.Connection, current_paths: set[str]
         conn.execute("DELETE FROM SongFile WHERE file_path NOT IN (SELECT path FROM _scan_paths)")
         conn.execute("DROP TABLE IF EXISTS _scan_paths")
 
-    orphan_item_ids = (
-        "SELECT id FROM SetlistItem WHERE song_id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL)"
-    )
-    conn.execute(
-        f"UPDATE Song SET last_setlist_item_id = NULL WHERE last_setlist_item_id IN ({orphan_item_ids})"
-    )
-    conn.execute(
-        f"""DELETE FROM SetlistBandAssignment WHERE setlist_item_id IN ({orphan_item_ids})"""
-    )
-    conn.execute(
-        """DELETE FROM SetlistItem WHERE song_id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL)"""
-    )
-    conn.execute(
-        """DELETE FROM SongLayoutAssignment WHERE song_layout_id IN
-           (SELECT id FROM SongLayout WHERE song_id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL))"""
-    )
-    conn.execute(
-        """DELETE FROM SongLayout WHERE song_id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL)"""
-    )
-    conn.execute(
-        """DELETE FROM PlayLog WHERE song_id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL)"""
-    )
-    conn.execute(
-        """DELETE FROM Song WHERE id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL)"""
-    )
-    conn.commit()
+    cleanup_orphaned_songs_after_songfile_deletion(conn)

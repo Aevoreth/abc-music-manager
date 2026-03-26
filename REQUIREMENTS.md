@@ -117,10 +117,14 @@ As a local-first user, I want the app to scan my ABC library folders and keep th
 ### Default behavior
 - Files inside user-configured set/export folders are excluded from the main library view by default. When "included," they are indexed but suppressed from the main library list; optional setting can expose them (DECISIONS 020).
 
-### When duplicates occur in primary library roots
+### Duplicate folder structures (primary library)
+- Under **File → Analyze duplicate folders…**, the app scans library roots for **folder trees** that have the same relative `.abc` paths and the same logical identity in each matching file. Clusters of two or more such folders are shown together; the user picks **one folder to keep** and, for each other folder in the cluster, either **remove from library only** (files remain on disk; `SongFile` rows removed) or **move that folder to the Recycle Bin** (requires `send2trash`; then `SongFile` rows for those paths are removed). During **Scan Library**, if both duplicate-folder clusters and pending file-level collisions exist, the user may be prompted to review duplicate folders first; resolved “losing” folders then drop related pending file-duplicate rows that fall under removed paths.
+
+### When duplicates occur in primary library roots (file-level)
 If two primary-library files collide on logical identity:
-- The app flags the collision and prompts the user to choose:
-  1) Treat as variants of the same song (recommended)
+- After the scan pass, the app opens **one batch review** listing all such collisions (grouped by folder). The user resolves each with the same choices as before (keep existing or new, delete one file to the recycle bin, create a separate library entry, or ignore the new file), and may apply bulk actions per folder (e.g. separate all pending in a folder, or ignore all new files in a folder). OK is enabled only when every listed collision has a resolution. Cancelling the batch dialog ignores all listed new files (they are not indexed).
+- Conceptually the choices remain:
+  1) Treat as variants of the same song (recommended when files are the same arrangement)
   2) Keep as separate songs
   3) Ignore one file
 

@@ -332,5 +332,6 @@ Fields:
 ### Practical behavior
 - Many SongFile rows may map to one Song.
 - The app should exclude set/export roots from the main library view by default.
-- When two primary-library files collide on logical identity:
-  - prompt the user to resolve (variants / separate / ignore).
+- **Duplicate folder structures** are detected by comparing, per library root, directory subtrees whose multiset of `(relative_path, logical identity)` for all `.abc` files underneath matches. Nested paths in the same cluster are collapsed to an antichain. The user resolves clusters via **Analyze duplicate folders…** (or an optional step during scan): one keeper folder; others unindexed or moved to the Recycle Bin, then `SongFile` cleanup / orphan song removal.
+- When two primary-library files collide on logical identity (file-level):
+  - after the scan, the user resolves all such collisions in one batch dialog (folder grouping, bulk actions, per-row diff); choices are the same as before (keep one file, separate entries, ignore new, etc.).

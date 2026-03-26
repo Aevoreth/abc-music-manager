@@ -244,6 +244,7 @@ class MainWindow(QMainWindow):
         menubar = self.menuBar()
         file_menu = menubar.addMenu("&File")
         file_menu.addAction("Scan &Library", self._on_scan_library)
+        file_menu.addAction("Analyze &duplicate folders…", self._on_analyze_duplicate_folders)
         file_menu.addAction("&Settings", self._on_settings)
         file_menu.addAction("Write &PluginData...", self._on_write_plugindata)
         file_menu.addSeparator()
@@ -308,12 +309,24 @@ class MainWindow(QMainWindow):
 
     def _on_scan_library(self) -> None:
         from ..scanning.scanner import run_scan
-        from .duplicate_dialog import show_duplicate_resolution
+        from .duplicate_batch_dialog import show_batch_duplicate_review
 
-        def on_duplicate(conn, new_file_path, parsed, existing_song_ids):
-            return show_duplicate_resolution(
-                conn, new_file_path, parsed.title, existing_song_ids
+        def on_duplicates_batch(conn, pending):
+            return show_batch_duplicate_review(conn, pending)
+
+        def on_folder_review(conn, folder_clusters, pending):
+            reply = QMessageBox.question(
+                self,
+                "Duplicate folders",
+                f"Found {len(folder_clusters)} duplicate folder structure(s). "
+                "Review them before resolving file-level duplicates?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
             )
+            if reply != QMessageBox.StandardButton.Yes:
+                return set()
+            from .folder_duplicate_dialog import show_folder_duplicate_dialog_for_scan
+            return show_folder_duplicate_dialog_for_scan(self, conn, folder_clusters, len(pending))
 
         self.statusBar().showMessage("Scanning...")
         QApplication.processEvents()
@@ -321,7 +334,8 @@ class MainWindow(QMainWindow):
             total, scanned, errors = run_scan(
                 self.app_state.conn,
                 progress_callback=lambda i, n: self.statusBar().showMessage(f"Scanning {i}/{n}..."),
-                on_duplicate=on_duplicate,
+                on_duplicates_batch=on_duplicates_batch,
+                on_folder_duplicates_review=on_folder_review,
             )
             self.statusBar().showMessage(f"Scan complete: {scanned} scanned, {errors} errors.")
             QMessageBox.information(
@@ -334,6 +348,35 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Scan failed", str(e))
         else:
             self.library_view.refresh()
+
+    def _on_analyze_duplicate_folders(self) -> None:
+        from ..db.folder_rule import get_enabled_roots
+        from ..scanning.folder_duplicate_detect import detect_duplicate_folder_clusters
+        from ..scanning.scanner import _normalize_path
+        from .folder_duplicate_dialog import show_standalone_folder_duplicate_dialog
+
+        conn = self.app_state.conn
+        lib, set_r, excl = get_enabled_roots(conn)
+        lib_n = [_normalize_path(p) for p in lib]
+        set_n = [_normalize_path(p) for p in set_r]
+        excl_n = [_normalize_path(p) for p in excl]
+        if not lib_n:
+            QMessageBox.information(self, "Duplicate folders", "No library root configured.")
+            return
+        self.statusBar().showMessage("Analyzing folders…")
+        QApplication.processEvents()
+        try:
+            clusters = detect_duplicate_folder_clusters(lib_n, set_n, excl_n)
+        except Exception as e:
+            QMessageBox.critical(self, "Duplicate folders", str(e))
+            return
+        finally:
+            self.statusBar().clearMessage()
+        if not clusters:
+            QMessageBox.information(self, "Duplicate folders", "No duplicate folder structures found.")
+            return
+        show_standalone_folder_duplicate_dialog(self, conn, clusters)
+        self.library_view.refresh()
 
     def _on_settings(self) -> None:
         self._go_to_page(self.PAGES.index("Settings"))
