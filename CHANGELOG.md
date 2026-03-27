@@ -2,6 +2,16 @@
 
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
+## Version 0.1.8b
+
+* Fixes for Setlist not allowing delete of songs or setlist after files moved
+* Setlist copy menu:
+  * Clarified appending and prepending setlists by renaming them to append to/prepend to setlist
+  * Added Prepend/append from setlist
+  * Added Copy setlist
+* Player level cap increased from 150 to 250 (some level of future-proofing)
+* Song import process enhancements (further iteration planned after tester feedback)
+
 ## Version 0.1.7b
 
 * Temporary icon set
