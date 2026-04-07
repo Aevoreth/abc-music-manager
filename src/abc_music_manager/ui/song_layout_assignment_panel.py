@@ -41,6 +41,7 @@ class SongLayoutAssignmentPanel(QWidget):
 
     def clear(self) -> None:
         self.grid.set_cards([])
+        self.grid.set_assignment_help_by_player({})
         self._song_layout_id = None
         self._hint.setText("")
         self.grid.setVisible(False)
@@ -52,6 +53,7 @@ class SongLayoutAssignmentPanel(QWidget):
         song_layout_id: int | None,
         parts_json: str | None,
     ) -> None:
+        self.grid.set_assignment_help_by_player({})
         self.grid.set_cards([])
 
         if not band_layout_id:

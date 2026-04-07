@@ -1389,6 +1389,7 @@ class SetlistsView(QWidget):
             setlist_item_id=r.item.id,
             song_layout_id=song_layout_id,
             parts_json=r.parts_json,
+            setlist_id=self._selected_setlist_id,
         )
         if created_layout:
             self._refresh_error_column_only()

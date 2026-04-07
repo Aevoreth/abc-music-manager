@@ -17,6 +17,7 @@ from .theme import (
     COLOR_ON_SURFACE,
     COLOR_ERROR,
     COLOR_WARNING_ORANGE,
+    COLOR_TEXT_SECONDARY,
 )
 
 # Grid and card specs
@@ -42,6 +43,12 @@ class LayoutCard:
     instrument_name: str = "(Made for Instrument)"
     instrument_warning: bool = False
     part_duplicate: bool = False  # Part assigned to multiple players
+    # Setlist editor: neighbor rows show adjacent-song part numbers (no "#"); empty string if none.
+    use_setlist_player_header: bool = False
+    neighbor_prev_part_label: str = ""
+    neighbor_next_part_label: str = ""
+    # Instrument differs from last earlier set item where this player had a part (setlist panel only).
+    instrument_changed_from_prior_in_set: bool = False
 
 
 def _rects_overlap(
@@ -134,6 +141,12 @@ class BandLayoutGridWidget(QWidget):
             instrument_name=c.instrument_name,
             instrument_warning=getattr(c, "instrument_warning", False),
             part_duplicate=getattr(c, "part_duplicate", False),
+            use_setlist_player_header=getattr(c, "use_setlist_player_header", False),
+            neighbor_prev_part_label=getattr(c, "neighbor_prev_part_label", ""),
+            neighbor_next_part_label=getattr(c, "neighbor_next_part_label", ""),
+            instrument_changed_from_prior_in_set=getattr(
+                c, "instrument_changed_from_prior_in_set", False
+            ),
         ) for c in self._cards]
 
     def add_card(self, card: LayoutCard) -> bool:
@@ -278,10 +291,26 @@ class BandLayoutGridWidget(QWidget):
             fm_reg = QFontMetrics(font)
             y = inner.top()
 
-            # Player name (never duplicated)
+            # Player name row — setlist: prev part | name | next part; else centered name
             painter.setPen(QColor(COLOR_ON_SURFACE))
             line_h = fm_reg.height()
-            _draw_text_fitting(painter, QRect(inner.left(), y, inner.width(), line_h), center, card.player_name, font)
+            if getattr(card, "use_setlist_player_header", False):
+                gutter = fm_reg.horizontalAdvance("999") + 6
+                left_r = QRect(inner.left(), y, gutter, line_h)
+                center_r = QRect(inner.left() + gutter, y, max(1, inner.width() - 2 * gutter), line_h)
+                right_r = QRect(inner.right() - gutter + 1, y, gutter, line_h)
+                painter.setPen(QColor(COLOR_TEXT_SECONDARY))
+                painter.drawText(left_r, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, card.neighbor_prev_part_label)
+                painter.drawText(right_r, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, card.neighbor_next_part_label)
+                painter.setPen(QColor(COLOR_ON_SURFACE))
+                elided = fm_reg.elidedText(
+                    card.player_name, Qt.TextElideMode.ElideRight, center_r.width()
+                )
+                painter.drawText(center_r, Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter, elided)
+            else:
+                _draw_text_fitting(
+                    painter, QRect(inner.left(), y, inner.width(), line_h), center, card.player_name, font
+                )
             y += line_h + 2
 
             # Part number (large, bold)
@@ -290,7 +319,13 @@ class BandLayoutGridWidget(QWidget):
             big_font.setWeight(QFont.Weight.Bold)
             fm_big = QFontMetrics(big_font)
             line_h = fm_big.height()
-            painter.setPen(dup_color)
+            if getattr(card, "part_duplicate", False):
+                part_num_pen = QColor("#ff4444")
+            elif getattr(card, "instrument_changed_from_prior_in_set", False):
+                part_num_pen = QColor(COLOR_WARNING_ORANGE)
+            else:
+                part_num_pen = QColor(COLOR_ON_SURFACE)
+            painter.setPen(part_num_pen)
             _draw_text_fitting(painter, QRect(inner.left(), y, inner.width(), line_h), center, card.part_number, big_font)
             y += line_h + 2
 

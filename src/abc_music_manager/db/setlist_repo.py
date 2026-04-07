@@ -610,6 +610,25 @@ def get_setlist_band_assignments(conn: sqlite3.Connection, setlist_item_id: int)
     return {r[0]: r[1] for r in cur.fetchall()}
 
 
+def get_setlist_band_assignments_bulk(
+    conn: sqlite3.Connection, setlist_item_ids: list[int]
+) -> dict[int, dict[int, int | None]]:
+    """Return setlist_item_id -> {player_id: part_number or None} for all given items."""
+    if not setlist_item_ids:
+        return {}
+    placeholders = ",".join("?" * len(setlist_item_ids))
+    cur = conn.execute(
+        f"""SELECT setlist_item_id, player_id, part_number FROM SetlistBandAssignment
+            WHERE setlist_item_id IN ({placeholders})""",
+        setlist_item_ids,
+    )
+    result: dict[int, dict[int, int | None]] = {i: {} for i in setlist_item_ids}
+    for r in cur.fetchall():
+        sid, pid, pn = int(r[0]), int(r[1]), r[2]
+        result.setdefault(sid, {})[pid] = pn
+    return result
+
+
 def upsert_setlist_band_assignment(
     conn: sqlite3.Connection,
     setlist_item_id: int,

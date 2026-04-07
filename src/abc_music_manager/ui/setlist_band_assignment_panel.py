@@ -6,6 +6,7 @@ Data saved to SetlistBandAssignment (setlist), not to the song.
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections import Counter
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QMenu, QWidgetAction
@@ -17,12 +18,62 @@ from ..db.band_repo import list_layout_slots
 from ..db.player_repo import list_players, list_player_instruments_bulk
 from ..db.song_layout_repo import get_song_layout_assignments
 from ..db.setlist_repo import (
+    SetlistItemSongMetaRow,
     get_setlist_band_assignments,
+    get_setlist_band_assignments_bulk,
+    list_setlist_items_with_song_meta,
     upsert_setlist_band_assignment,
     delete_setlist_band_assignment,
 )
 from ..db.instrument import get_instrument_name, get_instrument_ids_with_same_name_ci
 from .band_layout_grid import BandLayoutGridWidget, LayoutCard
+from .theme import COLOR_TEXT_SECONDARY
+
+
+def _as_instrument_id(raw: object) -> int | None:
+    if raw is None:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _instrument_id_for_part(parts_json: str | None, part_num: int) -> int | None:
+    if not parts_json:
+        return None
+    try:
+        raw = json.loads(parts_json)
+    except json.JSONDecodeError:
+        return None
+    for p in raw:
+        try:
+            if int(p.get("part_number") or 0) == part_num:
+                return _as_instrument_id(p.get("instrument_id"))
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _instruments_equivalent(conn: sqlite3.Connection, iid_a: int | None, iid_b: int | None) -> bool:
+    if iid_a is None and iid_b is None:
+        return True
+    if iid_a is None or iid_b is None:
+        return False
+    if iid_a == iid_b:
+        return True
+    eq_a = get_instrument_ids_with_same_name_ci(conn, iid_a)
+    return iid_b in eq_a
+
+
+def _effective_part(
+    overrides: dict[int, int | None],
+    layout_assigns: dict[int, int | None],
+    player_id: int,
+) -> int | None:
+    if player_id in overrides:
+        return overrides[player_id]
+    return layout_assigns.get(player_id)
 
 
 class _HoverLabel(QLabel):
@@ -57,6 +108,25 @@ class SetlistBandAssignmentGrid(BandLayoutGridWidget):
         self._part_to_player: dict[int, int] = {}
         self._pan_x = 0.0
         self._pan_y = 0.0
+        self._assignment_help_by_player: dict[int, str] = {}
+
+    def set_assignment_help_by_player(self, help_by_player: dict[int, str]) -> None:
+        self._assignment_help_by_player = dict(help_by_player)
+        self.setToolTip("")
+
+    def mouseMoveEvent(self, event) -> None:
+        super().mouseMoveEvent(event)
+        pos = event.position().toPoint()
+        card = self._card_at(pos.x(), pos.y())
+        if card:
+            t = self._assignment_help_by_player.get(card.player_id, "")
+            self.setToolTip(t)
+        else:
+            self.setToolTip("")
+
+    def leaveEvent(self, event) -> None:
+        super().leaveEvent(event)
+        self.setToolTip("")
 
     def set_assignment_parts(self, parts: list) -> None:
         self._assignment_parts = list(parts)
@@ -92,6 +162,17 @@ class SetlistBandAssignmentGrid(BandLayoutGridWidget):
     def _show_part_menu(self, player_id: int, global_pos, current_part: int | None = None) -> None:
         menu = QMenu(self)
         menu.setStyleSheet("QMenu::item { padding: 4px 12px; }")
+
+        help_text = (self._assignment_help_by_player.get(player_id) or "").strip()
+        if help_text:
+            hl = QLabel(help_text)
+            hl.setWordWrap(True)
+            hl.setMaximumWidth(400)
+            hl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; padding: 6px 10px;")
+            head = QWidgetAction(menu)
+            head.setDefaultWidget(hl)
+            menu.addAction(head)
+            menu.addSeparator()
 
         base_none = "color: #4caf50;" if current_part is None else ""
         none_lbl = _HoverLabel("(None)", base_none)
@@ -151,6 +232,7 @@ class SetlistBandAssignmentPanel(QWidget):
     def clear(self) -> None:
         self._slots = []
         self.grid.set_cards([])
+        self.grid.set_assignment_help_by_player({})
         self._item_id = None
         self._hint.setText("")
         self.grid.setVisible(False)
@@ -162,6 +244,7 @@ class SetlistBandAssignmentPanel(QWidget):
         setlist_item_id: int | None,
         song_layout_id: int | None,
         parts_json: str | None,
+        setlist_id: int | None = None,
     ) -> None:
         self._slots = []
         self.grid.set_cards([])
@@ -220,6 +303,39 @@ class SetlistBandAssignmentPanel(QWidget):
         part_counts = Counter(pnum for pnum in eff_assigns.values() if pnum is not None)
         duplicated_parts = {p for p, c in part_counts.items() if c > 1}
 
+        setlist_rows: list[SetlistItemSongMetaRow] | None = None
+        setlist_idx: int | None = None
+        bulk_ov: dict[int, dict[int, int | None]] = {}
+        layout_cache: dict[int | None, dict[int, int | None]] = {}
+
+        def layout_for(slayout_id: int | None) -> dict[int, int | None]:
+            if slayout_id not in layout_cache:
+                if not slayout_id:
+                    layout_cache[slayout_id] = {}
+                else:
+                    layout_cache[slayout_id] = {
+                        a.player_id: a.part_number
+                        for a in get_song_layout_assignments(conn, slayout_id)
+                    }
+            return layout_cache[slayout_id]
+
+        def eff_for_row(row: SetlistItemSongMetaRow, pid: int) -> int | None:
+            ov = bulk_ov.get(row.item.id, {})
+            la = layout_for(row.item.song_layout_id)
+            return _effective_part(ov, la, pid)
+
+        if setlist_id is not None:
+            setlist_rows = list_setlist_items_with_song_meta(conn, setlist_id)
+            setlist_idx = next(
+                (i for i, r in enumerate(setlist_rows) if r.item.id == setlist_item_id),
+                None,
+            )
+            if setlist_idx is not None:
+                item_ids = [r.item.id for r in setlist_rows]
+                bulk_ov = get_setlist_band_assignments_bulk(conn, item_ids)
+
+        help_by_player: dict[int, str] = {}
+
         cards = []
         for s in slots:
             eff = overrides[s.player_id] if s.player_id in overrides else layout_assigns.get(s.player_id)
@@ -228,7 +344,7 @@ class SetlistBandAssignmentPanel(QWidget):
                 meta = parts_by_num[eff]
                 pn = str(meta.get("part_number", eff))
                 pname = (meta.get("part_name") or "").strip() or f"Part {eff}"
-                iid = meta.get("instrument_id")
+                iid = _as_instrument_id(meta.get("instrument_id"))
                 iname = get_instrument_name(conn, iid) if iid else "—"
                 # Match by ID or by same name (case-insensitive) for ABC duplicates
                 equiv_ids = get_instrument_ids_with_same_name_ci(conn, iid) if iid else frozenset()
@@ -239,6 +355,63 @@ class SetlistBandAssignmentPanel(QWidget):
                 pname = "(Part Name)"
                 iname = "(Made for Instrument)"
                 inst_warn = False
+                iid = None
+
+            use_header = bool(setlist_rows is not None and setlist_idx is not None)
+            prev_l = ""
+            next_l = ""
+            inst_changed = False
+            if use_header:
+                assert setlist_rows is not None and setlist_idx is not None
+                row_before = setlist_rows[setlist_idx - 1] if setlist_idx > 0 else None
+                row_after = (
+                    setlist_rows[setlist_idx + 1] if setlist_idx + 1 < len(setlist_rows) else None
+                )
+                if row_before is not None:
+                    ppn = eff_for_row(row_before, s.player_id)
+                    if ppn is not None:
+                        prev_l = str(ppn)
+                if row_after is not None:
+                    npn = eff_for_row(row_after, s.player_id)
+                    if npn is not None:
+                        next_l = str(npn)
+
+                prior_iid: int | None = None
+                prior_title = ""
+                prior_pn: int | None = None
+                for j in range(setlist_idx - 1, -1, -1):
+                    back = setlist_rows[j]
+                    bpn = eff_for_row(back, s.player_id)
+                    if bpn is not None:
+                        prior_iid = _instrument_id_for_part(back.parts_json, bpn)
+                        prior_title = back.title
+                        prior_pn = bpn
+                        break
+
+                if (
+                    not part_dup
+                    and eff is not None
+                    and eff in parts_by_num
+                    and iid is not None
+                    and prior_iid is not None
+                ):
+                    inst_changed = not _instruments_equivalent(conn, iid, prior_iid)
+
+                lines: list[str] = []
+                if prior_pn is not None and prior_title:
+                    piname = (
+                        get_instrument_name(conn, prior_iid) if prior_iid is not None else "—"
+                    )
+                    lines.append(
+                        f"Last assignment in this set: \"{prior_title}\" — Part {prior_pn} — {piname}"
+                    )
+                else:
+                    lines.append("No earlier assignment in this set for this player.")
+                if setlist_idx > 0:
+                    lines.append(f"Previous song in set: {prev_l or '—'}")
+                if setlist_idx + 1 < len(setlist_rows):
+                    lines.append(f"Next song in set: {next_l or '—'}")
+                help_by_player[s.player_id] = "\n".join(lines)
 
             cards.append(
                 LayoutCard(
@@ -251,8 +424,13 @@ class SetlistBandAssignmentPanel(QWidget):
                     instrument_name=iname,
                     instrument_warning=inst_warn,
                     part_duplicate=part_dup,
+                    use_setlist_player_header=use_header,
+                    neighbor_prev_part_label=prev_l,
+                    neighbor_next_part_label=next_l,
+                    instrument_changed_from_prior_in_set=inst_changed,
                 )
             )
+        self.grid.set_assignment_help_by_player(help_by_player)
         self.grid.set_cards(cards)
 
     def _on_part_selected(self, player_id: int, part_number: int | None) -> None:
