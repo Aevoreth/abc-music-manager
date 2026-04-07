@@ -1115,7 +1115,8 @@ class SetlistsView(QWidget):
             play_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.songs_table.setItem(i, 0, play_item)
 
-            err = self._song_has_error(sl, r, bulk, slots)
+            warn_msg = self._song_warning_message(sl, r, bulk, slots)
+            err = warn_msg is not None
             flag = QTableWidgetItem("\u26a0" if err else "")
             flag.setForeground(QColor("#ff4444") if err else QColor(COLOR_ON_SURFACE))
             f = QFont()
@@ -1124,6 +1125,7 @@ class SetlistsView(QWidget):
             flag.setFont(f)
             flag.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             flag.setFlags(flag.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            flag.setToolTip(warn_msg or "")
             self.songs_table.setItem(i, 1, flag)
 
             t = QTableWidgetItem(r.title)
@@ -1213,18 +1215,18 @@ class SetlistsView(QWidget):
         else:
             self.remaining_set_time_lbl.setText("Remaining: —")
 
-    def _song_has_error(
+    def _song_warning_message(
         self,
         sl: SetlistRow,
         r: SetlistItemSongMetaRow,
         bulk: dict[int, set[int]],
         slots: list,
-    ) -> bool:
+    ) -> str | None:
+        """If the setlist song row should show a warning, return tooltip text; otherwise None."""
         if not sl.band_layout_id:
-            return False
-        # Warning: song has no band layout (song_layout) for the setlist's band
+            return None
         if r.item.song_layout_id is None:
-            return True
+            return "No song layout is linked for this setlist's band. Link or create a layout in the assignment panel."
         overrides = get_setlist_band_assignments(self.app_state.conn, r.item.id)
         layout = {
             a.player_id: a.part_number
@@ -1246,16 +1248,21 @@ class SetlistsView(QWidget):
             if iid:
                 equiv_ids = get_instrument_ids_with_same_name_ci(self.app_state.conn, iid)
                 if not (equiv_ids and (bulk.get(pid, set()) & equiv_ids)):
-                    return True
-        # Warning: song has band layout but has unassigned parts (other than none)
+                    return (
+                        "A player is assigned a part that requires an instrument they do not have "
+                        "(including instruments matched by the same name)."
+                    )
         for p in parts:
             try:
                 pnum = int(p.get("part_number"))
             except (TypeError, ValueError):
                 continue
             if pnum not in assigned_parts:
-                return True
-        return False
+                return (
+                    "One or more parts in this song are not assigned to any player "
+                    "in the band layout."
+                )
+        return None
 
     def _move_song(self, item_id: int, delta: int) -> None:
         if not self._selected_setlist_id or delta not in (-1, 1):
@@ -1353,7 +1360,8 @@ class SetlistsView(QWidget):
         pids = [s.player_id for s in slots]
         bulk = list_player_instruments_bulk(self.app_state.conn, pids) if pids else {}
         for i, r in enumerate(rows):
-            err = self._song_has_error(sl, r, bulk, slots)
+            warn_msg = self._song_warning_message(sl, r, bulk, slots)
+            err = warn_msg is not None
             flag = self.songs_table.item(i, 1)
             if flag:
                 flag.setText("\u26a0" if err else "")
@@ -1363,6 +1371,7 @@ class SetlistsView(QWidget):
                     f.setPointSize(f.pointSize() + 4)
                     f.setWeight(QFont.Weight.Bold)
                 flag.setFont(f)
+                flag.setToolTip(warn_msg or "")
 
     def _refresh_assignment_panel(self) -> None:
         if not self._selected_setlist_id or not self._editor_enabled:
