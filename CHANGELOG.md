@@ -2,6 +2,16 @@
 
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
+## Version 0.1.10b
+
+* Added part hinting to setlist editor:
+  * Previous and next part numbers in player card headers
+  * Tooltip on card indicating last instrument player used
+  * When instrument differs from previous song that a player played in, part number is colored orange
+* Tooltip over warning icon in setlist editor indicating what is triggering the warning to be present
+* Fixed table column widths in setlist editor not always restoring correctly
+* Fixed issue with window size and position not always returning to previous state
+
 ## Version 0.1.8b
 
 * Fixes for Setlist not allowing delete of songs or setlist after files moved
