@@ -114,15 +114,18 @@ DEFAULT_LIBRARY_TABLE_HEADER_STATE: dict[str, Any] = {
 
 def get_window_geometry() -> dict[str, Any] | str | None:
     """
-    Saved main window geometry. Returns dict with x, y, width, height, maximized (human-readable),
-    or legacy base64 str. None if not set.
+    Saved main window geometry. Returns:
+    - dict v2: {"v": 2, "qt": "<base64 QWidget.saveGeometry>"} (preferred; multi-monitor safe)
+    - dict v1: {x, y, width, height, maximized} (legacy)
+    - str: legacy base64 saveGeometry only
+    None if not set.
     """
     prefs = load_preferences()
     return prefs.get("window_geometry")
 
 
 def set_window_geometry(geometry: dict[str, Any]) -> None:
-    """Save main window geometry as human-readable dict: x, y, width, height, maximized."""
+    """Save main window geometry (v2 Qt blob from QWidget.saveGeometry(), base64)."""
     prefs = load_preferences()
     prefs["window_geometry"] = geometry
     save_preferences(prefs)

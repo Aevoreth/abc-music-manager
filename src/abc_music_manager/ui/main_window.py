@@ -4,6 +4,8 @@ Main window: menu bar, navigation (Library | Setlists | Bands | Settings), stack
 
 from __future__ import annotations
 
+import base64
+
 from PySide6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -19,7 +21,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
 )
 from PySide6.QtCore import Qt, QByteArray, QRect, QTimer, QEvent
-from PySide6.QtGui import QColor, QFontMetrics, QPalette
+from PySide6.QtGui import QColor, QFontMetrics, QGuiApplication, QPalette
 
 from ..services.app_state import AppState
 from ..services import preferences
@@ -36,39 +38,86 @@ from ..services.preferences import (
 )
 
 
+def _coerce_saved_maximized(value) -> bool:
+    """JSON may only guarantee booleans; tolerate legacy hand-edited values without bool('false') == True."""
+    if value is True:
+        return True
+    if value is False or value is None:
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes")
+    if isinstance(value, (int, float)):
+        return value != 0
+    return False
+
+
+def _clip_rect_to_screens(rect: QRect) -> QRect:
+    """If the saved position is off every display (e.g. unplugged monitor), center on primary."""
+    if QGuiApplication.screenAt(rect.center()) is not None:
+        return rect
+    primary = QGuiApplication.primaryScreen()
+    if primary is None:
+        return rect
+    ag = primary.availableGeometry()
+    x = ag.x() + max(0, (ag.width() - rect.width()) // 2)
+    y = ag.y() + max(0, (ag.height() - rect.height()) // 2)
+    return QRect(x, y, rect.width(), rect.height())
+
+
+WINDOW_GEOMETRY_PREFS_VERSION = 2
+
+
 def _restore_window_geometry(window: QMainWindow) -> None:
     """Restore main window size and position from preferences if available."""
     saved = preferences.get_window_geometry()
     if not saved:
         return
+    if isinstance(saved, dict) and saved.get("v") == WINDOW_GEOMETRY_PREFS_VERSION:
+        qt = saved.get("qt")
+        if isinstance(qt, str) and qt.strip():
+            data = QByteArray.fromBase64(qt.strip().encode("ascii"))
+            if not data.isEmpty():
+                # Defer to first showEvent: on Windows, restoreGeometry needs a shown top-level
+                # to apply the correct monitor + maximized state.
+                window._pending_restore_geometry = data
+        return
     if isinstance(saved, dict):
-        # Human-readable format: {x, y, width, height, maximized}
-        x = saved.get("x", 0)
-        y = saved.get("y", 0)
-        w = saved.get("width", DEFAULT_WINDOW_WIDTH)
-        h = saved.get("height", DEFAULT_WINDOW_HEIGHT)
-        window.setGeometry(QRect(x, y, w, h))
-        if saved.get("maximized"):
-            window.setWindowState(window.windowState() | Qt.WindowState.WindowMaximized)
-    else:
-        # Legacy base64 format
-        data = QByteArray.fromBase64(saved.encode("utf-8"))
+        # Legacy v1 human-readable format: {x, y, width, height, maximized}
+        try:
+            x = int(saved.get("x", 0))
+            y = int(saved.get("y", 0))
+            w = int(saved.get("width", DEFAULT_WINDOW_WIDTH))
+            h = int(saved.get("height", DEFAULT_WINDOW_HEIGHT))
+        except (TypeError, ValueError):
+            x, y = 0, 0
+            w, h = DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT
+        want_max = _coerce_saved_maximized(saved.get("maximized"))
+        w = max(w, window.minimumWidth())
+        h = max(h, window.minimumHeight())
+        rect = _clip_rect_to_screens(QRect(x, y, w, h))
+        window.setWindowState(Qt.WindowState.WindowNoState)
+        window.setGeometry(rect)
+        if want_max:
+
+            def _maximize() -> None:
+                window.setWindowState(window.windowState() | Qt.WindowState.WindowMaximized)
+
+            QTimer.singleShot(0, _maximize)
+        return
+    # Legacy: preferences stored raw base64 saveGeometry as a string
+    if isinstance(saved, str) and saved.strip():
+        data = QByteArray.fromBase64(saved.strip().encode("ascii"))
         if not data.isEmpty():
-            window.restoreGeometry(data)
+            window._pending_restore_geometry = data
 
 
 def _save_window_geometry(window: QMainWindow) -> None:
-    """Persist main window size and position to preferences (human-readable format)."""
-    # Use normalGeometry when maximized so we get the size/position when un-maximized
-    geom = window.normalGeometry() if (window.windowState() & Qt.WindowState.WindowMaximized) else window.geometry()
-    maximized = bool(window.windowState() & Qt.WindowState.WindowMaximized)
-    preferences.set_window_geometry({
-        "x": geom.x(),
-        "y": geom.y(),
-        "width": geom.width(),
-        "height": geom.height(),
-        "maximized": maximized,
-    })
+    """Persist QWidget.saveGeometry() (placement, screen, and maximized state) for multi-monitor Win32."""
+    qba = window.saveGeometry()
+    if qba.isEmpty():
+        return
+    b64 = base64.b64encode(qba.data()).decode("ascii")
+    preferences.set_window_geometry({"v": WINDOW_GEOMETRY_PREFS_VERSION, "qt": b64})
 
 
 class PlaceholderPage(QWidget):
@@ -102,8 +151,10 @@ class MainWindow(QMainWindow):
         self.playback_state.layout_used.connect(self._on_layout_used)
         self.playback_state.state_changed.connect(self._update_window_title)
         self._update_window_title()
+        self._pending_restore_geometry: QByteArray | None = None
         self.setMinimumSize(900, 600)
-        self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
+        if not preferences.get_window_geometry():
+            self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         _restore_window_geometry(self)
 
         self._build_menu_bar()
@@ -205,6 +256,10 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        pending = getattr(self, "_pending_restore_geometry", None)
+        if pending is not None:
+            self._pending_restore_geometry = None
+            self.restoreGeometry(pending)
         if not getattr(self, "_splitter_initial_sizes_set", True):
             self._splitter_initial_sizes_set = True
             saved = get_splitter_state()
