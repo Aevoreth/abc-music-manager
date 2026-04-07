@@ -245,7 +245,19 @@ def get_setlists_songs_table_header_state() -> list[int] | None:
     return None
 
 
+_SETLIST_SONGS_TABLE_COLUMN_COUNT = 7
+_SETLIST_SONGS_MIN_SECTION = 20
+_SETLIST_SONGS_MIN_TOTAL_WIDTH = 200
+
+
 def set_setlists_songs_table_header_state(sizes: list[int]) -> None:
+    """Persist column widths; skip invalid lists so layout glitches don't overwrite good prefs."""
+    if len(sizes) != _SETLIST_SONGS_TABLE_COLUMN_COUNT:
+        return
+    if any(s < _SETLIST_SONGS_MIN_SECTION for s in sizes):
+        return
+    if sum(sizes) < _SETLIST_SONGS_MIN_TOTAL_WIDTH:
+        return
     prefs = load_preferences()
     prefs["setlists_songs_table_header_state"] = sizes
     save_preferences(prefs)

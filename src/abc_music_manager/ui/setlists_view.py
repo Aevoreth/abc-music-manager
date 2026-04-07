@@ -634,6 +634,7 @@ class SetlistsView(QWidget):
         self._editor_splitter_restored = False
         self._top_split_restored = False
         self._songs_table_header_restored = False
+        self._songs_header_restore_scheduled = False
         self._splitter_restore_retries = 0
         self._songs_header_save_timer = QTimer(self)
         self._songs_header_save_timer.setSingleShot(True)
@@ -811,6 +812,7 @@ class SetlistsView(QWidget):
         self.songs_table.cellClicked.connect(self._on_song_cell_clicked)
         for col in range(7):
             self.songs_table.horizontalHeader().setSectionResizeMode(col, QHeaderView.ResizeMode.Interactive)
+        self.songs_table.horizontalHeader().setStretchLastSection(False)
         self.songs_table.horizontalHeader().setMinimumSectionSize(20)
         self.songs_table.horizontalHeader().resizeSection(0, 28)  # Play
         self.songs_table.horizontalHeader().resizeSection(1, 24)  # Flag
@@ -1939,6 +1941,32 @@ class SetlistsView(QWidget):
         sizes = [hh.sectionSize(i) for i in range(hh.count())]
         set_setlists_songs_table_header_state(sizes)
 
+    def _apply_persisted_songs_table_header_widths(self) -> None:
+        """Apply saved column widths without triggering sectionResized → save (avoids bad prefs)."""
+        saved = get_setlists_songs_table_header_state()
+        widths = saved if saved else DEFAULT_SETLISTS_SONGS_TABLE_HEADER_STATE
+        hh = self.songs_table.horizontalHeader()
+        self._songs_header_save_timer.stop()
+        hh.blockSignals(True)
+        try:
+            min_w = hh.minimumSectionSize()
+            for i, w in enumerate(widths):
+                if i < hh.count():
+                    hh.resizeSection(i, max(int(w), min_w))
+        finally:
+            hh.blockSignals(False)
+
+    def _deferred_finish_songs_table_header_restore(self, pass_num: int) -> None:
+        """Re-apply widths after splitters/layout settle; Qt may ignore first resize inside ScrollArea."""
+        if self._songs_table_header_restored:
+            return
+        self._apply_persisted_songs_table_header_widths()
+        if pass_num == 0:
+            QTimer.singleShot(50, lambda p=1: self._deferred_finish_songs_table_header_restore(p))
+        else:
+            self._songs_table_header_restored = True
+            self._songs_header_restore_scheduled = False
+
     def _save_setlists_state(self) -> None:
         """Persist splitter positions and table column widths. Called from main window on close."""
         self._save_songs_table_header_state()
@@ -2005,14 +2033,9 @@ class SetlistsView(QWidget):
                     ratio_left = left_d / (left_d + right_d) if (left_d + right_d) > 0 else 0.33
                     left_now = max(80, min(total_top - 80, int(total_top * ratio_left)))
                     self.top_split.setSizes([left_now, total_top - left_now])
-        if not self._songs_table_header_restored:
-            self._songs_table_header_restored = True
-            saved = get_setlists_songs_table_header_state()
-            hh = self.songs_table.horizontalHeader()
-            widths = saved if saved else DEFAULT_SETLISTS_SONGS_TABLE_HEADER_STATE
-            for i, w in enumerate(widths):
-                if i < hh.count():
-                    hh.resizeSection(i, w)
+        if not self._songs_table_header_restored and not self._songs_header_restore_scheduled:
+            self._songs_header_restore_scheduled = True
+            QTimer.singleShot(0, lambda p=0: self._deferred_finish_songs_table_header_restore(p))
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
