@@ -95,6 +95,36 @@ def apply_csv_part_display_renames(text: str, rules: list[tuple[str, str]]) -> s
     return s
 
 
+def _csv_part_cell_label(
+    conn: sqlite3.Connection,
+    part_entry: dict,
+    part_number: int,
+    use_instrument: bool,
+    settings: SetExportSettings,
+) -> str:
+    """Text shown after 'n: ' in band-layout CSV part cells; same rules as part vs instrument + CSV renames."""
+    pname = (part_entry.get("part_name") or "").strip() or f"Part {part_number}"
+    if use_instrument and part_entry.get("instrument_id"):
+        iname = get_instrument_name(conn, part_entry["instrument_id"])
+        pname = iname or pname
+    return apply_csv_part_display_renames(pname, settings.csv_part_rename_rules)
+
+
+def _csv_appendix_made_for_catalog_name(conn: sqlite3.Connection, part_entry: dict) -> str:
+    """
+    Instrument catalog name for the part's %%made-for (stored as instrument_id when the song was parsed).
+    Does not use %%part-name and does not apply CSV Part Renaming rules.
+    """
+    iid = part_entry.get("instrument_id")
+    if iid is None:
+        return ""
+    try:
+        iid_int = int(iid)
+    except (TypeError, ValueError):
+        return ""
+    return get_instrument_name(conn, iid_int) or ""
+
+
 # CSV columns for custom mode
 CSV_AVAILABLE_COLUMNS = [
     "Title",
@@ -261,6 +291,8 @@ def _generate_csv(
     for column order if provided, else list_layout_slots_for_export."""
     metadata_cols = _get_metadata_columns(settings)
     use_instrument = settings.csv_part_columns == "instrument"
+    player_ids: list[int] = []
+    player_names: list[str] = []
 
     if band_layout_id:
         if player_ids_in_order is not None:
@@ -291,11 +323,7 @@ def _generate_csv(
                     pn = assignments.get(pid)
                     if pn is not None and pn in parts_by_num:
                         p = parts_by_num[pn]
-                        pname = (p.get("part_name") or "").strip() or f"Part {pn}"
-                        if use_instrument and p.get("instrument_id"):
-                            iname = get_instrument_name(conn, p["instrument_id"])
-                            pname = iname or pname
-                        pname = apply_csv_part_display_renames(pname, settings.csv_part_rename_rules)
+                        pname = _csv_part_cell_label(conn, p, pn, use_instrument, settings)
                         meta_vals.append(f"{pn}: {pname}")
                     else:
                         meta_vals.append("")
@@ -309,6 +337,28 @@ def _generate_csv(
                     )
 
             writer.writerow(meta_vals)
+
+        if band_layout_id and player_ids:
+            for _ in range(3):
+                writer.writerow([""] * len(headers))
+            writer.writerow(["Player Name", "Instruments needed"])
+            by_player: dict[int, set[str]] = {pid: set() for pid in player_ids}
+            for row in items:
+                assignments = get_setlist_band_assignments(conn, row.item.id)
+                try:
+                    parts = json.loads(row.parts_json) if row.parts_json else []
+                except (json.JSONDecodeError, TypeError):
+                    parts = []
+                parts_by_num = {int(p.get("part_number") or 0): p for p in parts}
+                for pid in player_ids:
+                    pn = assignments.get(pid)
+                    if pn is not None and pn in parts_by_num:
+                        label = _csv_appendix_made_for_catalog_name(conn, parts_by_num[pn])
+                        if label:
+                            by_player[pid].add(label)
+            for pid, display_name in zip(player_ids, player_names):
+                ordered = sorted(by_player[pid], key=str.casefold)
+                writer.writerow([display_name, ", ".join(ordered)])
 
 
 def export_set(
