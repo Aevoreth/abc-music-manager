@@ -619,6 +619,7 @@ def get_set_export_prefs() -> dict[str, Any]:
         "csv_part_columns": "part",
         "rename_parts": False,
         "part_name_pattern": "$PartTitle",
+        "csv_part_rename_rules": [],
     }
     result = dict(defaults)
     for k, v in se.items():

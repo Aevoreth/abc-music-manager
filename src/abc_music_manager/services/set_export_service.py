@@ -11,9 +11,9 @@ import shutil
 import sqlite3
 import tempfile
 import zipfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 from ..db.band_repo import list_layout_slots_for_export, set_export_column_order
 from ..db.library_query import get_primary_file_path_for_song
@@ -60,7 +60,39 @@ class SetExportSettings:
     csv_part_columns: str  # "part" or "instrument"
     rename_parts: bool
     part_name_pattern: str
-    csv_part_rename_rules: list[tuple[str, str]] = field(default_factory=list)
+    csv_part_rename_rules: list[tuple[str, str]]
+
+
+def normalize_csv_part_rename_rules(raw: Any) -> list[tuple[str, str]]:
+    """Load find/replace pairs from preferences JSON. Skips rules with empty find text."""
+    out: list[tuple[str, str]] = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            find_s, repl_s = str(item[0]), str(item[1])
+        elif isinstance(item, dict):
+            f = item.get("find")
+            r = item.get("replace")
+            if f is None:
+                continue
+            find_s, repl_s = str(f), "" if r is None else str(r)
+        else:
+            continue
+        if not find_s.strip():
+            continue
+        out.append((find_s, repl_s))
+    return out
+
+
+def apply_csv_part_display_renames(text: str, rules: list[tuple[str, str]]) -> str:
+    """Apply find/replace rules in order (literal substring replace)."""
+    s = text
+    for find_s, repl_s in rules:
+        if not find_s:
+            continue
+        s = s.replace(find_s, repl_s)
+    return s
 
 
 # CSV columns for custom mode
@@ -75,15 +107,6 @@ CSV_AVAILABLE_COLUMNS = [
     "Status",
 ]
 CSV_DEFAULT_ENABLED = {"Title", "Part Count", "Duration", "Composers", "Transcriber"}
-
-
-def apply_csv_part_rename_rules(text: str, rules: list[tuple[str, str]]) -> str:
-    """Apply find→replace rules in order (substring replacement). Empty find strings are skipped."""
-    out = text
-    for find, repl in rules:
-        if find:
-            out = out.replace(find, repl)
-    return out
 
 
 def _format_duration(seconds: int | None) -> str:
@@ -272,7 +295,7 @@ def _generate_csv(
                         if use_instrument and p.get("instrument_id"):
                             iname = get_instrument_name(conn, p["instrument_id"])
                             pname = iname or pname
-                        pname = apply_csv_part_rename_rules(pname, settings.csv_part_rename_rules)
+                        pname = apply_csv_part_display_renames(pname, settings.csv_part_rename_rules)
                         meta_vals.append(f"{pn}: {pname}")
                     else:
                         meta_vals.append("")
@@ -280,7 +303,10 @@ def _generate_csv(
                 parts = json.loads(row.parts_json) if row.parts_json else []
                 for i in range(max_parts):
                     pnum = i + 1
-                    meta_vals.append(_get_part_display(row.parts_json, pnum, use_instrument, conn))
+                    cell = _get_part_display(row.parts_json, pnum, use_instrument, conn)
+                    meta_vals.append(
+                        apply_csv_part_display_renames(cell, settings.csv_part_rename_rules)
+                    )
 
             writer.writerow(meta_vals)
 

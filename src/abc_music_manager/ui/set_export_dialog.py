@@ -10,6 +10,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QDragEnterEvent, QDragLeaveEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -24,6 +25,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
     QFrame,
@@ -50,6 +53,7 @@ from ..services.set_export_service import (
     CSV_DEFAULT_ENABLED,
     SetExportSettings,
     export_set,
+    normalize_csv_part_rename_rules,
 )
 
 
@@ -328,7 +332,37 @@ class SetExportDialog(QDialog):
         t3.addStretch()
         self.tabs.addTab(tab3, "CSV Part Sheet")
 
-        # Tab 5: Player Column Order
+        # Tab: CSV Part Renaming (find/replace on part cells only)
+        tab_csv_rename = QWidget()
+        tcr = QVBoxLayout(tab_csv_rename)
+        rename_help = QLabel(
+            "Optional find/replace pairs applied to part names in the CSV (after part vs instrument "
+            "choice). Rules run in order; each step replaces all occurrences. Example: "
+            '"Basic Theorbo" → "Theorbo".'
+        )
+        rename_help.setWordWrap(True)
+        rename_help.setStyleSheet("color: #b4a8a8; font-size: 12px;")
+        tcr.addWidget(rename_help)
+        self.csv_rename_table = QTableWidget(0, 2)
+        self.csv_rename_table.setHorizontalHeaderLabels(["Find", "Replace"])
+        self.csv_rename_table.horizontalHeader().setStretchLastSection(True)
+        self.csv_rename_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.csv_rename_table.setMinimumHeight(160)
+        tcr.addWidget(self.csv_rename_table)
+        rename_btn_row = QHBoxLayout()
+        add_rule_btn = QPushButton("Add row")
+        add_rule_btn.clicked.connect(self._csv_rename_add_row)
+        rename_btn_row.addWidget(add_rule_btn)
+        remove_rule_btn = QPushButton("Remove selected")
+        remove_rule_btn.clicked.connect(self._csv_rename_remove_selected)
+        rename_btn_row.addWidget(remove_rule_btn)
+        rename_btn_row.addStretch()
+        tcr.addLayout(rename_btn_row)
+        tcr.addStretch()
+        self._load_csv_rename_table(prefs)
+        self.tabs.addTab(tab_csv_rename, "CSV Part Renaming")
+
+        # Tab: Player Column Order
         tab4 = QWidget()
         t4 = QVBoxLayout(tab4)
         t4.addWidget(QLabel("Drag to reorder player columns for CSV export:"))
@@ -377,6 +411,7 @@ class SetExportDialog(QDialog):
     def _on_csv_toggled(self, checked: bool) -> None:
         self.composer_check.setEnabled(checked)
         self.tabs.setTabEnabled(3, checked)
+        self.tabs.setTabEnabled(4, checked)
 
     def _on_rename_parts_toggled(self, checked: bool) -> None:
         self.tabs.setTabEnabled(2, checked)
@@ -402,6 +437,40 @@ class SetExportDialog(QDialog):
         self.custom_cols_group.setEnabled(not use_visible)
         self.composer_check.setEnabled(self.csv_check.isChecked() and use_visible)
 
+    def _load_csv_rename_table(self, prefs: dict) -> None:
+        rules = normalize_csv_part_rename_rules(prefs.get("csv_part_rename_rules", []))
+        n = max(1, len(rules))
+        self.csv_rename_table.setRowCount(n)
+        for i, (f, r) in enumerate(rules):
+            self.csv_rename_table.setItem(i, 0, QTableWidgetItem(f))
+            self.csv_rename_table.setItem(i, 1, QTableWidgetItem(r))
+        if not rules:
+            self.csv_rename_table.setItem(0, 0, QTableWidgetItem(""))
+            self.csv_rename_table.setItem(0, 1, QTableWidgetItem(""))
+
+    def _collect_csv_rename_rules(self) -> list[tuple[str, str]]:
+        rows: list[tuple[str, str]] = []
+        for r in range(self.csv_rename_table.rowCount()):
+            fi = self.csv_rename_table.item(r, 0)
+            ri = self.csv_rename_table.item(r, 1)
+            f = fi.text() if fi else ""
+            repl = ri.text() if ri else ""
+            rows.append((f, repl))
+        return normalize_csv_part_rename_rules(rows)
+
+    def _csv_rename_add_row(self) -> None:
+        r = self.csv_rename_table.rowCount()
+        self.csv_rename_table.insertRow(r)
+        self.csv_rename_table.setItem(r, 0, QTableWidgetItem(""))
+        self.csv_rename_table.setItem(r, 1, QTableWidgetItem(""))
+
+    def _csv_rename_remove_selected(self) -> None:
+        rows = sorted({idx.row() for idx in self.csv_rename_table.selectedIndexes()}, reverse=True)
+        for r in rows:
+            self.csv_rename_table.removeRow(r)
+        if self.csv_rename_table.rowCount() == 0:
+            self._csv_rename_add_row()
+
     def _load_player_order(self) -> None:
         self.player_list.clear()
         if not self.band_layout_id:
@@ -416,8 +485,8 @@ class SetExportDialog(QDialog):
 
     def _update_player_tab_state(self) -> None:
         has_layout = self.band_layout_id is not None
-        self.tabs.setTabEnabled(4, has_layout)
-        self.tabs.setTabToolTip(4, "Assign a band layout to the setlist to configure player column order." if not has_layout else "")
+        self.tabs.setTabEnabled(5, has_layout)
+        self.tabs.setTabToolTip(5, "Assign a band layout to the setlist to configure player column order." if not has_layout else "")
         if has_layout:
             self.player_order_placeholder.hide()
             self.player_list.show()
@@ -486,6 +555,7 @@ class SetExportDialog(QDialog):
             csv_part_columns="part" if self.part_col_combo.currentIndex() == 0 else "instrument",
             rename_parts=self.rename_parts_check.isChecked(),
             part_name_pattern=self.part_pattern_edit.text() or "$PartTitle",
+            csv_part_rename_rules=self._collect_csv_rename_rules(),
         )
 
     def _get_player_ids_in_order(self) -> list[int] | None:
@@ -561,6 +631,9 @@ class SetExportDialog(QDialog):
             "csv_part_columns": "part" if self.part_col_combo.currentIndex() == 0 else "instrument",
             "rename_parts": self.rename_parts_check.isChecked(),
             "part_name_pattern": self.part_pattern_edit.text(),
+            "csv_part_rename_rules": [
+                {"find": f, "replace": r} for f, r in self._collect_csv_rename_rules()
+            ],
         }
         save_set_export_prefs(prefs)
 

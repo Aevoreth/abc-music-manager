@@ -95,6 +95,7 @@ def test_set_export_abcp_playlist_optional(export_abcp_playlist: bool, expect_fi
             csv_part_columns="part",
             rename_parts=False,
             part_name_pattern="$PartTitle",
+            csv_part_rename_rules=[],
         )
         export_set(conn, sl_id, "Test Set", None, settings, None, status_callback=None)
 
