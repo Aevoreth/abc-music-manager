@@ -2,6 +2,14 @@
 
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
+## Version 0.1.11b
+
+* Added: Optional Part Renaming for Exported Sets using customizable pattern
+* Added: Setlist export now optionally exports an ABC Player compatible playlist
+* Added: String Find and Replace during CSV export to allow for shortening part names
+* Added: CSV now exports with an appendix, listing players and required instruments for the set
+* Fixed: Student Fiddle now properly named Student's Fiddle
+
 ## Version 0.1.10b
 
 * Added part hinting to setlist editor:
