@@ -236,6 +236,9 @@ class SetExportDialog(QDialog):
         self.csv_check.setChecked(prefs.get("export_csv_part_sheet", False))
         self.csv_check.toggled.connect(self._on_csv_toggled)
         t1.addWidget(self.csv_check)
+        self.abcp_check = QCheckBox("Export ABCP playlist (relative paths for ABC Player)")
+        self.abcp_check.setChecked(prefs.get("export_abcp_playlist", True))
+        t1.addWidget(self.abcp_check)
         self.composer_check = QCheckBox("Include composer in CSV")
         self.composer_check.setChecked(prefs.get("include_composer_in_csv", True))
         t1.addWidget(self.composer_check)
@@ -476,6 +479,7 @@ class SetExportDialog(QDialog):
             whitespace_replace=SPACE_REPLACE_CHARS[self.whitespace_combo.currentIndex()] if self.whitespace_combo.currentIndex() >= 0 else " ",
             part_count_zero_padded=True,
             export_csv_part_sheet=self.csv_check.isChecked(),
+            export_abcp_playlist=self.abcp_check.isChecked(),
             include_composer_in_csv=self.composer_check.isChecked(),
             csv_use_visible_columns=self.visible_col_radio.isChecked(),
             csv_columns_enabled=csv_enabled,
@@ -550,6 +554,7 @@ class SetExportDialog(QDialog):
             "filename_pattern": self.pattern_edit.text(),
             "whitespace_replace": SPACE_REPLACE_CHARS[self.whitespace_combo.currentIndex()] if self.whitespace_combo.currentIndex() >= 0 else " ",
             "export_csv_part_sheet": self.csv_check.isChecked(),
+            "export_abcp_playlist": self.abcp_check.isChecked(),
             "include_composer_in_csv": self.composer_check.isChecked(),
             "csv_use_visible_columns": self.visible_col_radio.isChecked(),
             "csv_columns_enabled": {col: self.csv_col_checks[col].isChecked() for col in CSV_AVAILABLE_COLUMNS},

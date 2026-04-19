@@ -33,7 +33,7 @@ ABCP files are XML playlists containing only ordered track paths. No metadata (b
 
 - Root: `<playlist fileVersion="3.4.0.300">`
 - Child: `<trackList>` containing `<track>` elements
-- Each track: `<track><location>absolute_path_to.abc</location></track>`
+- Each track: `<track><location>path_to.abc</location></track>` — typically an **absolute** path for a standalone export; **relative** paths (same folder as the `.abcp` file) when the playlist is bundled with the ABC files (set export folder or zip).
 - Encoding: UTF-8
 
 ### Example
@@ -49,10 +49,13 @@ ABCP files are XML playlists containing only ordered track paths. No metadata (b
 </playlist>
 ```
 
+Relative locations (set export): e.g. `<location>001_My_Song.abc</location>` next to `{set_name}.abcp` inside the exported folder or zip.
+
 ### Import/Export notes
 
 - **Import:** Paths must match library SongFile paths (exact match). Unmatched paths are skipped; user is informed.
-- **Export:** Uses primary file path per song. Band layout, part assignments, notes, timing, and other metadata are not included.
+- **Export (setlist → ABCP file):** Uses primary file path per song. Band layout, part assignments, notes, timing, and other metadata are not included.
+- **Set export (folder/zip):** Optional (same dialog as CSV). When enabled, writes `{set_name}.abcp` beside the copied ABC files with **relative** paths so ABC Player can open the playlist from the bundle.
 
 ---
 

@@ -606,6 +606,7 @@ def get_set_export_prefs() -> dict[str, Any]:
         "filename_pattern": "$SongIndex_$FileName",
         "whitespace_replace": " ",
         "export_csv_part_sheet": False,
+        "export_abcp_playlist": True,
         "include_composer_in_csv": True,
         "csv_use_visible_columns": True,
         "csv_columns_enabled": {

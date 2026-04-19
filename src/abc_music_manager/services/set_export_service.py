@@ -11,7 +11,7 @@ import shutil
 import sqlite3
 import tempfile
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -24,6 +24,7 @@ from ..db.setlist_repo import (
 )
 from ..db.setlist_repo import SetlistItemSongMetaRow
 from ..db.instrument import get_instrument_name
+from .abcp_service import write_abcp
 from .abc_part_title_rewrite import rewrite_abc_part_t_lines
 from .filename_template import (
     compute_part_numeration,
@@ -52,12 +53,14 @@ class SetExportSettings:
     whitespace_replace: str
     part_count_zero_padded: bool
     export_csv_part_sheet: bool
+    export_abcp_playlist: bool
     include_composer_in_csv: bool
     csv_use_visible_columns: bool
     csv_columns_enabled: dict[str, bool]
     csv_part_columns: str  # "part" or "instrument"
     rename_parts: bool
     part_name_pattern: str
+    csv_part_rename_rules: list[tuple[str, str]] = field(default_factory=list)
 
 
 # CSV columns for custom mode
@@ -72,6 +75,15 @@ CSV_AVAILABLE_COLUMNS = [
     "Status",
 ]
 CSV_DEFAULT_ENABLED = {"Title", "Part Count", "Duration", "Composers", "Transcriber"}
+
+
+def apply_csv_part_rename_rules(text: str, rules: list[tuple[str, str]]) -> str:
+    """Apply find→replace rules in order (substring replacement). Empty find strings are skipped."""
+    out = text
+    for find, repl in rules:
+        if find:
+            out = out.replace(find, repl)
+    return out
 
 
 def _format_duration(seconds: int | None) -> str:
@@ -260,6 +272,7 @@ def _generate_csv(
                         if use_instrument and p.get("instrument_id"):
                             iname = get_instrument_name(conn, p["instrument_id"])
                             pname = iname or pname
+                        pname = apply_csv_part_rename_rules(pname, settings.csv_part_rename_rules)
                         meta_vals.append(f"{pn}: {pname}")
                     else:
                         meta_vals.append("")
@@ -394,6 +407,11 @@ def export_set(
                 copy_to / f"{set_name}.csv",
                 player_ids_in_order=player_ids_in_order,
             )
+
+        if settings.export_abcp_playlist and export_entries:
+            status("Writing ABCP playlist...")
+            rel_paths = [Path(base).as_posix() for _, _, _, base in export_entries]
+            write_abcp(copy_to / f"{set_name}.abcp", rel_paths)
 
         if settings.export_as_zip:
             if not settings.export_as_folder:
