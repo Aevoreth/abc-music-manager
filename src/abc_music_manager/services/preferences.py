@@ -616,6 +616,8 @@ def get_set_export_prefs() -> dict[str, Any]:
             "Transcriber": True,
         },
         "csv_part_columns": "part",
+        "rename_parts": False,
+        "part_name_pattern": "$PartTitle",
     }
     result = dict(defaults)
     for k, v in se.items():

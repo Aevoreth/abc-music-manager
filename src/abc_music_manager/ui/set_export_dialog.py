@@ -36,6 +36,7 @@ from ..services.filename_template import (
     SPACE_REPLACE_CHARS,
     SPACE_REPLACE_LABELS,
     format_filename,
+    format_part_name,
 )
 from ..services.preferences import (
     get_set_export_dir,
@@ -55,6 +56,27 @@ from ..services.set_export_service import (
 def _sanitize_set_name(s: str) -> str:
     invalid = re.compile(r'[<>:"/\\|?*]')
     return invalid.sub("", s).strip() or "Untitled Set"
+
+
+# Song-level variables for filename / part T: patterns (see format_filename / format_part_name).
+_FILENAME_PATTERN_VARS_HELP = (
+    "$FileName — Original filename without .abc\n"
+    "$SongIndex — 1-based position in setlist (e.g. 001)\n"
+    "$PartCount — Number of parts\n"
+    "$SongComposer — Composers (C: field)\n"
+    "$SongTranscriber — Transcriber (Z: field)\n"
+    "$SongLength — Duration in mm_ss format\n"
+    "$SongTitle — Title (T: field)"
+)
+
+_PART_RENAMING_ONLY_VARS_HELP = (
+    "$PartInstrument — Made-for instrument (from %%made-for)\n"
+    "$PartName — Unmodified %%part-name comment value\n"
+    "$PartTitle — Original part T: line (first T: in that X: block)\n"
+    "$PartNumber — Part number (X: value)\n"
+    "$PlayerAssignment — Player assigned to this part in the setlist band layout\n"
+    "$Numeration — 1, 2, … when multiple parts share the same %%part-name; empty if unique"
+)
 
 
 class PlayerOrderListWidget(QListWidget):
@@ -200,6 +222,10 @@ class SetExportDialog(QDialog):
         self.rename_check = QCheckBox("Rename ABC files using pattern")
         self.rename_check.setChecked(prefs.get("rename_abc_files", True))
         t1.addWidget(self.rename_check)
+        self.rename_parts_check = QCheckBox("Rename parts in exported ABC using pattern")
+        self.rename_parts_check.setChecked(prefs.get("rename_parts", False))
+        self.rename_parts_check.toggled.connect(self._on_rename_parts_toggled)
+        t1.addWidget(self.rename_parts_check)
         self.folder_check = QCheckBox("Export as folder")
         self.folder_check.setChecked(prefs.get("export_as_folder", True))
         t1.addWidget(self.folder_check)
@@ -225,7 +251,7 @@ class SetExportDialog(QDialog):
         idx = SPACE_REPLACE_CHARS.index(prefs.get("whitespace_replace", " "))
         if 0 <= idx < len(SPACE_REPLACE_CHARS):
             self.whitespace_combo.setCurrentIndex(idx)
-        self.whitespace_combo.currentIndexChanged.connect(self._update_example)
+        self.whitespace_combo.currentIndexChanged.connect(self._on_filename_whitespace_changed)
         t2.addWidget(self.whitespace_combo)
         t2.addWidget(QLabel("Pattern for new ABC filenames:"))
         self.pattern_edit = QLineEdit()
@@ -236,23 +262,41 @@ class SetExportDialog(QDialog):
         self.example_label.setStyleSheet("color: #888;")
         t2.addWidget(self.example_label)
         t2.addWidget(QLabel("Variables:"))
-        var_text = (
-            "$FileName — Original filename without .abc\n"
-            "$SongIndex — 1-based position in setlist (e.g. 001)\n"
-            "$PartCount — Number of parts\n"
-            "$SongComposer — Composers (C: field)\n"
-            "$SongTranscriber — Transcriber (Z: field)\n"
-            "$SongLength — Duration in mm_ss format\n"
-            "$SongTitle — Title (T: field)"
-        )
-        var_label = QLabel(var_text)
+        var_label = QLabel(_FILENAME_PATTERN_VARS_HELP)
         var_label.setStyleSheet("color: #b4a8a8; font-size: 12px;")
         var_label.setWordWrap(True)
         t2.addWidget(var_label)
         t2.addStretch()
         self.tabs.addTab(tab2, "ABC File Renaming")
 
-        # Tab 3: CSV Part Sheet
+        # Tab 3: Part Renaming (T: lines per X: block)
+        tab_part = QWidget()
+        tp = QVBoxLayout(tab_part)
+        tp.addWidget(QLabel("Replace spaces in variables with:"))
+        self.part_whitespace_combo = QComboBox()
+        self.part_whitespace_combo.addItems(SPACE_REPLACE_LABELS)
+        pidx = SPACE_REPLACE_CHARS.index(prefs.get("whitespace_replace", " "))
+        if 0 <= pidx < len(SPACE_REPLACE_CHARS):
+            self.part_whitespace_combo.setCurrentIndex(pidx)
+        self.part_whitespace_combo.currentIndexChanged.connect(self._on_part_whitespace_changed)
+        tp.addWidget(self.part_whitespace_combo)
+        tp.addWidget(QLabel("Pattern for each part's T: line:"))
+        self.part_pattern_edit = QLineEdit()
+        self.part_pattern_edit.setText(prefs.get("part_name_pattern", "$PartTitle"))
+        self.part_pattern_edit.textChanged.connect(self._update_part_example)
+        tp.addWidget(self.part_pattern_edit)
+        self.part_example_label = QLabel()
+        self.part_example_label.setStyleSheet("color: #888;")
+        tp.addWidget(self.part_example_label)
+        tp.addWidget(QLabel("Variables:"))
+        part_var_label = QLabel(_FILENAME_PATTERN_VARS_HELP + "\n" + _PART_RENAMING_ONLY_VARS_HELP)
+        part_var_label.setStyleSheet("color: #b4a8a8; font-size: 12px;")
+        part_var_label.setWordWrap(True)
+        tp.addWidget(part_var_label)
+        tp.addStretch()
+        self.tabs.addTab(tab_part, "Part Renaming")
+
+        # Tab 4: CSV Part Sheet
         tab3 = QWidget()
         t3 = QVBoxLayout(tab3)
         self.visible_col_radio = QRadioButton("Use visible table columns")
@@ -281,7 +325,7 @@ class SetExportDialog(QDialog):
         t3.addStretch()
         self.tabs.addTab(tab3, "CSV Part Sheet")
 
-        # Tab 4: Player Column Order
+        # Tab 5: Player Column Order
         tab4 = QWidget()
         t4 = QVBoxLayout(tab4)
         t4.addWidget(QLabel("Drag to reorder player columns for CSV export:"))
@@ -312,10 +356,12 @@ class SetExportDialog(QDialog):
 
         self._output_dir = output_dir
         self._on_csv_toggled(self.csv_check.isChecked())
+        self._on_rename_parts_toggled(self.rename_parts_check.isChecked())
         self._on_column_mode_changed()
         self._load_player_order()
         self._update_player_tab_state()
         self._update_example()
+        self._update_part_example()
 
     def _browse_output(self) -> None:
         start = self._output_dir or str(Path.home())
@@ -327,7 +373,26 @@ class SetExportDialog(QDialog):
 
     def _on_csv_toggled(self, checked: bool) -> None:
         self.composer_check.setEnabled(checked)
+        self.tabs.setTabEnabled(3, checked)
+
+    def _on_rename_parts_toggled(self, checked: bool) -> None:
         self.tabs.setTabEnabled(2, checked)
+
+    def _on_filename_whitespace_changed(self, idx: int) -> None:
+        if self.part_whitespace_combo.currentIndex() != idx:
+            self.part_whitespace_combo.blockSignals(True)
+            self.part_whitespace_combo.setCurrentIndex(idx)
+            self.part_whitespace_combo.blockSignals(False)
+        self._update_example()
+        self._update_part_example()
+
+    def _on_part_whitespace_changed(self, idx: int) -> None:
+        if self.whitespace_combo.currentIndex() != idx:
+            self.whitespace_combo.blockSignals(True)
+            self.whitespace_combo.setCurrentIndex(idx)
+            self.whitespace_combo.blockSignals(False)
+        self._update_example()
+        self._update_part_example()
 
     def _on_column_mode_changed(self) -> None:
         use_visible = self.visible_col_radio.isChecked()
@@ -348,8 +413,8 @@ class SetExportDialog(QDialog):
 
     def _update_player_tab_state(self) -> None:
         has_layout = self.band_layout_id is not None
-        self.tabs.setTabEnabled(3, has_layout)
-        self.tabs.setTabToolTip(3, "Assign a band layout to the setlist to configure player column order." if not has_layout else "")
+        self.tabs.setTabEnabled(4, has_layout)
+        self.tabs.setTabToolTip(4, "Assign a band layout to the setlist to configure player column order." if not has_layout else "")
         if has_layout:
             self.player_order_placeholder.hide()
             self.player_list.show()
@@ -375,6 +440,30 @@ class SetExportDialog(QDialog):
         )
         self.example_label.setText(f"Example: {example}")
 
+    def _update_part_example(self) -> None:
+        pattern = self.part_pattern_edit.text() or "$PartTitle"
+        idx = self.whitespace_combo.currentIndex()
+        ws = SPACE_REPLACE_CHARS[idx] if 0 <= idx < len(SPACE_REPLACE_CHARS) else " "
+        example = format_part_name(
+            pattern,
+            file_path="my song.abc",
+            index=2,
+            title="My Song",
+            composers="Composer Name",
+            transcriber="Transcriber",
+            duration_seconds=125,
+            part_count=3,
+            part_instrument="Lute",
+            part_name="Basic Flute",
+            part_title="Flute",
+            part_number_display="1",
+            player_assignment="Player One",
+            numeration="1",
+            whitespace_replace=ws,
+            part_count_zero_padded=True,
+        )
+        self.part_example_label.setText(f"Example T: line: {example}")
+
     def _get_settings(self) -> SetExportSettings:
         csv_enabled = {col: self.csv_col_checks[col].isChecked() for col in CSV_AVAILABLE_COLUMNS}
         return SetExportSettings(
@@ -391,6 +480,8 @@ class SetExportDialog(QDialog):
             csv_use_visible_columns=self.visible_col_radio.isChecked(),
             csv_columns_enabled=csv_enabled,
             csv_part_columns="part" if self.part_col_combo.currentIndex() == 0 else "instrument",
+            rename_parts=self.rename_parts_check.isChecked(),
+            part_name_pattern=self.part_pattern_edit.text() or "$PartTitle",
         )
 
     def _get_player_ids_in_order(self) -> list[int] | None:
@@ -463,6 +554,8 @@ class SetExportDialog(QDialog):
             "csv_use_visible_columns": self.visible_col_radio.isChecked(),
             "csv_columns_enabled": {col: self.csv_col_checks[col].isChecked() for col in CSV_AVAILABLE_COLUMNS},
             "csv_part_columns": "part" if self.part_col_combo.currentIndex() == 0 else "instrument",
+            "rename_parts": self.rename_parts_check.isChecked(),
+            "part_name_pattern": self.part_pattern_edit.text(),
         }
         save_set_export_prefs(prefs)
 

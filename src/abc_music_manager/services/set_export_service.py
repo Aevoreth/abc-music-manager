@@ -24,7 +24,12 @@ from ..db.setlist_repo import (
 )
 from ..db.setlist_repo import SetlistItemSongMetaRow
 from ..db.instrument import get_instrument_name
-from .filename_template import format_filename
+from .abc_part_title_rewrite import rewrite_abc_part_t_lines
+from .filename_template import (
+    compute_part_numeration,
+    format_filename,
+    format_part_name,
+)
 
 
 # Invalid path chars for Windows (and common across OS)
@@ -51,6 +56,8 @@ class SetExportSettings:
     csv_use_visible_columns: bool
     csv_columns_enabled: dict[str, bool]
     csv_part_columns: str  # "part" or "instrument"
+    rename_parts: bool
+    part_name_pattern: str
 
 
 # CSV columns for custom mode
@@ -135,6 +142,75 @@ def _get_part_display(
                         return name
             return (p.get("part_name") or "").strip() or f"Part {part_number}"
     return f"Part {part_number}"
+
+
+def _player_name_for_part(
+    assigns: dict[int, int | None],
+    players_by_id: dict[int, str],
+    part_number: int,
+) -> str:
+    """Band layout player display name for this part; lowest player_id if multiple."""
+    candidates = sorted(pid for pid, pn in assigns.items() if pn == part_number)
+    if not candidates:
+        return ""
+    pid = candidates[0]
+    return players_by_id.get(pid) or f"Player {pid}"
+
+
+def _build_part_t_line_map(
+    conn: sqlite3.Connection,
+    row: SetlistItemSongMetaRow,
+    file_path: str,
+    list_index: int,
+    band_layout_id: int | None,
+    assigns: dict[int, int | None],
+    players_by_id: dict[int, str],
+    settings: SetExportSettings,
+) -> dict[int, str]:
+    """part_number -> new T: body text for rewrite_abc_part_t_lines."""
+    try:
+        parts = json.loads(row.parts_json) if row.parts_json else []
+    except (json.JSONDecodeError, TypeError):
+        parts = []
+    if not parts:
+        return {}
+
+    numer = compute_part_numeration(parts)
+    out: dict[int, str] = {}
+    for p in parts:
+        pn = int(p.get("part_number") or 0)
+        if not pn:
+            continue
+        raw_name = p.get("part_name")
+        part_name_str = "" if raw_name is None else str(raw_name)
+        tf = p.get("title_from_t")
+        title_from_t = "" if tf is None else str(tf)
+        iid = p.get("instrument_id")
+        inst = ""
+        if iid:
+            inst = get_instrument_name(conn, iid) or ""
+        player = _player_name_for_part(assigns, players_by_id, pn) if band_layout_id else ""
+
+        new_title = format_part_name(
+            settings.part_name_pattern,
+            file_path=file_path,
+            index=list_index,
+            title=row.title or "",
+            composers=row.composers or "",
+            transcriber=row.transcriber,
+            duration_seconds=row.duration_seconds,
+            part_count=row.part_count,
+            part_instrument=inst,
+            part_name=part_name_str,
+            part_title=title_from_t,
+            part_number_display=str(pn),
+            player_assignment=player,
+            numeration=numer.get(pn, ""),
+            whitespace_replace=settings.whitespace_replace,
+            part_count_zero_padded=settings.part_count_zero_padded,
+        )
+        out[pn] = new_title
+    return out
 
 
 def _generate_csv(
@@ -250,18 +326,21 @@ def export_set(
         status("Preparing export...")
 
     try:
+        players_by_id = {p.id: p.name for p in list_players(conn)}
+
         # Build target filenames
         used_names: dict[str, int] = {}
-        target_names: list[tuple[str, Path]] = []
+        export_entries: list[tuple[int, SetlistItemSongMetaRow, Path, str]] = []
 
         for i, row in enumerate(items):
             if row.item.song_id not in file_paths:
                 continue
             src = Path(file_paths[row.item.song_id])
+            fp = file_paths[row.item.song_id]
             if settings.rename_abc_files:
                 base = format_filename(
                     settings.filename_pattern,
-                    file_path=file_paths[row.item.song_id],
+                    file_path=fp,
                     index=i,
                     title=row.title,
                     composers=row.composers,
@@ -281,11 +360,28 @@ def export_set(
                 base = f"{stem}_{used_names[base]}{ext}"
             else:
                 used_names[base] = 1
-            target_names.append((base, src))
+            export_entries.append((i, row, src, base))
 
-        for i, (base, src) in enumerate(target_names):
-            copy_to.joinpath(base).write_bytes(src.read_bytes())
-            status(f"Copied ABC {i + 1} of {len(target_names)}...")
+        for j, (list_i, row, src, base) in enumerate(export_entries):
+            dest = copy_to / base
+            if settings.rename_parts:
+                assigns = get_setlist_band_assignments(conn, row.item.id) if band_layout_id else {}
+                part_map = _build_part_t_line_map(
+                    conn,
+                    row,
+                    file_path=file_paths[row.item.song_id],
+                    list_index=list_i,
+                    band_layout_id=band_layout_id,
+                    assigns=assigns,
+                    players_by_id=players_by_id,
+                    settings=settings,
+                )
+                text = src.read_text(encoding="utf-8", errors="replace")
+                new_text = rewrite_abc_part_t_lines(text, part_map)
+                dest.write_text(new_text, encoding="utf-8")
+            else:
+                dest.write_bytes(src.read_bytes())
+            status(f"Copied ABC {j + 1} of {len(export_entries)}...")
 
         if settings.export_csv_part_sheet:
             status("Generating CSV part sheet...")
@@ -325,6 +421,3 @@ def export_set(
         if not settings.export_as_folder and copy_to.exists():
             shutil.rmtree(copy_to, ignore_errors=True)
         raise
-
-
-from typing import Callable
