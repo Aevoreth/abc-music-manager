@@ -6,12 +6,13 @@ Migration system: schema_version table tracks DB version. init_database() runs p
 migrations in order to bring any previous-version DB up to CURRENT_SCHEMA_VERSION.
 """
 
+import json
 import os
 import sqlite3
 from pathlib import Path
 
 # Current schema version. Increment when adding migrations. See SCHEMA.md.
-CURRENT_SCHEMA_VERSION = 11
+CURRENT_SCHEMA_VERSION = 12
 
 
 def get_db_path() -> Path:
@@ -450,7 +451,7 @@ def _migrate_setlist_folders(conn: sqlite3.Connection) -> None:
 # Exported for use by player_repo and bands_view.
 PLAYER_INSTRUMENTS = [
     "Basic Fiddle",
-    "Student Fiddle",
+    "Student's Fiddle",
     "Bardic Fiddle",
     "Lonely Mountain Fiddle",
     "Sprightly Fiddle",
@@ -529,6 +530,97 @@ def _migrate_song_last_layout(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _migrate_student_fiddle_rename(conn: sqlite3.Connection) -> None:
+    """Rename seeded instrument to LOTRO canonical 'Student's Fiddle' and merge duplicate Instrument rows."""
+    from datetime import datetime, timezone
+
+    old_name = "Student Fiddle"
+    new_name = "Student's Fiddle"
+    now = datetime.now(timezone.utc).isoformat()
+
+    cur = conn.execute("SELECT id FROM Instrument WHERE name = ?", (old_name,))
+    old_row = cur.fetchone()
+    cur = conn.execute("SELECT id FROM Instrument WHERE name = ?", (new_name,))
+    new_row = cur.fetchone()
+
+    if not old_row:
+        return
+
+    old_id = old_row[0]
+
+    if not new_row:
+        conn.execute(
+            "UPDATE Instrument SET name = ?, updated_at = ? WHERE id = ?",
+            (new_name, now, old_id),
+        )
+        conn.commit()
+        return
+
+    new_id = new_row[0]
+
+    cur = conn.execute(
+        """
+        SELECT DISTINCT pi1.player_id
+        FROM PlayerInstrument pi1
+        JOIN PlayerInstrument pi2 ON pi1.player_id = pi2.player_id
+        WHERE pi1.instrument_id = ? AND pi2.instrument_id = ?
+        """,
+        (old_id, new_id),
+    )
+    for (player_id,) in cur.fetchall():
+        cur2 = conn.execute(
+            """
+            SELECT id, instrument_id, has_instrument, has_proficiency
+            FROM PlayerInstrument
+            WHERE player_id = ? AND instrument_id IN (?, ?)
+            """,
+            (player_id, old_id, new_id),
+        )
+        rows = cur2.fetchall()
+        new_pi = [r for r in rows if r[1] == new_id]
+        old_pi = [r for r in rows if r[1] == old_id]
+        if len(new_pi) != 1 or len(old_pi) != 1:
+            continue
+        merged_hi = max(new_pi[0][2], old_pi[0][2])
+        merged_hp = max(new_pi[0][3], old_pi[0][3])
+        conn.execute(
+            """
+            UPDATE PlayerInstrument
+            SET has_instrument = ?, has_proficiency = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (merged_hi, merged_hp, now, new_pi[0][0]),
+        )
+        conn.execute("DELETE FROM PlayerInstrument WHERE id = ?", (old_pi[0][0],))
+
+    conn.execute(
+        "UPDATE PlayerInstrument SET instrument_id = ?, updated_at = ? WHERE instrument_id = ?",
+        (new_id, now, old_id),
+    )
+
+    cur = conn.execute(
+        "SELECT id, parts FROM Song WHERE parts IS NOT NULL AND parts != '' AND parts != '[]'"
+    )
+    for song_id, parts_json in cur.fetchall():
+        try:
+            parts = json.loads(parts_json)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        changed = False
+        for p in parts:
+            if isinstance(p, dict) and p.get("instrument_id") == old_id:
+                p["instrument_id"] = new_id
+                changed = True
+        if changed:
+            conn.execute(
+                "UPDATE Song SET parts = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(parts), now, song_id),
+            )
+
+    conn.execute("DELETE FROM Instrument WHERE id = ?", (old_id,))
+    conn.commit()
+
+
 # Ordered migrations: (version, migrate_func). Each upgrades from version-1 to version.
 _MIGRATIONS: list[tuple[int, "function"]] = [
     (1, _migrate_status_drop_is_active),
@@ -542,6 +634,7 @@ _MIGRATIONS: list[tuple[int, "function"]] = [
     (9, _migrate_band_layout_sort_order),
     (10, _migrate_player_level_class),
     (11, _migrate_song_last_layout),
+    (12, _migrate_student_fiddle_rename),
 ]
 
 

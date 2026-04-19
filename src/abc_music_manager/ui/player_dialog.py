@@ -31,7 +31,7 @@ from ..db.instrument import get_or_create_instruments_by_names
 INSTRUMENT_COLUMNS: list[list[tuple[str | None, list[str]]]] = [
     # Column 1: Fiddles
     [
-        ("Fiddles", ["Basic Fiddle", "Student Fiddle", "Bardic Fiddle", "Lonely Mountain Fiddle", "Sprightly Fiddle", "Traveler's Trusty Fiddle"]),
+        ("Fiddles", ["Basic Fiddle", "Student's Fiddle", "Bardic Fiddle", "Lonely Mountain Fiddle", "Sprightly Fiddle", "Traveler's Trusty Fiddle"]),
     ],
     # Column 2: Bassoons, Basic Flute, Basic Horn, Basic Clarinet, Basic Bagpipe, Basic Pibgorn
     [
