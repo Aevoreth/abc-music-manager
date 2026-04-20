@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 
 # Whitespace replacement options (from Maestro ExportFilenameTemplate)
@@ -35,14 +35,25 @@ def build_song_variable_map(
     duration_seconds: int | None,
     part_count: int,
     part_count_zero_padded: bool = True,
+    song_length_sep: str = "_",
+    song_length_pad: Literal["both", "seconds"] = "both",
 ) -> dict[str, str]:
-    """Shared $Song* / $FileName / $PartCount variables for filename and part renaming patterns."""
+    """Shared $Song* / $FileName / $PartCount variables for filename and part renaming patterns.
+
+    song_length_sep: between minutes and seconds in $SongLength. Underscore for exported filenames
+    (Windows-safe); colon for part T: titles.
+    song_length_pad: "both" zero-pads minutes and seconds (filenames); "seconds" pads only seconds
+    (part T: titles).
+    """
     filename_stem = Path(file_path).stem if file_path else "unknown"
     duration_str = ""
     if duration_seconds is not None:
         m = duration_seconds // 60
         s = duration_seconds % 60
-        duration_str = f"{m:02d}_{s:02d}"
+        if song_length_pad == "both":
+            duration_str = f"{m:02d}{song_length_sep}{s:02d}"
+        else:
+            duration_str = f"{m}{song_length_sep}{s:02d}"
 
     part_fmt = f"{part_count:02d}" if part_count_zero_padded else str(part_count)
     index_fmt = f"{index + 1:03d}"  # 1-based, zero-padded
@@ -179,6 +190,8 @@ def format_part_name(
         duration_seconds=duration_seconds,
         part_count=part_count,
         part_count_zero_padded=part_count_zero_padded,
+        song_length_sep=":",
+        song_length_pad="seconds",
     )
     variables.update(
         {

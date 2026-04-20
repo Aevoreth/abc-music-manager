@@ -37,6 +37,46 @@ def test_compute_part_numeration_duplicates() -> None:
     assert n[2] == "2"
 
 
+def test_format_part_name_song_length_colon_minutes_unpadded() -> None:
+    s = format_part_name(
+        "$SongLength",
+        file_path="x.abc",
+        index=0,
+        title="T",
+        composers="",
+        transcriber=None,
+        duration_seconds=125,
+        part_count=1,
+        part_instrument="",
+        part_name="",
+        part_title="",
+        part_number_display="1",
+        player_assignment="",
+        numeration="",
+    )
+    assert s == "2:05"
+
+
+def test_format_part_name_song_length_ten_minutes() -> None:
+    s = format_part_name(
+        "$SongLength",
+        file_path="x.abc",
+        index=0,
+        title="T",
+        composers="",
+        transcriber=None,
+        duration_seconds=605,
+        part_count=1,
+        part_instrument="",
+        part_name="",
+        part_title="",
+        part_number_display="1",
+        player_assignment="",
+        numeration="",
+    )
+    assert s == "10:05"
+
+
 def test_format_part_name_variables() -> None:
     s = format_part_name(
         "$PartTitle - $PartName ($PartNumber) [$PlayerAssignment] $Numeration",

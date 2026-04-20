@@ -63,14 +63,25 @@ def _sanitize_set_name(s: str) -> str:
 
 
 # Song-level variables for filename / part T: patterns (see format_filename / format_part_name).
-_FILENAME_PATTERN_VARS_HELP = (
-    "$FileName — Original filename without .abc\n"
-    "$SongIndex — 1-based position in setlist (e.g. 001)\n"
-    "$PartCount — Number of parts\n"
-    "$SongComposer — Composers (C: field)\n"
-    "$SongTranscriber — Transcriber (Z: field)\n"
-    "$SongLength — Duration in mm_ss format\n"
-    "$SongTitle — Title (T: field)"
+def _song_level_vars_help(*, song_length_line: str) -> str:
+    return (
+        "$FileName — Original filename without .abc\n"
+        "$SongIndex — 1-based position in setlist (e.g. 001)\n"
+        "$PartCount — Number of parts\n"
+        "$SongComposer — Composers (C: field)\n"
+        "$SongTranscriber — Transcriber (Z: field)\n"
+        f"{song_length_line}\n"
+        "$SongTitle — Title (T: field)"
+    )
+
+
+_FILENAME_PATTERN_VARS_HELP = _song_level_vars_help(
+    song_length_line="$SongLength — Duration in mm_ss format (for exported filenames)",
+)
+_PART_TAB_SONG_VARS_HELP = _song_level_vars_help(
+    song_length_line=(
+        "$SongLength — Duration as m:ss (minutes not zero-padded, seconds two digits, e.g. 2:05)"
+    ),
 )
 
 _PART_RENAMING_ONLY_VARS_HELP = (
@@ -296,7 +307,7 @@ class SetExportDialog(QDialog):
         self.part_example_label.setStyleSheet("color: #888;")
         tp.addWidget(self.part_example_label)
         tp.addWidget(QLabel("Variables:"))
-        part_var_label = QLabel(_FILENAME_PATTERN_VARS_HELP + "\n" + _PART_RENAMING_ONLY_VARS_HELP)
+        part_var_label = QLabel(_PART_TAB_SONG_VARS_HELP + "\n" + _PART_RENAMING_ONLY_VARS_HELP)
         part_var_label.setStyleSheet("color: #b4a8a8; font-size: 12px;")
         part_var_label.setWordWrap(True)
         tp.addWidget(part_var_label)
