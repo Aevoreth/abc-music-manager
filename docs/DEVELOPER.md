@@ -8,7 +8,7 @@ For developers: build instructions, design docs, and contribution info. End user
 
 ABC Music Manager is a local-first desktop application designed specifically for player musicians in *The Lord of the Rings Online* who manage and perform ABC music libraries. It helps you organize a large ABC library, build and run event setlists, model band layouts, preview multi-part playback, and generate `SongbookData.plugindata` for selected accounts.
 
-> **Status:** Beta — feature-complete except Set Playback mode. UI is built with **PySide6 (Qt)**; Flet was replaced per DECISIONS 026.  
+> **Status:** Beta — Set Play (live) with optional Cloudflare relay is available. UI is built with **PySide6 (Qt)**; Flet was replaced per DECISIONS 026.  
 > **License:** MIT (see [LICENSE.txt](../LICENSE.txt))
 > **Source Code:** [Github - Aevoreth/abc-music-manager](https://github.com/Aevoreth/abc-music-manager)
 > **Disclaimer:** Not affiliated with or endorsed by the creators/publishers of *The Lord of the Rings Online*.
@@ -55,16 +55,11 @@ ABC Music Manager is a local-first desktop application designed specifically for
   - Open/save `*.abcp` (ABC Player compatibility; spec in [FILE_FORMATS.md](FILE_FORMATS.md))
   - Export to folder or zip with configurable naming rules
 
-### Set Playback Mode (Live) (DECISIONS 015) — *Not yet released*
-- **v1:** LAN-only; leader runs WebSocket server; clients connect to leader. **Planned:** internet-wide via relay (same message format).
-- Band leader runs the show; clients can connect to view live set status
-- Highlights:
-  - Last played song (green)
-  - Next selected song (blue)
-- Band layout view shows per player:
-  - Name (top), part number (large/bold center), instrument (bottom)
-  - Instrument change indicator (gold) when instrument differs from previous song
-- Per-client highlight: each viewer can highlight selected players
+### Set Play (Live) (DECISIONS 015)
+- **Set Play** (bandleader) and **Band Assistant** pages in the app; standalone assistant: `python main.py --assistant`.
+- Bandleader: load a setlist (band layout required), checkboxes for played / current / next / skip, **Advance song**, optional PlayLog actions, up-next band grid with current-song part in the card header gutter (same visual language as the setlist editor).
+- **Relay (Phase 2):** Deploy `workers/set-play-relay` with Wrangler (`npm install` in that folder, `npx wrangler login`, `npx wrangler deploy`). Set **Set Play relay URL** in Settings → Playback to your Worker URL (`wss://…` or `https://…`, no trailing slash). Leader enables **Broadcast session** to obtain a room code; assistants enter the code and connect.
+- Message format: JSON `set_play_state_v1` (full snapshot); see [`src/abc_music_manager/services/set_play_sync.py`](../src/abc_music_manager/services/set_play_sync.py).
 
 ### Compatibility Feature: `SongbookData.plugindata`
 - Manual generation/writing of `SongbookData.plugindata` as **Lua table source** (UTF-8 text: top-level `return` plus a table with `Directories` and `Songs`) to selected account PluginData directories (where applicable). This matches what the Songbook plugin loads; it is **not** JSON.
@@ -81,7 +76,7 @@ ABC Music Manager is a local-first desktop application designed specifically for
    # source .venv/bin/activate  # macOS/Linux
    ```
 2. **Install dependencies:** `pip install -r requirements.txt` (PySide6 and other deps)
-3. **Run from repo root:** `python main.py`
+3. **Run from repo root:** `python main.py` — or **Band Assistant only:** `python main.py --assistant`
 
 The database is created automatically on first run at `~/.abc_music_manager/abc_music_manager.sqlite` (or `$HOME/.abc_music_manager` on macOS/Linux). Schema and migration details: [SCHEMA.md](../SCHEMA.md). Override with the `ABC_MUSIC_MANAGER_DATA` environment variable to use a custom data directory. Run unit tests with `pytest tests/ -v`.
 

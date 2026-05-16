@@ -134,7 +134,7 @@ class MainWindow(QMainWindow):
     """Main application window with navigation and stacked content."""
 
     # Set Playback temporarily disabled (half-baked, not functional yet)
-    PAGES = ["Library", "Setlists", "Bands", "Settings"]
+    PAGES = ["Library", "Setlists", "Bands", "Set Play", "Band Assistant", "Settings"]
 
     def __init__(self, app_state: AppState) -> None:
         super().__init__()
@@ -172,15 +172,20 @@ class MainWindow(QMainWindow):
         from .library_view import LibraryView
         from .setlists_view import SetlistsView
         from .bands_view import BandsView
-        # from .set_playback_view import SetPlaybackView  # disabled
+        from .set_play_view import SetPlayView
         from .settings_view import SettingsView
         self.library_view = LibraryView(app_state, self.playback_state)
         self.setlists_view = SetlistsView(app_state, self.playback_state)
         self.bands_view = BandsView(app_state)
+        self.set_play_view = SetPlayView(app_state, self.playback_state, assistant_mode=False)
+        self.band_assistant_view = SetPlayView(
+            app_state, self.playback_state, assistant_mode=True
+        )
         self.stacked.addWidget(self.library_view)
         self.stacked.addWidget(self.setlists_view)
         self.stacked.addWidget(self.bands_view)
-        # self.stacked.addWidget(SetPlaybackView(app_state, self.playback_state))  # disabled
+        self.stacked.addWidget(self.set_play_view)
+        self.stacked.addWidget(self.band_assistant_view)
         self.stacked.addWidget(SettingsView(app_state, self.playback_state))
         self.library_view.navigateToSetlist.connect(self._on_navigate_to_setlist)
         self._playback_toolbar.playlistExportedAsSet.connect(self._on_navigate_to_setlist)

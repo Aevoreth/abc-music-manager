@@ -138,8 +138,9 @@
 
 ## 015 — Set Playback client sync protocol
 
-- **Phase 1 (v1):** LAN-only. Leader runs a WebSocket server; clients connect directly to leader's IP:port (or discover via mDNS). Message format is transport-agnostic (e.g. JSON: set state, highlights) so the same protocol can be used over other transports later.
-- **Phase 2 (planned):** Internet-wide Set Playback via a relay. Leader and clients connect to a central relay; same message format. Auth and hosting TBD when Phase 2 is implemented. No relay code in v1.
+- **Phase 1 (optional / future):** LAN-only. Leader runs a WebSocket server; clients connect directly to leader's IP:port (or discover via mDNS). Message format is transport-agnostic so other transports can reuse it.
+- **Phase 2 (implemented):** Internet relay using **Cloudflare Workers + SQLite-backed Durable Objects** (`workers/set-play-relay/`). Leader and assistants open **outbound** `wss://` to the Worker; no port forwarding. JSON envelope: `type: "set_play_state_v1"` (revision, set metadata, row list, played/current/next/skip ids, `next_layout_cards` payload). Leader authenticates with `leaderToken` query param; assistants join read-only with room code only.
+- **App:** Settings → Playback stores `set_play_relay_url` (wss/https base). Bandleader enables "Broadcast session"; assistants use in-app **Band Assistant** page or `python main.py --assistant`.
 
 ## 016 — Compatibility support matrix
 

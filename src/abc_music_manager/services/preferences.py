@@ -761,6 +761,22 @@ def set_playback_last_band_layout_key(key: str | None) -> None:
     save_preferences(prefs)
 
 
+def get_set_play_relay_url() -> str:
+    """Base URL for Set Play Cloudflare relay (wss), no trailing slash."""
+    prefs = load_preferences()
+    v = prefs.get("set_play_relay_url")
+    return str(v).strip() if isinstance(v, str) else ""
+
+
+def set_set_play_relay_url(url: str | None) -> None:
+    prefs = load_preferences()
+    if url and url.strip():
+        prefs["set_play_relay_url"] = url.strip().rstrip("/")
+    else:
+        prefs.pop("set_play_relay_url", None)
+    save_preferences(prefs)
+
+
 def resolve_music_path(relative_or_absolute: str) -> str:
     """
     If path is relative, resolve against the Music folder and return absolute path.

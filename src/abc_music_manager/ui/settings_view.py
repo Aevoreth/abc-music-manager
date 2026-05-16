@@ -72,6 +72,8 @@ from ..services.preferences import (
     resolve_music_path,
     get_default_filters,
     set_default_filters,
+    get_set_play_relay_url,
+    set_set_play_relay_url,
 )
 from ..db import list_folder_rules, add_folder_rule, update_folder_rule, delete_folder_rule, FolderRuleRow, RuleType
 from ..db.status_repo import list_statuses, add_status, update_status, delete_status, reorder_statuses, StatusRow
@@ -1166,6 +1168,20 @@ class SettingsView(QWidget):
         stereo_row.addWidget(self.playback_stereo_slider)
         stereo_row.addStretch()
         v.addLayout(stereo_row)
+        relay_row = QHBoxLayout()
+        relay_row.addWidget(QLabel("Set Play relay URL (wss or https, no trailing slash):"))
+        self.set_play_relay_edit = QLineEdit()
+        self.set_play_relay_edit.setPlaceholderText(
+            "wss://abc-set-play-relay.your-subdomain.workers.dev"
+        )
+        self.set_play_relay_edit.setText(get_set_play_relay_url())
+        self.set_play_relay_edit.textChanged.connect(
+            lambda: set_set_play_relay_url(
+                self.set_play_relay_edit.text().strip() or None
+            )
+        )
+        relay_row.addWidget(self.set_play_relay_edit, 1)
+        v.addLayout(relay_row)
         v.addStretch()
         return w
 

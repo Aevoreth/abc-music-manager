@@ -18,6 +18,7 @@ from .theme import (
     COLOR_ERROR,
     COLOR_WARNING_ORANGE,
     COLOR_TEXT_SECONDARY,
+    COLOR_PRIMARY,
 )
 
 # Grid and card specs
@@ -109,6 +110,7 @@ class BandLayoutGridWidget(QWidget):
         self._drag_card_start_x = 0
         self._drag_card_start_y = 0
         self._original_z_order: list[LayoutCard] = []
+        self._highlight_player_ids: frozenset[int] = frozenset()
 
         self._add_player_btn = QPushButton("Add Player", self)
         self._add_player_btn.setFixedWidth(
@@ -127,6 +129,11 @@ class BandLayoutGridWidget(QWidget):
     def set_cards(self, cards: list[LayoutCard]) -> None:
         """Replace the card list."""
         self._cards = list(cards)
+        self.update()
+
+    def set_highlight_player_ids(self, player_ids: frozenset[int] | set[int]) -> None:
+        """Draw an extra border on cards for these player ids (local UI highlight)."""
+        self._highlight_player_ids = frozenset(player_ids)
         self.update()
 
     def get_cards(self) -> list[LayoutCard]:
@@ -274,11 +281,17 @@ class BandLayoutGridWidget(QWidget):
 
             overlap = self._has_overlap(card)
             if overlap:
-                painter.setPen(QPen(QColor(COLOR_ERROR), 3))
+                painter.setPen(QPen(QColor(COLOR_ERROR), 2))
             else:
                 painter.setPen(QPen(QColor(COLOR_OUTLINE), 1))
             painter.setBrush(QColor(COLOR_SURFACE))
             painter.drawRoundedRect(rect, 4, 4)
+            if card.player_id in self._highlight_player_ids:
+                hi = QColor(COLOR_PRIMARY)
+                hi.setAlphaF(0.85)
+                painter.setPen(QPen(hi, 2))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), 4, 4)
 
             # Card content - all text centered, shrink font if needed to fit
             dup_color = QColor("#ff4444") if getattr(card, "part_duplicate", False) else QColor(COLOR_ON_SURFACE)
