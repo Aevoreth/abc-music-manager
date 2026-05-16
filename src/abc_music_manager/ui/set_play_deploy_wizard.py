@@ -6,7 +6,7 @@ import re
 import sys
 import uuid
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 from PySide6.QtCore import QProcess, QProcessEnvironment, Qt
 from PySide6.QtWidgets import (
@@ -91,8 +91,8 @@ class SetPlayRelayDeployWizard(QDialog):
                 "• Check for Node.js (and on Windows you can try installing Node LTS with winget)<br>"
                 "• Run npm install (includes Wrangler)<br>"
                 "• Open a browser so you can sign in to Cloudflare (wrangler login)<br>"
-                "• Run <code>wrangler delete --force</code> for that worker, then deploy a fresh copy "
-                "(delete runs only after login, immediately before deploy)<br>"
+                "• On a dedicated step, run <code>wrangler delete --force</code> for that worker (after login), "
+                "then deploy a fresh copy<br>"
                 "• Deploy the worker to your Cloudflare account (wrangler deploy)<br><br>"
                 "You will need a Cloudflare account. The browser step cannot be skipped."
             )
@@ -152,21 +152,42 @@ class SetPlayRelayDeployWizard(QDialog):
             "Step 3 — Cloudflare login",
             "Runs wrangler login. Complete sign-in in the browser; this window will continue when finished.",
         )
-        deploy_help = (
-            "When redeploying, clicking Next on this screen removes the previous worker on Cloudflare, "
-            "then runs wrangler deploy. When deploy succeeds, click Next to finish and copy your URL."
-            if delete_worker_first
-            else "Runs wrangler deploy. When it succeeds, click Next to finish and copy your URL."
-        )
-        self._log_deploy = self._make_step_page("Step 4 — Deploy", deploy_help)
+        if delete_worker_first:
+            self._log_delete = self._make_step_page(
+                "Step 4 — Remove previous worker",
+                "Runs wrangler delete --force in the deploy folder. Complete login first, review the log, "
+                "then go on to Deploy.",
+            )
+            self._idx_delete: Optional[int] = 4
+            deploy_step_no = 5
+            deploy_help = (
+                "Runs wrangler deploy. When redeploying, run the Remove previous worker step before this one. "
+                "When deploy succeeds, click Next to finish."
+            )
+        else:
+            self._log_delete = None
+            self._idx_delete = None
+            deploy_step_no = 4
+            deploy_help = "Runs wrangler deploy. When it succeeds, click Next to finish and copy your URL."
+        self._log_deploy = self._make_step_page(f"Step {deploy_step_no} — Deploy", deploy_help)
+        self._idx_deploy = deploy_step_no
         self._done_page = QWidget()
         done_l = QVBoxLayout(self._done_page)
-        done_l.addWidget(
-            QLabel(
-                "Copy the relay URL (wss) into Set Playback, paste it into this relay and click OK, "
-                "or use Add to Set Playback when creating a new entry."
+        if on_deploy_url is not None:
+            done_hint = (
+                "Click <b>OK</b> to return to the relay editor. The new URL is already in the URL field "
+                "(use Copy if you need it elsewhere)."
             )
-        )
+            done_intro = QLabel(done_hint)
+            done_intro.setTextFormat(Qt.TextFormat.RichText)
+        else:
+            done_intro = QLabel(
+                "Copy the relay URL (wss) into Set Playback, or use Add to Set Playback when creating a new entry. "
+                "Click OK to close."
+            )
+        done_intro.setWordWrap(True)
+        done_intro.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        done_l.addWidget(done_intro)
         self._url_out = QTextEdit()
         self._url_out.setReadOnly(True)
         self._url_out.setMaximumHeight(72)
@@ -176,9 +197,12 @@ class SetPlayRelayDeployWizard(QDialog):
         copy_btn.clicked.connect(self._copy_url)
         add_btn = QPushButton("Add to Set Playback…")
         add_btn.clicked.connect(self._add_to_set_playback)
+        ok_done = QPushButton("OK")
+        ok_done.clicked.connect(self._done_ok)
         done_btn_row.addWidget(copy_btn)
         done_btn_row.addWidget(add_btn)
         done_btn_row.addStretch()
+        done_btn_row.addWidget(ok_done)
         done_l.addLayout(done_btn_row)
         self._stack.addWidget(self._done_page)
 
@@ -196,7 +220,6 @@ class SetPlayRelayDeployWizard(QDialog):
 
         self._page_idx = 0
         self._sync_done = False
-        self._redeploy_delete_done = False
         self._update_nav()
 
     def _refresh_path_label(self) -> None:
@@ -265,14 +288,6 @@ class SetPlayRelayDeployWizard(QDialog):
             return
 
         if self._page_idx < n - 2:
-            if (
-                self._delete_worker_first
-                and not self._redeploy_delete_done
-                and self._page_idx == 3
-            ):
-                if not self._maybe_run_redeploy_delete():
-                    return
-                self._redeploy_delete_done = True
             self._page_idx += 1
             self._stack.setCurrentIndex(self._page_idx)
             self._update_nav()
@@ -295,7 +310,10 @@ class SetPlayRelayDeployWizard(QDialog):
         if self._page_idx == 3:
             self._run_wrangler_login(log, deploy)
             return
-        if self._page_idx == 4:
+        if self._idx_delete is not None and self._page_idx == self._idx_delete:
+            self._run_wrangler_delete(log, deploy)
+            return
+        if self._page_idx == self._idx_deploy:
             self._run_wrangler_deploy(log, deploy)
 
     def _append_log(self, log: QTextEdit, text: str) -> None:
@@ -303,42 +321,12 @@ class SetPlayRelayDeployWizard(QDialog):
         sb = log.verticalScrollBar()
         sb.setValue(sb.maximum())
 
-    def _maybe_run_redeploy_delete(self) -> bool:
-        """Run wrangler delete before deploy; return False if user cancels after failure."""
-        code, out = self._wrangler_delete_blocking(self._deploy_dir)
-        if code == 0:
-            return True
-        tail = out.strip()
-        if len(tail) > 3500:
-            tail = "…\n" + tail[-3500:]
-        r = QMessageBox.question(
-            self,
-            "Wrangler delete failed",
-            "The worker could not be deleted (output below). You can still continue if this "
-            "worker was never deployed from this PC, or you want to run deploy anyway.\n\n"
-            f"{tail}\n\n"
-            "Continue without a successful delete?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        return r == QMessageBox.StandardButton.Yes
-
-    def _wrangler_delete_blocking(self, deploy: Path) -> tuple[int, str]:
-        """Run wrangler delete --force in deploy dir; block until finished."""
-        proc = QProcess()
-        proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
-        proc.setWorkingDirectory(str(deploy))
-        proc.setProcessEnvironment(QProcessEnvironment.systemEnvironment())
-        if sys.platform == "win32":
-            proc.start("cmd.exe", ["/c", "npx", "wrangler", "delete", "--force"])
-        else:
-            proc.start("npx", ["wrangler", "delete", "--force"])
-        if not proc.waitForFinished(180_000):
-            proc.kill()
-            proc.waitForFinished(5_000)
-            return -1, "Timed out waiting for wrangler delete (3 min)."
-        out = bytes(proc.readAllStandardOutput()).decode(errors="replace")
-        return proc.exitCode(), out
+    def _done_ok(self) -> None:
+        """Close wizard; re-apply URL to parent editor when opened from SetPlayRelayEditor."""
+        t = self._url_out.toPlainText().strip()
+        if t and self._on_deploy_url:
+            self._on_deploy_url(t)
+        self.accept()
 
     def _run_cmd(
         self,
@@ -368,7 +356,7 @@ class SetPlayRelayDeployWizard(QDialog):
         def finished(code: int, status: QProcess.ExitStatus) -> None:
             read_out()
             self._append_log(log, f"-- exit code {code} --")
-            if self._page_idx == 4 and code == 0:
+            if self._page_idx == self._idx_deploy and code == 0:
                 text = log.toPlainText()
                 m = _WORKERS_DEV_RE.search(text)
                 if m:
@@ -415,6 +403,12 @@ class SetPlayRelayDeployWizard(QDialog):
             self._run_cmd(log, "cmd.exe", ["/c", "npx", "wrangler", "login"], cwd=deploy)
         else:
             self._run_cmd(log, "npx", ["wrangler", "login"], cwd=deploy)
+
+    def _run_wrangler_delete(self, log: QTextEdit, deploy: Path) -> None:
+        if sys.platform == "win32":
+            self._run_cmd(log, "cmd.exe", ["/c", "npx", "wrangler", "delete", "--force"], cwd=deploy)
+        else:
+            self._run_cmd(log, "npx", ["wrangler", "delete", "--force"], cwd=deploy)
 
     def _run_wrangler_deploy(self, log: QTextEdit, deploy: Path) -> None:
         if sys.platform == "win32":
