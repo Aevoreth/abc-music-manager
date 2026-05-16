@@ -4,6 +4,32 @@
 import os
 import sys
 block_cipher = None
+
+
+def _exit_if_windows_dist_exe_locked():
+    """PyInstaller replaces the output .exe via os.remove; that fails if the app is still running."""
+    if sys.platform != "win32":
+        return
+    try:
+        distpath = DISTPATH
+    except NameError:
+        return
+    target = os.path.join(distpath, "ABC Music Manager.exe")
+    if not os.path.isfile(target):
+        return
+    try:
+        os.remove(target)
+    except PermissionError:
+        print(
+            "\nCannot rebuild: the previous build is still locked:\n"
+            f"  {os.path.abspath(target)}\n\n"
+            "Close any running ABC Music Manager (Task Manager if needed), then rebuild.\n"
+            "Or delete/rename that .exe manually and run PyInstaller again.\n",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
 docs_datas = [(os.path.join('docs', f), 'docs') for f in os.listdir('docs')
               if os.path.isfile(os.path.join('docs', f))]
 
@@ -33,6 +59,9 @@ def _set_play_relay_worker_datas():
 
 
 set_play_worker_datas = _set_play_relay_worker_datas()
+
+_exit_if_windows_dist_exe_locked()
+
 a = Analysis(
     ['main.py'],
     pathex=['src'],

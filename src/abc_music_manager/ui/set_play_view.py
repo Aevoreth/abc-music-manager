@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import urllib.error
-import urllib.request
 from typing import Any
 
 from PySide6.QtCore import Qt, QTimer
@@ -50,6 +49,7 @@ from ..services.set_play_state import (
 )
 from ..services.set_play_sync import STATE_TYPE, apply_snapshot_to_session, snapshot_from_leader
 from ..services.set_play_relay_client import SetPlayRelayClient
+from ..services.set_play_relay_http import create_relay_room
 from ..db.setlist_repo import (
     SetlistItemRow,
     SetlistItemSongMetaRow,
@@ -91,30 +91,6 @@ def _fmt_hhmmss(sec: int) -> str:
     h, m = divmod(sec, 3600)
     m, s = divmod(m, 60)
     return f"{h}:{m:02d}:{s:02d}"
-
-
-def _relay_https_base(url: str) -> str:
-    u = (url or "").strip().rstrip("/")
-    if u.startswith("wss://"):
-        return "https://" + u[6:]
-    if u.startswith("https://"):
-        return u
-    if u.startswith("http://"):
-        return u
-    return "https://" + u
-
-
-def create_relay_room(https_base: str) -> tuple[str, str]:
-    body = b"{}"
-    req = urllib.request.Request(
-        _relay_https_base(https_base) + "/api/rooms",
-        data=body,
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    return str(data["roomCode"]), str(data["leaderToken"])
 
 
 class SetPlayReadOnlyBandGrid(BandLayoutGridWidget):
