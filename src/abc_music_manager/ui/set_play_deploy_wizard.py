@@ -44,16 +44,22 @@ def https_to_wss_worker_url(https_url: str) -> str:
 
 
 class SetPlayRelayDeployWizard(QDialog):
-    """Overview → extract → Node → npm install → wrangler login → deploy."""
+    """Overview → extract → Node → npm → wrangler login → (redeploy: delete) → deploy."""
 
     def __init__(
         self,
         parent: QWidget | None = None,
         *,
         on_deploy_url: Callable[[str], None] | None = None,
+        delete_worker_first: bool = False,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Create your own Set Play relay")
+        self._delete_worker_first = delete_worker_first
+        self.setWindowTitle(
+            "Redeploy Set Play relay worker"
+            if delete_worker_first
+            else "Create your own Set Play relay"
+        )
         self.resize(560, 420)
         self._on_deploy_url = on_deploy_url
         self._deploy_dir = resolve_set_play_deploy_directory()
@@ -68,17 +74,43 @@ class SetPlayRelayDeployWizard(QDialog):
         # ---- Page 0: overview
         overview = QWidget()
         ov_l = QVBoxLayout(overview)
-        intro = QLabel(
-            "This assistant will:\n\n"
-            "• Copy the relay worker template to a folder on your computer\n"
-            "• Check for Node.js (and on Windows you can try installing Node LTS with winget)\n"
-            "• Run npm install (includes Wrangler)\n"
-            "• Open a browser so you can sign in to Cloudflare (wrangler login)\n"
-            "• Deploy the worker to your Cloudflare account (wrangler deploy)\n\n"
-            "You will need a Cloudflare account. The browser step cannot be skipped."
-        )
+        if delete_worker_first:
+            intro_text = (
+                "<b>Redeploy removes the worker from Cloudflare and deploys a fresh copy.</b><br><br>"
+                "• You must complete <b>wrangler login</b> with <b>the same Cloudflare account</b> "
+                "that currently hosts this relay. Otherwise delete/deploy will target the wrong account "
+                "or fail.<br>"
+                "• <b>This should almost never be needed.</b> Only use it after extensive testing or "
+                "when you are genuinely hitting Cloudflare limits—not for routine troubleshooting.<br>"
+                "• If several Set Playback relay entries share the same *.workers.dev host (same Wrangler "
+                "worker name), deleting the worker affects <b>all</b> of them until each URL is fixed.<br>"
+                "• After redeploy, the URL string may match the old one if the worker name is unchanged, "
+                "but cloud-side state is reset—update and save the relay URL here if it changed.<br><br>"
+                "This assistant will:<br><br>"
+                "• Copy the relay worker template to a folder on your computer<br>"
+                "• Check for Node.js (and on Windows you can try installing Node LTS with winget)<br>"
+                "• Run npm install (includes Wrangler)<br>"
+                "• Open a browser so you can sign in to Cloudflare (wrangler login)<br>"
+                "• Run <code>wrangler delete --force</code> for that worker, then deploy a fresh copy "
+                "(delete runs only after login, immediately before deploy)<br>"
+                "• Deploy the worker to your Cloudflare account (wrangler deploy)<br><br>"
+                "You will need a Cloudflare account. The browser step cannot be skipped."
+            )
+        else:
+            intro_text = (
+                "This assistant will:\n\n"
+                "• Copy the relay worker template to a folder on your computer\n"
+                "• Check for Node.js (and on Windows you can try installing Node LTS with winget)\n"
+                "• Run npm install (includes Wrangler)\n"
+                "• Open a browser so you can sign in to Cloudflare (wrangler login)\n"
+                "• Deploy the worker to your Cloudflare account (wrangler deploy)\n\n"
+                "You will need a Cloudflare account. The browser step cannot be skipped."
+            )
+        intro = QLabel(intro_text)
         intro.setWordWrap(True)
         intro.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        if delete_worker_first:
+            intro.setTextFormat(Qt.TextFormat.RichText)
         ov_l.addWidget(intro)
         self._path_lbl = QLabel()
         self._path_lbl.setWordWrap(True)
@@ -120,15 +152,19 @@ class SetPlayRelayDeployWizard(QDialog):
             "Step 3 — Cloudflare login",
             "Runs wrangler login. Complete sign-in in the browser; this window will continue when finished.",
         )
-        self._log_deploy = self._make_step_page(
-            "Step 4 — Deploy",
-            "Runs wrangler deploy. When it succeeds, click Next to finish and copy your URL.",
+        deploy_help = (
+            "When redeploying, clicking Next on this screen removes the previous worker on Cloudflare, "
+            "then runs wrangler deploy. When deploy succeeds, click Next to finish and copy your URL."
+            if delete_worker_first
+            else "Runs wrangler deploy. When it succeeds, click Next to finish and copy your URL."
         )
+        self._log_deploy = self._make_step_page("Step 4 — Deploy", deploy_help)
         self._done_page = QWidget()
         done_l = QVBoxLayout(self._done_page)
         done_l.addWidget(
             QLabel(
-                "Copy the relay URL (wss) into Set Playback, or use Add to Set Playback."
+                "Copy the relay URL (wss) into Set Playback, paste it into this relay and click OK, "
+                "or use Add to Set Playback when creating a new entry."
             )
         )
         self._url_out = QTextEdit()
@@ -160,6 +196,7 @@ class SetPlayRelayDeployWizard(QDialog):
 
         self._page_idx = 0
         self._sync_done = False
+        self._redeploy_delete_done = False
         self._update_nav()
 
     def _refresh_path_label(self) -> None:
@@ -228,6 +265,14 @@ class SetPlayRelayDeployWizard(QDialog):
             return
 
         if self._page_idx < n - 2:
+            if (
+                self._delete_worker_first
+                and not self._redeploy_delete_done
+                and self._page_idx == 3
+            ):
+                if not self._maybe_run_redeploy_delete():
+                    return
+                self._redeploy_delete_done = True
             self._page_idx += 1
             self._stack.setCurrentIndex(self._page_idx)
             self._update_nav()
@@ -257,6 +302,43 @@ class SetPlayRelayDeployWizard(QDialog):
         log.append(text.rstrip())
         sb = log.verticalScrollBar()
         sb.setValue(sb.maximum())
+
+    def _maybe_run_redeploy_delete(self) -> bool:
+        """Run wrangler delete before deploy; return False if user cancels after failure."""
+        code, out = self._wrangler_delete_blocking(self._deploy_dir)
+        if code == 0:
+            return True
+        tail = out.strip()
+        if len(tail) > 3500:
+            tail = "…\n" + tail[-3500:]
+        r = QMessageBox.question(
+            self,
+            "Wrangler delete failed",
+            "The worker could not be deleted (output below). You can still continue if this "
+            "worker was never deployed from this PC, or you want to run deploy anyway.\n\n"
+            f"{tail}\n\n"
+            "Continue without a successful delete?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return r == QMessageBox.StandardButton.Yes
+
+    def _wrangler_delete_blocking(self, deploy: Path) -> tuple[int, str]:
+        """Run wrangler delete --force in deploy dir; block until finished."""
+        proc = QProcess()
+        proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        proc.setWorkingDirectory(str(deploy))
+        proc.setProcessEnvironment(QProcessEnvironment.systemEnvironment())
+        if sys.platform == "win32":
+            proc.start("cmd.exe", ["/c", "npx", "wrangler", "delete", "--force"])
+        else:
+            proc.start("npx", ["wrangler", "delete", "--force"])
+        if not proc.waitForFinished(180_000):
+            proc.kill()
+            proc.waitForFinished(5_000)
+            return -1, "Timed out waiting for wrangler delete (3 min)."
+        out = bytes(proc.readAllStandardOutput()).decode(errors="replace")
+        return proc.exitCode(), out
 
     def _run_cmd(
         self,

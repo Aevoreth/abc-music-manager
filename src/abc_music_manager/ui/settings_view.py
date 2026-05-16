@@ -434,6 +434,12 @@ class SetPlayRelayEditor(QDialog):
         layout.addRow("Name:", self.name_edit)
         layout.addRow("URL:", self.url_edit)
         if relay:
+            redeploy_btn = QPushButton("Redeploy worker on Cloudflare…")
+            redeploy_btn.setToolTip(
+                "Remove the Worker and deploy again from the bundled template. Rarely needed—see warnings."
+            )
+            redeploy_btn.clicked.connect(self._on_redeploy_set_play_worker)
+            layout.addRow(redeploy_btn)
             self.name_edit.setText(relay.get("name") or "")
             self.url_edit.setText(relay.get("url") or "")
         ok = QPushButton("OK")
@@ -449,6 +455,30 @@ class SetPlayRelayEditor(QDialog):
             self.url_edit.text().strip(),
             rid,
         )
+
+    def _on_redeploy_set_play_worker(self) -> None:
+        if (
+            QMessageBox.question(
+                self,
+                "Redeploy relay worker?",
+                "This will run the deploy assistant after attempting to delete the existing Worker.\n\n"
+                "You must sign in to Cloudflare with the same account that already hosts this relay; "
+                "otherwise delete or deploy may fail or target the wrong account.\n\n"
+                "You should almost never need this—only after extensive testing or if Cloudflare limits "
+                "are genuinely a problem—not for routine troubleshooting.\n\n"
+                "Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        wiz = SetPlayRelayDeployWizard(
+            self,
+            delete_worker_first=True,
+            on_deploy_url=lambda u: self.url_edit.setText(u),
+        )
+        wiz.exec()
 
 
 class SettingsView(QWidget):
