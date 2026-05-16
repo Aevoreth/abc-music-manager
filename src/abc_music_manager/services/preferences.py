@@ -6,16 +6,16 @@ from __future__ import annotations
 
 import json
 import sys
+import uuid
 from pathlib import Path
-from typing import Any
-
-from ..db.schema import get_db_path
-
+from typing import Any, TypedDict
 
 _skip_all_saves = False
 
 
 def _preferences_path() -> Path:
+    from ..db.schema import get_db_path
+
     return get_db_path().parent / "preferences.json"
 
 
@@ -761,20 +761,179 @@ def set_playback_last_band_layout_key(key: str | None) -> None:
     save_preferences(prefs)
 
 
-def get_set_play_relay_url() -> str:
-    """Base URL for Set Play Cloudflare relay (wss), no trailing slash."""
-    prefs = load_preferences()
-    v = prefs.get("set_play_relay_url")
-    return str(v).strip() if isinstance(v, str) else ""
+class SetPlayRelayDict(TypedDict):
+    """One named Set Play relay (Cloudflare worker base URL)."""
+
+    id: str
+    name: str
+    url: str
 
 
-def set_set_play_relay_url(url: str | None) -> None:
+_SET_PLAY_RELAYS_KEY = "set_play_relays"
+_SET_PLAY_SELECTED_RELAY_ID_KEY = "set_play_selected_relay_id"
+_LEGACY_SET_PLAY_RELAY_URL_KEY = "set_play_relay_url"
+
+
+def _normalize_set_play_relay_url(url: str) -> str:
+    return url.strip().rstrip("/")
+
+
+def _parse_relay_item(raw: Any) -> SetPlayRelayDict | None:
+    if not isinstance(raw, dict):
+        return None
+    rid = raw.get("id")
+    name = raw.get("name")
+    url = raw.get("url")
+    if not isinstance(rid, str) or not rid.strip():
+        return None
+    if not isinstance(url, str) or not url.strip():
+        return None
+    name_str = name.strip() if isinstance(name, str) else ""
+    if not name_str:
+        name_str = "Relay"
+    return {
+        "id": rid.strip(),
+        "name": name_str,
+        "url": _normalize_set_play_relay_url(url),
+    }
+
+
+def _migrate_set_play_relays(prefs: dict[str, Any]) -> bool:
+    """
+    Normalize relay list, migrate legacy set_play_relay_url, fix selection.
+    Mutates prefs. Returns True if the caller should save.
+    """
+    changed = False
+    raw_list = prefs.get(_SET_PLAY_RELAYS_KEY)
+    items: list[SetPlayRelayDict] = []
+    if isinstance(raw_list, list):
+        for raw in raw_list:
+            p = _parse_relay_item(raw)
+            if p:
+                items.append(p)
+
+    legacy = prefs.get(_LEGACY_SET_PLAY_RELAY_URL_KEY)
+    if not items and isinstance(legacy, str) and legacy.strip():
+        rid = str(uuid.uuid4())
+        items = [
+            {
+                "id": rid,
+                "name": "Default",
+                "url": _normalize_set_play_relay_url(legacy),
+            }
+        ]
+        prefs[_SET_PLAY_RELAYS_KEY] = items
+        prefs[_SET_PLAY_SELECTED_RELAY_ID_KEY] = rid
+        prefs.pop(_LEGACY_SET_PLAY_RELAY_URL_KEY, None)
+        return True
+
+    if items:
+        if prefs.get(_SET_PLAY_RELAYS_KEY) != items:
+            prefs[_SET_PLAY_RELAYS_KEY] = items
+            changed = True
+        if _LEGACY_SET_PLAY_RELAY_URL_KEY in prefs:
+            prefs.pop(_LEGACY_SET_PLAY_RELAY_URL_KEY, None)
+            changed = True
+        ids = {x["id"] for x in items}
+        sel = prefs.get(_SET_PLAY_SELECTED_RELAY_ID_KEY)
+        if not isinstance(sel, str) or sel not in ids:
+            prefs[_SET_PLAY_SELECTED_RELAY_ID_KEY] = items[0]["id"]
+            changed = True
+        return changed
+
+    # Empty list
+    if prefs.get(_SET_PLAY_RELAYS_KEY) != []:
+        prefs[_SET_PLAY_RELAYS_KEY] = []
+        changed = True
+    if _LEGACY_SET_PLAY_RELAY_URL_KEY in prefs:
+        prefs.pop(_LEGACY_SET_PLAY_RELAY_URL_KEY, None)
+        changed = True
+    if prefs.pop(_SET_PLAY_SELECTED_RELAY_ID_KEY, None) is not None:
+        changed = True
+    return changed
+
+
+def _coerce_set_play_prefs() -> dict[str, Any]:
     prefs = load_preferences()
-    if url and url.strip():
-        prefs["set_play_relay_url"] = url.strip().rstrip("/")
+    if _migrate_set_play_relays(prefs):
+        save_preferences(prefs)
+    return prefs
+
+
+def get_set_play_relays() -> list[SetPlayRelayDict]:
+    prefs = _coerce_set_play_prefs()
+    raw = prefs.get(_SET_PLAY_RELAYS_KEY)
+    if not isinstance(raw, list):
+        return []
+    out: list[SetPlayRelayDict] = []
+    for x in raw:
+        p = _parse_relay_item(x)
+        if p:
+            out.append(p)
+    return out
+
+
+def set_set_play_relays(relays: list[SetPlayRelayDict]) -> None:
+    prefs = load_preferences()
+    clean: list[SetPlayRelayDict] = []
+    seen: set[str] = set()
+    for r in relays:
+        p = _parse_relay_item(r)
+        if p and p["id"] not in seen:
+            seen.add(p["id"])
+            clean.append(p)
+    prefs[_SET_PLAY_RELAYS_KEY] = clean
+    prefs.pop(_LEGACY_SET_PLAY_RELAY_URL_KEY, None)
+    if clean:
+        sel = prefs.get(_SET_PLAY_SELECTED_RELAY_ID_KEY)
+        if not isinstance(sel, str) or sel not in seen:
+            prefs[_SET_PLAY_SELECTED_RELAY_ID_KEY] = clean[0]["id"]
     else:
-        prefs.pop("set_play_relay_url", None)
+        prefs.pop(_SET_PLAY_SELECTED_RELAY_ID_KEY, None)
     save_preferences(prefs)
+
+
+def get_set_play_selected_relay_id() -> str | None:
+    prefs = _coerce_set_play_prefs()
+    v = prefs.get(_SET_PLAY_SELECTED_RELAY_ID_KEY)
+    if isinstance(v, str) and v.strip():
+        return v.strip()
+    return None
+
+
+def set_set_play_selected_relay_id(relay_id: str | None) -> None:
+    prefs = load_preferences()
+    _migrate_set_play_relays(prefs)
+    if relay_id and relay_id.strip():
+        prefs[_SET_PLAY_SELECTED_RELAY_ID_KEY] = relay_id.strip()
+    else:
+        prefs.pop(_SET_PLAY_SELECTED_RELAY_ID_KEY, None)
+    save_preferences(prefs)
+
+
+def get_active_set_play_relay_url() -> str:
+    """Base URL for the selected Set Play relay (wss/https), no trailing slash."""
+    prefs = _coerce_set_play_prefs()
+    relays = prefs.get(_SET_PLAY_RELAYS_KEY)
+    if not isinstance(relays, list) or not relays:
+        return ""
+    sel = prefs.get(_SET_PLAY_SELECTED_RELAY_ID_KEY)
+    if isinstance(sel, str):
+        for raw in relays:
+            p = _parse_relay_item(raw)
+            if p and p["id"] == sel:
+                return p["url"]
+    # Fall back to first
+    for raw in relays:
+        p = _parse_relay_item(raw)
+        if p:
+            return p["url"]
+    return ""
+
+
+def get_set_play_relay_url() -> str:
+    """Alias for the active relay URL (legacy name)."""
+    return get_active_set_play_relay_url()
 
 
 def resolve_music_path(relative_or_absolute: str) -> str:

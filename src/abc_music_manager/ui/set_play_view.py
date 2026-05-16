@@ -35,7 +35,10 @@ from PySide6.QtWidgets import (
 from ..services.app_state import AppState
 from ..services.playback_state import PlaybackState
 from ..services.preferences import (
-    get_set_play_relay_url,
+    get_active_set_play_relay_url,
+    get_set_play_relays,
+    get_set_play_selected_relay_id,
+    set_set_play_selected_relay_id,
 )
 from ..services.set_play_state import (
     SetPlaySessionState,
@@ -182,6 +185,7 @@ class SetPlayView(QWidget):
         self._relay_code: str | None = None
         self._relay_leader_token: str | None = None
         self._last_pushed_revision: int = -1
+        self._leader_reconnect_btn: QPushButton | None = None
 
         self._relay.connected_ok.connect(self._on_relay_connected)
         self._relay.disconnected.connect(self._on_relay_disconnected)
@@ -252,6 +256,14 @@ class SetPlayView(QWidget):
             pick_row.addWidget(self._start_btn)
             left_lay.addLayout(pick_row)
 
+            relay_pick = QHBoxLayout()
+            relay_pick.addWidget(QLabel("Relay:"))
+            self._relay_combo = QComboBox()
+            self._relay_combo.setMinimumWidth(160)
+            self._relay_combo.currentIndexChanged.connect(self._on_relay_combo_changed)
+            relay_pick.addWidget(self._relay_combo, 1)
+            left_lay.addLayout(relay_pick)
+
             relay_row = QHBoxLayout()
             self._broadcast_cb = QCheckBox("Broadcast (Cloudflare relay)")
             self._broadcast_cb.toggled.connect(self._on_broadcast_toggled)
@@ -260,6 +272,13 @@ class SetPlayView(QWidget):
             self._copy_code_btn.setEnabled(False)
             self._copy_code_btn.clicked.connect(self._copy_room_code)
             relay_row.addWidget(self._copy_code_btn)
+            self._leader_reconnect_btn = QPushButton("Reconnect")
+            self._leader_reconnect_btn.setToolTip(
+                "Reconnect to the relay with the same room after a connection drop."
+            )
+            self._leader_reconnect_btn.setVisible(False)
+            self._leader_reconnect_btn.clicked.connect(self._leader_reconnect_relay)
+            relay_row.addWidget(self._leader_reconnect_btn)
             self._room_lbl = QLabel("")
             self._room_lbl.setWordWrap(True)
             relay_row.addWidget(self._room_lbl, 1)
@@ -333,6 +352,13 @@ class SetPlayView(QWidget):
             left_panel = QWidget()
             lv = QVBoxLayout(left_panel)
             lv.setSpacing(6)
+            relay_pick = QHBoxLayout()
+            relay_pick.addWidget(QLabel("Relay:"))
+            self._relay_combo = QComboBox()
+            self._relay_combo.setMinimumWidth(160)
+            self._relay_combo.currentIndexChanged.connect(self._on_relay_combo_changed)
+            relay_pick.addWidget(self._relay_combo, 1)
+            lv.addLayout(relay_pick)
             room_row = QHBoxLayout()
             room_row.addWidget(QLabel("Room:"))
             self._room_edit = QComboBox()
@@ -346,6 +372,13 @@ class SetPlayView(QWidget):
             self._disconnect_btn.clicked.connect(self._assistant_disconnect)
             self._disconnect_btn.setEnabled(False)
             room_row.addWidget(self._disconnect_btn)
+            self._assistant_reconnect_btn = QPushButton("Reconnect")
+            self._assistant_reconnect_btn.setToolTip(
+                "Connect again with the same room code after a drop."
+            )
+            self._assistant_reconnect_btn.clicked.connect(self._assistant_reconnect)
+            self._assistant_reconnect_btn.setEnabled(False)
+            room_row.addWidget(self._assistant_reconnect_btn)
             lv.addLayout(room_row)
             self._info_lbl = QLabel("—")
             self._info_lbl.setWordWrap(True)
@@ -373,6 +406,65 @@ class SetPlayView(QWidget):
         main_vert.setStretchFactor(1, 3)
         main_vert.setChildrenCollapsible(False)
         root.addWidget(main_vert, 1)
+
+        self._fill_relay_combo()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if hasattr(self, "_relay_combo"):
+            self._fill_relay_combo()
+
+    def _fill_relay_combo(self) -> None:
+        if not hasattr(self, "_relay_combo"):
+            return
+        sel = get_set_play_selected_relay_id()
+        self._relay_combo.blockSignals(True)
+        self._relay_combo.clear()
+        relays = get_set_play_relays()
+        for r in relays:
+            self._relay_combo.addItem(r["name"], r["id"])
+        if not relays:
+            self._relay_combo.addItem("(add a relay in Settings → Set Playback)", "")
+        elif sel:
+            idx = self._relay_combo.findData(sel)
+            if idx >= 0:
+                self._relay_combo.setCurrentIndex(idx)
+        self._relay_combo.blockSignals(False)
+
+    def _on_relay_combo_changed(self) -> None:
+        if not hasattr(self, "_relay_combo"):
+            return
+        rid = self._relay_combo.currentData()
+        if isinstance(rid, str) and rid:
+            set_set_play_selected_relay_id(rid)
+        else:
+            set_set_play_selected_relay_id(None)
+
+    def _update_leader_reconnect_visibility(self) -> None:
+        if self._leader_reconnect_btn is None or self._broadcast_cb is None:
+            return
+        vis = bool(
+            self._broadcast_cb.isChecked()
+            and self._relay_code
+            and self._relay_leader_token
+        )
+        self._leader_reconnect_btn.setVisible(vis)
+        self._leader_reconnect_btn.setEnabled(vis and not self._relay.is_open())
+
+    def _leader_reconnect_relay(self) -> None:
+        if self._assistant_mode or not self._relay_code or not self._relay_leader_token:
+            return
+        base = get_active_set_play_relay_url()
+        if not base:
+            QMessageBox.warning(self, "Relay", "Choose a relay in Settings → Set Playback.")
+            return
+        self._relay.close()
+        self._relay.open_leader(base, self._relay_code, self._relay_leader_token)
+        self._status_lbl.setText("Reconnecting…")
+        self._update_leader_reconnect_visibility()
+
+    def _assistant_reconnect(self) -> None:
+        self._assistant_connect()
 
     def _fill_setlist_combo(self) -> None:
         if not self.app_state:
@@ -899,13 +991,14 @@ class SetPlayView(QWidget):
                 self._room_lbl.setText("")
             if self._copy_code_btn:
                 self._copy_code_btn.setEnabled(False)
+            self._update_leader_reconnect_visibility()
             return
-        base = get_set_play_relay_url()
+        base = get_active_set_play_relay_url()
         if not base:
             QMessageBox.warning(
                 self,
                 "Relay",
-                "Set the Set Play relay URL in Settings (use wss:// from your Worker).",
+                "Add a relay in Settings → Set Playback (use wss:// from your Worker).",
             )
             if self._broadcast_cb:
                 self._broadcast_cb.blockSignals(True)
@@ -929,14 +1022,24 @@ class SetPlayView(QWidget):
             self._copy_code_btn.setEnabled(True)
         self._relay.open_leader(base, code, token)
         QTimer.singleShot(500, self._push_relay_if_leader)
+        self._update_leader_reconnect_visibility()
 
     def _on_relay_connected(self) -> None:
         self._status_lbl.setText("Relay connected.")
         self._push_relay_if_leader()
+        self._update_leader_reconnect_visibility()
+        if self._assistant_mode and hasattr(self, "_assistant_reconnect_btn"):
+            self._assistant_reconnect_btn.setEnabled(True)
 
     def _on_relay_disconnected(self) -> None:
         if not self._assistant_mode:
             self._status_lbl.setText("Relay disconnected.")
+            self._update_leader_reconnect_visibility()
+        else:
+            self._disconnect_btn.setEnabled(False)
+            if hasattr(self, "_assistant_reconnect_btn"):
+                code = (self._room_edit.currentText() or "").strip()
+                self._assistant_reconnect_btn.setEnabled(len(code) >= 5)
 
     def _on_relay_error(self, msg: str) -> None:
         self._status_lbl.setText(f"Relay: {msg}")
@@ -956,9 +1059,9 @@ class SetPlayView(QWidget):
             QApplication.clipboard().setText(self._relay_code)
 
     def _assistant_connect(self) -> None:
-        base = get_set_play_relay_url()
+        base = get_active_set_play_relay_url()
         if not base:
-            QMessageBox.warning(self, "Relay", "Set the relay URL in Settings.")
+            QMessageBox.warning(self, "Relay", "Add a relay in Settings → Set Playback.")
             return
         code = (self._room_edit.currentText() or "").strip().upper()
         if len(code) < 5:
@@ -967,11 +1070,16 @@ class SetPlayView(QWidget):
         self._relay.close()
         self._relay.open_assistant(base, code)
         self._disconnect_btn.setEnabled(True)
+        if hasattr(self, "_assistant_reconnect_btn"):
+            self._assistant_reconnect_btn.setEnabled(True)
         self._status_lbl.setText("Connecting…")
 
     def _assistant_disconnect(self) -> None:
         self._relay.close()
         self._disconnect_btn.setEnabled(False)
+        if hasattr(self, "_assistant_reconnect_btn"):
+            code = (self._room_edit.currentText() or "").strip()
+            self._assistant_reconnect_btn.setEnabled(len(code) >= 5)
         self._status_lbl.setText("Disconnected.")
 
     def _apply_remote_snapshot(self, data: dict[str, Any]) -> None:

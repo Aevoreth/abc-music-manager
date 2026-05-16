@@ -4,6 +4,7 @@ Settings: folder rules, statuses, account targets (PluginData).
 
 from __future__ import annotations
 
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -72,13 +73,14 @@ from ..services.preferences import (
     resolve_music_path,
     get_default_filters,
     set_default_filters,
-    get_set_play_relay_url,
-    set_set_play_relay_url,
+    get_set_play_relays,
+    set_set_play_relays,
 )
 from ..db import list_folder_rules, add_folder_rule, update_folder_rule, delete_folder_rule, FolderRuleRow, RuleType
 from ..db.status_repo import list_statuses, add_status, update_status, delete_status, reorder_statuses, StatusRow
 from ..db.account_target import list_account_targets, add_account_target, update_account_target, delete_account_target, AccountTargetRow
 from .theme import STATUS_CIRCLE_DIAMETER, COLOR_TEXT_SECONDARY
+from .set_play_deploy_wizard import SetPlayRelayDeployWizard
 from .library_view import (
     LAST_PLAYED_TIME_OPTS,
     _index_for_seconds_ago,
@@ -417,6 +419,38 @@ class AccountTargetEditor(QDialog):
         )
 
 
+class SetPlayRelayEditor(QDialog):
+    """Add or edit one named Set Play relay URL."""
+
+    def __init__(self, parent: QWidget | None = None, relay: dict | None = None) -> None:
+        super().__init__(parent)
+        self._relay_id: str | None = relay["id"] if relay else None
+        self.setWindowTitle("Edit relay" if relay else "Add relay")
+        layout = QFormLayout(self)
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText('e.g. The Rowanwoods')
+        self.url_edit = QLineEdit()
+        self.url_edit.setPlaceholderText("wss://….workers.dev (no trailing slash)")
+        layout.addRow("Name:", self.name_edit)
+        layout.addRow("URL:", self.url_edit)
+        if relay:
+            self.name_edit.setText(relay.get("name") or "")
+            self.url_edit.setText(relay.get("url") or "")
+        ok = QPushButton("OK")
+        ok.clicked.connect(self.accept)
+        cancel = QPushButton("Cancel")
+        cancel.clicked.connect(self.reject)
+        layout.addRow(ok, cancel)
+
+    def get_values(self) -> tuple[str, str, str]:
+        rid = self._relay_id or str(uuid.uuid4())
+        return (
+            self.name_edit.text().strip(),
+            self.url_edit.text().strip(),
+            rid,
+        )
+
+
 class SettingsView(QWidget):
     def __init__(
         self,
@@ -429,12 +463,20 @@ class SettingsView(QWidget):
         self.playback_state = playback_state
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_appearance_tab(), "Appearance")
-        self.tabs.addTab(self._build_default_filters_tab(), "Default filters")
-        self.tabs.addTab(self._build_folder_rules_tab(), "Folder rules")
-        self.tabs.addTab(self._build_statuses_tab(), "Statuses")
-        self.tabs.addTab(self._build_account_targets_tab(), "Account targets")
-        self.tabs.addTab(self._build_playback_tab(), "Playback")
+        self._tab_appearance = self._build_appearance_tab()
+        self.tabs.addTab(self._tab_appearance, "Appearance")
+        self._tab_default_filters = self._build_default_filters_tab()
+        self.tabs.addTab(self._tab_default_filters, "Default filters")
+        self._tab_folder_rules = self._build_folder_rules_tab()
+        self.tabs.addTab(self._tab_folder_rules, "Folder rules")
+        self._tab_statuses = self._build_statuses_tab()
+        self.tabs.addTab(self._tab_statuses, "Statuses")
+        self._tab_account_targets = self._build_account_targets_tab()
+        self.tabs.addTab(self._tab_account_targets, "Account targets")
+        self._tab_playback = self._build_playback_tab()
+        self.tabs.addTab(self._tab_playback, "ABC Playback")
+        self._tab_set_playback = self._build_set_playback_tab()
+        self.tabs.addTab(self._tab_set_playback, "Set Playback")
         self.tabs.currentChanged.connect(self._on_settings_tab_changed)
         layout.addWidget(self.tabs)
 
@@ -842,12 +884,11 @@ class SettingsView(QWidget):
         return w
 
     def _on_settings_tab_changed(self, index: int) -> None:
-        # Folder rules tab is index 1: ensure default LOTRO path is detected/saved and refresh display
-        if index == 1:
+        w = self.tabs.widget(index)
+        if w is self._tab_folder_rules:
             ensure_default_lotro_root()
             self._refresh_lotro_and_set_export_display()
-        # Playback tab is index 5: sync stereo controls from PlaybackState
-        if index == 5:
+        if w is self._tab_playback:
             self._refresh_playback_tab()
 
     def _refresh_lotro_and_set_export_display(self) -> None:
@@ -1168,22 +1209,123 @@ class SettingsView(QWidget):
         stereo_row.addWidget(self.playback_stereo_slider)
         stereo_row.addStretch()
         v.addLayout(stereo_row)
-        relay_row = QHBoxLayout()
-        relay_row.addWidget(QLabel("Set Play relay URL (wss or https, no trailing slash):"))
-        self.set_play_relay_edit = QLineEdit()
-        self.set_play_relay_edit.setPlaceholderText(
-            "wss://abc-set-play-relay.your-subdomain.workers.dev"
-        )
-        self.set_play_relay_edit.setText(get_set_play_relay_url())
-        self.set_play_relay_edit.textChanged.connect(
-            lambda: set_set_play_relay_url(
-                self.set_play_relay_edit.text().strip() or None
-            )
-        )
-        relay_row.addWidget(self.set_play_relay_edit, 1)
-        v.addLayout(relay_row)
         v.addStretch()
         return w
+
+    def _build_set_playback_tab(self) -> QWidget:
+        w = QWidget()
+        v = QVBoxLayout(w)
+        intro = QLabel(
+            "Named relay URLs so each bandleader can use their own Cloudflare worker. "
+            "Choose the active relay on the Set Play and Band Assistant pages."
+        )
+        intro.setWordWrap(True)
+        v.addWidget(intro)
+        btn_row = QHBoxLayout()
+        add_btn = QPushButton("Add relay")
+        add_btn.clicked.connect(self._add_set_play_relay)
+        deploy_btn = QPushButton("Create your own relay (deploy helper)…")
+        deploy_btn.clicked.connect(self._open_set_play_deploy_wizard)
+        btn_row.addWidget(add_btn)
+        btn_row.addWidget(deploy_btn)
+        btn_row.addStretch()
+        v.addLayout(btn_row)
+        self.set_play_relays_table = QTableWidget()
+        self.set_play_relays_table.setColumnCount(3)
+        self.set_play_relays_table.setHorizontalHeaderLabels(["Name", "URL", "Actions"])
+        self.set_play_relays_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.set_play_relays_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.set_play_relays_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        v.addWidget(self.set_play_relays_table)
+        self._refresh_set_playback_table()
+        return w
+
+    def _refresh_set_playback_table(self) -> None:
+        relays = get_set_play_relays()
+        self.set_play_relays_table.setRowCount(len(relays))
+        for i, r in enumerate(relays):
+            self.set_play_relays_table.setItem(i, 0, QTableWidgetItem(r["name"]))
+            self.set_play_relays_table.setItem(i, 1, QTableWidgetItem(r["url"]))
+            cell = QWidget()
+            hl = QHBoxLayout(cell)
+            hl.setContentsMargins(2, 0, 2, 0)
+            edit_btn = QPushButton("Edit")
+            del_btn = QPushButton("Delete")
+            _btn_style = "padding: 1px 4px; font-size: 11px; min-width: 22px;"
+            edit_btn.setStyleSheet(_btn_style)
+            del_btn.setStyleSheet(_btn_style)
+            edit_btn.clicked.connect(lambda checked=False, relay=r: self._edit_set_play_relay(relay))
+            del_btn.clicked.connect(lambda checked=False, relay=r: self._delete_set_play_relay(relay))
+            hl.addWidget(edit_btn)
+            hl.addWidget(del_btn)
+            self.set_play_relays_table.setCellWidget(i, 2, cell)
+
+    def _add_set_play_relay(self) -> None:
+        dlg = SetPlayRelayEditor(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        name, url, rid = dlg.get_values()
+        if not name or not url.strip():
+            QMessageBox.warning(self, "Relay", "Name and URL are required.")
+            return
+        relays = list(get_set_play_relays())
+        relays.append(
+            {
+                "id": rid,
+                "name": name,
+                "url": url.strip().rstrip("/"),
+            }
+        )
+        set_set_play_relays(relays)
+        self._refresh_set_playback_table()
+
+    def _edit_set_play_relay(self, relay: dict) -> None:
+        dlg = SetPlayRelayEditor(self, relay)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        name, url, rid = dlg.get_values()
+        if not name or not url.strip():
+            QMessageBox.warning(self, "Relay", "Name and URL are required.")
+            return
+        relays = []
+        for r in get_set_play_relays():
+            if r["id"] == relay["id"]:
+                relays.append(
+                    {
+                        "id": rid,
+                        "name": name,
+                        "url": url.strip().rstrip("/"),
+                    }
+                )
+            else:
+                relays.append(dict(r))
+        set_set_play_relays(relays)
+        self._refresh_set_playback_table()
+
+    def _delete_set_play_relay(self, relay: dict) -> None:
+        if (
+            QMessageBox.question(
+                self,
+                "Confirm",
+                f"Remove relay “{relay.get('name', '')}”?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        relays = [r for r in get_set_play_relays() if r["id"] != relay["id"]]
+        set_set_play_relays(relays)
+        self._refresh_set_playback_table()
+
+    def _open_set_play_deploy_wizard(self) -> None:
+        wiz = SetPlayRelayDeployWizard(self)
+        wiz.exec()
+        self._refresh_set_playback_table()
 
     def _on_stereo_mode_changed(self) -> None:
         mode = self.playback_stereo_combo.currentData()

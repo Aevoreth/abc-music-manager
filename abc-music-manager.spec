@@ -7,6 +7,32 @@ block_cipher = None
 docs_datas = [(os.path.join('docs', f), 'docs') for f in os.listdir('docs')
               if os.path.isfile(os.path.join('docs', f))]
 
+
+def _set_play_relay_worker_datas():
+    """Bundle Cloudflare worker template (no node_modules) for deploy wizard."""
+    out = []
+    root = os.path.join('workers', 'set-play-relay')
+    if not os.path.isdir(root):
+        return out
+    skip_dirnames = {'node_modules', '.wrangler'}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in skip_dirnames]
+        low = dirpath.replace('\\', '/').lower()
+        if '/.cache/' in low or low.endswith('/.cache'):
+            continue
+        for fn in filenames:
+            if 'wrangler-account' in fn:
+                continue
+            src = os.path.join(dirpath, fn)
+            rel = os.path.relpath(src, root)
+            dest_dir = os.path.join('workers', 'set-play-relay', os.path.dirname(rel))
+            if os.sep != '/':
+                dest_dir = dest_dir.replace(os.sep, '/')
+            out.append((src, dest_dir))
+    return out
+
+
+set_play_worker_datas = _set_play_relay_worker_datas()
 a = Analysis(
     ['main.py'],
     pathex=['src'],
@@ -22,7 +48,7 @@ a = Analysis(
         ('SCHEMA.md', '.'),
         ('licenses/LGPL-3.0.txt', 'licenses'),
         ('resources/icons', 'resources/icons'),
-    ] + docs_datas,
+    ] + docs_datas + set_play_worker_datas,
     hiddenimports=['tinysoundfont', 'pyaudio'],
     hookspath=[],
     hooksconfig={},
