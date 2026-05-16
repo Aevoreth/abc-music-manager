@@ -303,7 +303,8 @@ class SetPlayRelayDeployWizard(QDialog):
 
     def _run_node_check(self, log: QTextEdit) -> None:
         if sys.platform == "win32":
-            self._run_cmd(log, "cmd.exe", ["/c", "where node && node -v && npm -v"])
+            # Avoid "cd ... && ..." one-liners (Qt/cmd quoting can break); chain with &.
+            self._run_cmd(log, "cmd.exe", ["/c", "where", "node", "&", "node", "-v", "&", "npm", "-v"])
         else:
             self._run_cmd(log, "sh", ["-lc", "command -v node && node -v && npm -v"])
 
@@ -323,22 +324,19 @@ class SetPlayRelayDeployWizard(QDialog):
 
     def _run_npm_install(self, log: QTextEdit, deploy: Path) -> None:
         if sys.platform == "win32":
-            cmd = f'cd /d "{deploy}" && npm install'
-            self._run_cmd(log, "cmd.exe", ["/c", cmd])
+            self._run_cmd(log, "cmd.exe", ["/c", "npm", "install"], cwd=deploy)
         else:
             self._run_cmd(log, "npm", ["install"], cwd=deploy)
 
     def _run_wrangler_login(self, log: QTextEdit, deploy: Path) -> None:
         if sys.platform == "win32":
-            cmd = f'cd /d "{deploy}" && npx wrangler login'
-            self._run_cmd(log, "cmd.exe", ["/c", cmd])
+            self._run_cmd(log, "cmd.exe", ["/c", "npx", "wrangler", "login"], cwd=deploy)
         else:
             self._run_cmd(log, "npx", ["wrangler", "login"], cwd=deploy)
 
     def _run_wrangler_deploy(self, log: QTextEdit, deploy: Path) -> None:
         if sys.platform == "win32":
-            cmd = f'cd /d "{deploy}" && npx wrangler deploy'
-            self._run_cmd(log, "cmd.exe", ["/c", cmd])
+            self._run_cmd(log, "cmd.exe", ["/c", "npx", "wrangler", "deploy"], cwd=deploy)
         else:
             self._run_cmd(log, "npx", ["wrangler", "deploy"], cwd=deploy)
 
