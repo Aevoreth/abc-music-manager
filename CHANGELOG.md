@@ -2,6 +2,27 @@
 
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
+## Version 0.2.1b
+
+* Added: Set Play feature
+  * Select and load setlist
+  * Broadcast set playback status via a user-created Cloudflare Relay (Cloudflare account required; even heavy usage under normal circumstances will never come close to exceeding free-tier usage)
+  * Cloudflare Relay URL defined in Settings; multiple relays can be defined and used for different bands
+  * Song list with checkboxes for skip, next, Current, and Played
+  * Advancing a song marks the currently selected Current song as Played, the currently selected next song as Current, and the next song in the setlist that is not marked skip as next
+  * Band layout with part change highlighting
+  * List of band member names; selecting member(s) highlights them on the band layout (not broadcast; client only)
+  * Option to automatically mark songs played in Library Playback History
+* Added: Band Assistant
+  * Select relay and enter the seven-character code from the band leader, then Connect
+  * Read-only view of what the band leader is broadcasting, including the song list with skip, next, current, and played fields and the band layout with instrument change highlighting
+  * List of band member names; selecting member(s) highlights them on the band layout (not broadcast; client only)
+* Added: Settings → Set Playback tab
+  * Add band-leader-provided relay URLs for coordinated set playback
+  * Generate a WebSocket relay URL to share with band members also using the app
+  * Redeploy a Cloudflare Relay in the unlikely event that Cloudflare resource limits are reached
+* Note: Creating a relay requires a free Cloudflare account and must be set up and logged in before launching the relay setup wizard. At the appropriate step, the wizard opens the system default browser to authenticate with Cloudflare. A relay can only be created after this authentication completes.
+
 ## Version 0.1.11b
 
 * Added: Optional Part Renaming for Exported Sets using customizable pattern
