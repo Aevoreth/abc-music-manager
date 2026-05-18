@@ -32,25 +32,17 @@ jobs:
           pip install pyinstaller
 
       - name: Build with PyInstaller
-        run: |
-          pyinstaller `
-            --noconfirm `
-            --clean `
-            --windowed `
-            --name "ABC Music Manager" `
-            --icon "resources/icons/app.ico" `
-            main.py
-
-      - name: Copy extra release files
-        run: |
-          Copy-Item README.md "dist/ABC Music Manager/"
-          Copy-Item LICENSE.txt "dist/ABC Music Manager/"
-          Copy-Item CHANGELOG.md "dist/ABC Music Manager/"
-          Copy-Item NOTICE.txt "dist/ABC Music Manager/"
+        run: pyinstaller --noconfirm --clean abc-music-manager.spec
 
       - name: Package portable ZIP
         run: |
-          Compress-Archive -Path "dist/ABC Music Manager/*" -DestinationPath "ABC-Music-Manager-${env:VERSION}-Windows.zip"
+          Compress-Archive -LiteralPath @(
+            "dist/ABC Music Manager.exe",
+            "README.md",
+            "LICENSE.txt",
+            "NOTICE.txt",
+            "CHANGELOG.md"
+          ) -DestinationPath "ABC-Music-Manager-${env:VERSION}-Windows.zip" -Force
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

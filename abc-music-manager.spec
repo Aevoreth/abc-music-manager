@@ -70,6 +70,7 @@ a = Analysis(
         ('NOTICE.txt', '.'),
         ('README.md', '.'),  # For Help > User Guide when frozen
         ('LICENSE.txt', '.'),
+        ('CHANGELOG.md', '.'),
         ('PROJECT_BRIEF.md', '.'),
         ('REQUIREMENTS.md', '.'),
         ('DATA_MODEL.md', '.'),
