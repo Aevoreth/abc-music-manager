@@ -33,12 +33,12 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller ^
-            --noconfirm ^
-            --clean ^
-            --windowed ^
-            --name "ABC Music Manager" ^
-            --icon "assets/icon.ico" ^
+          pyinstaller `
+            --noconfirm `
+            --clean `
+            --windowed `
+            --name "ABC Music Manager" `
+            --icon "assets/icon.ico" `
             main.py
 
       - name: Copy extra release files
