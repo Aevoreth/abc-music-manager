@@ -38,13 +38,13 @@ jobs:
             --clean `
             --windowed `
             --name "ABC Music Manager" `
-            --icon "assets/icon.ico" `
+            --icon "resources/icons/app.ico" `
             main.py
 
       - name: Copy extra release files
         run: |
           Copy-Item README.md "dist/ABC Music Manager/"
-          Copy-Item LICENSE.md "dist/ABC Music Manager/"
+          Copy-Item LICENSE.txt "dist/ABC Music Manager/"
           Copy-Item CHANGELOG.md "dist/ABC Music Manager/"
           Copy-Item NOTICE.txt "dist/ABC Music Manager/"
 
