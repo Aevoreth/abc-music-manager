@@ -57,6 +57,7 @@ from ..db.setlist_repo import (
     list_setlists,
     list_setlist_items_with_song_meta,
 )
+from .setlist_picker_combo import SetlistPickerCombo
 from ..db.play_log import log_play, log_play_at
 from .band_layout_grid import BandLayoutGridWidget, LayoutCard
 from .set_play_layout import (
@@ -223,7 +224,7 @@ class SetPlayView(QWidget):
 
             pick_row = QHBoxLayout()
             pick_row.addWidget(QLabel("Setlist:"))
-            self._setlist_combo = QComboBox()
+            self._setlist_combo = SetlistPickerCombo()
             self._fill_setlist_combo()
             self._setlist_combo.currentIndexChanged.connect(self._on_setlist_combo_changed)
             pick_row.addWidget(self._setlist_combo, 1)
@@ -458,17 +459,7 @@ class SetPlayView(QWidget):
             preserve_id = self._setlist.id
         elif self._setlist_combo.currentData() is not None:
             preserve_id = self._setlist_combo.currentData()
-        self._setlist_combo.blockSignals(True)
-        self._setlist_combo.clear()
-        self._setlist_combo.addItem("(select)", None)
-        for s in list_setlists(self.app_state.conn):
-            label = s.name + (" [locked]" if s.locked else "")
-            self._setlist_combo.addItem(label, s.id)
-        if preserve_id is not None:
-            idx = self._setlist_combo.findData(preserve_id)
-            if idx >= 0:
-                self._setlist_combo.setCurrentIndex(idx)
-        self._setlist_combo.blockSignals(False)
+        self._setlist_combo.populate(self.app_state.conn, preserve_id=preserve_id)
 
     def _on_setlist_combo_changed(self) -> None:
         if not self._assistant_mode and self._setlist_name_lbl is not None:

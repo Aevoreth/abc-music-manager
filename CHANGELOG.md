@@ -2,10 +2,12 @@
 
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
-* FIX: Setlist Editor was not fully deleting sets if that set had a Set Play playback history, leaving behind an empty set instead
-* FIX: Newly created setlists were not showing up in Set Play until app restart (Due to list only refreshing on startup)
-* FIX: Set Play no longer requires a band layout for sets to be loaded.
-* ADD: Ability to clear a setlist
+* Setlist and Set Play
+  * FIX: Setlist Editor was not fully deleting sets if that set had a Set Play playback history, leaving behind an empty set instead
+  * FIX: Newly created setlists were not showing up in Set Play until app restart (Due to list only refreshing on startup)
+  * FIX: Set Play no longer requires a band layout for sets to be loaded.
+  * ADD: Ability to clear a setlist
+  * IMPROVE: Set Play Set selection combo box now has a tree view for folders and sets
 
 ## Version 0.2.1b
 
