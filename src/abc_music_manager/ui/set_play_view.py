@@ -462,8 +462,6 @@ class SetPlayView(QWidget):
         self._setlist_combo.clear()
         self._setlist_combo.addItem("(select)", None)
         for s in list_setlists(self.app_state.conn):
-            if s.band_layout_id is None:
-                continue
             label = s.name + (" [locked]" if s.locked else "")
             self._setlist_combo.addItem(label, s.id)
         if preserve_id is not None:
@@ -494,11 +492,11 @@ class SetPlayView(QWidget):
             return
         sid = self._setlist_combo.currentData()
         if not sid:
-            QMessageBox.warning(self, "Set Play", "Select a setlist with a band layout.")
+            QMessageBox.warning(self, "Set Play", "Select a setlist.")
             return
         sl = next((s for s in list_setlists(self.app_state.conn) if s.id == sid), None)
-        if not sl or not sl.band_layout_id:
-            QMessageBox.warning(self, "Set Play", "This setlist needs a band layout (Setlists tab).")
+        if not sl:
+            QMessageBox.warning(self, "Set Play", "Setlist not found.")
             return
         self._setlist = sl
         self._song_rows = list_setlist_items_with_song_meta(self.app_state.conn, sid)
