@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QToolButton,
 )
-from PySide6.QtCore import Qt, QDate, QTime, QTimer, QMimeData, QSize, QRect, QPoint
+from PySide6.QtCore import Qt, QDate, QTime, QTimer, QMimeData, QSize, QRect, QPoint, Signal
 from PySide6.QtGui import QColor, QFont, QDrag, QMouseEvent, QPixmap, QPainter
 
 from ..services.app_state import AppState
@@ -612,6 +612,8 @@ class SetlistSongsTable(QTableWidget):
 
 
 class SetlistsView(QWidget):
+    setlistsChanged = Signal()
+
     def __init__(
         self,
         app_state: AppState,
@@ -1047,12 +1049,14 @@ class SetlistsView(QWidget):
         self.locked_check.setChecked(s.locked)
         self.default_duration_spin.setValue(s.default_change_duration_seconds or 0)
         self._load_band_layout_combo()
+        self.band_layout_combo.blockSignals(True)
         for i in range(self.band_layout_combo.count()):
             if self.band_layout_combo.itemData(i) == s.band_layout_id:
                 self.band_layout_combo.setCurrentIndex(i)
                 break
         else:
             self.band_layout_combo.setCurrentIndex(0)
+        self.band_layout_combo.blockSignals(False)
         self._loaded_name = s.name
         self._loaded_notes = s.notes or ""
         self._loaded_band_layout_id = s.band_layout_id
@@ -1090,7 +1094,22 @@ class SetlistsView(QWidget):
             self.band_layout_combo.addItem(band_name, layout_id)
         self.band_layout_combo.blockSignals(False)
 
+    def _persist_band_layout_if_dirty(self) -> None:
+        if not self._selected_setlist_id:
+            return
+        bl_id = self.band_layout_combo.currentData()
+        if bl_id == self._loaded_band_layout_id:
+            return
+        update_setlist(
+            self.app_state.conn,
+            self._selected_setlist_id,
+            band_layout_id=bl_id,
+        )
+        self._loaded_band_layout_id = bl_id
+        self.setlistsChanged.emit()
+
     def _on_band_layout_combo_changed(self) -> None:
+        self._persist_band_layout_if_dirty()
         self._refresh_songs_table()
         self._refresh_assignment_panel()
 
@@ -1526,6 +1545,7 @@ class SetlistsView(QWidget):
             )
         self._refresh_setlist_tree()
         self.select_setlist_by_id(setlist_id)
+        self.setlistsChanged.emit()
         QMessageBox.information(
             self,
             "Import ABCP",
@@ -1643,6 +1663,7 @@ class SetlistsView(QWidget):
             return
         self._refresh_setlist_tree()
         self.select_setlist_by_id(new_id)
+        self.setlistsChanged.emit()
 
     def _on_prepend_current_to_other(self, current_id: int) -> None:
         other_id = self._pick_other_setlist(
@@ -1790,6 +1811,7 @@ class SetlistsView(QWidget):
                 self._selected_setlist_id = None
                 self._set_editor_enabled(False)
             self._refresh_setlist_tree()
+            self.setlistsChanged.emit()
 
     def _on_setlist_tree_context_menu(self, pos) -> None:
         item = self.setlist_tree.itemAt(pos)
@@ -1886,6 +1908,7 @@ class SetlistsView(QWidget):
         self._loaded_set_time = set_time
         self._loaded_target_dur = target_dur
         self._refresh_setlist_tree()
+        self.setlistsChanged.emit()
 
     def has_unsaved_changes(self) -> bool:
         if not self._editor_enabled or self._selected_setlist_id is None:
@@ -1930,6 +1953,7 @@ class SetlistsView(QWidget):
             self._selected_setlist_id = None
             self._refresh_setlist_tree()
             self._set_editor_enabled(False)
+            self.setlistsChanged.emit()
 
     def _add_item(self) -> None:
         if not self._selected_setlist_id:

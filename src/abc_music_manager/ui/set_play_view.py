@@ -385,12 +385,18 @@ class SetPlayView(QWidget):
 
         self._fill_relay_combo()
 
+    def refresh_setlist_picker(self) -> None:
+        """Reload setlist dropdown from the database (e.g. after setlists change elsewhere)."""
+        if self._assistant_mode:
+            return
+        if hasattr(self, "_setlist_combo"):
+            self._fill_setlist_combo()
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if hasattr(self, "_relay_combo"):
             self._fill_relay_combo()
-        if not self._assistant_mode and hasattr(self, "_setlist_combo"):
-            self._fill_setlist_combo()
+        self.refresh_setlist_picker()
 
     def _fill_relay_combo(self) -> None:
         if not hasattr(self, "_relay_combo"):

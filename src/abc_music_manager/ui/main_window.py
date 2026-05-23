@@ -190,6 +190,9 @@ class MainWindow(QMainWindow):
         self.library_view.navigateToSetlist.connect(self._on_navigate_to_setlist)
         self._playback_toolbar.playlistExportedAsSet.connect(self._on_navigate_to_setlist)
         self.bands_view.band_layout_updated.connect(self._on_band_layout_updated)
+        self.setlists_view.setlistsChanged.connect(self.set_play_view.refresh_setlist_picker)
+        self._set_play_page_index = self.PAGES.index("Set Play")
+        self.stacked.currentChanged.connect(self._on_main_page_changed)
 
         self.nav_list = QListWidget()
         self.nav_list.setObjectName("nav_list")
@@ -357,6 +360,10 @@ class MainWindow(QMainWindow):
             return
         self.nav_list.setCurrentRow(index)
         self.stacked.setCurrentIndex(index)
+
+    def _on_main_page_changed(self, index: int) -> None:
+        if index == self._set_play_page_index:
+            self.set_play_view.refresh_setlist_picker()
 
     def _on_navigate_to_setlist(self, setlist_id: int) -> None:
         self._go_to_page(self.PAGES.index("Setlists"))
