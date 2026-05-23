@@ -8,6 +8,7 @@ All notable changes to ABC Music Manager are documented here. Most recent at the
   * FIX: Set Play no longer requires a band layout for sets to be loaded.
   * ADD: Ability to clear a setlist
   * IMPROVE: Set Play Set selection combo box now has a tree view for folders and sets
+  * IMPROVE: Replaced "Add Song" dialogue with a proper, filterable song table similar to Library view
 
 ## Version 0.2.1b
 

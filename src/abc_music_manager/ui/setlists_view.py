@@ -58,7 +58,6 @@ from ..services.preferences import (
     set_setlists_songs_table_header_state,
     set_setlists_folder_expanded_state,
 )
-from ..db import list_library_songs
 from ..db.setlist_repo import (
     list_setlists,
     list_setlists_grouped_by_folder,
@@ -95,6 +94,7 @@ from ..db.library_query import get_primary_file_path_for_song, get_song_id_for_f
 from ..services.playback_state import PlaybackState, PlaylistEntry
 from ..services.abcp_service import parse_abcp, write_abcp
 from ..services.preferences import get_set_export_dir, resolve_music_path
+from .library_picker_dialog import open_library_picker_dialog
 from .setlist_band_assignment_panel import SetlistBandAssignmentPanel
 from .set_export_dialog import SetExportDialog
 from .theme import COLOR_ON_SURFACE, COLOR_PRIMARY
@@ -1958,25 +1958,17 @@ class SetlistsView(QWidget):
     def _add_item(self) -> None:
         if not self._selected_setlist_id:
             return
-        songs = list_library_songs(self.app_state.conn, limit=500)
-        if not songs:
-            QMessageBox.information(self, "Info", "No songs in library. Scan library first.")
-            return
-        titles = [r.title for r in songs]
-        title, ok = QInputDialog.getItem(self, "Add song", "Song:", titles, 0, False)
-        if not ok or not title:
-            return
-        song_id = next(r.song_id for r in songs if r.title == title)
-        items = list_setlist_items_with_song_meta(self.app_state.conn, self._selected_setlist_id)
-        position = len(items)
-        new_id = add_setlist_item(
-            self.app_state.conn,
+
+        def on_song_added(_song_id: int) -> None:
+            self._refresh_songs_table()
+            self.setlistsChanged.emit()
+
+        open_library_picker_dialog(
+            self.app_state,
             self._selected_setlist_id,
-            song_id,
-            position,
-            song_layout_id=None,
+            self,
+            on_song_added=on_song_added,
         )
-        self._refresh_songs_table(select_item_id=new_id)
 
     def _remove_item(self, item_id: int) -> None:
         remove_setlist_item(self.app_state.conn, item_id)
