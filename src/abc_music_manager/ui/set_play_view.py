@@ -389,6 +389,8 @@ class SetPlayView(QWidget):
         super().showEvent(event)
         if hasattr(self, "_relay_combo"):
             self._fill_relay_combo()
+        if not self._assistant_mode and hasattr(self, "_setlist_combo"):
+            self._fill_setlist_combo()
 
     def _fill_relay_combo(self) -> None:
         if not hasattr(self, "_relay_combo"):
@@ -445,6 +447,11 @@ class SetPlayView(QWidget):
     def _fill_setlist_combo(self) -> None:
         if not self.app_state:
             return
+        preserve_id: int | None = None
+        if self._setlist is not None:
+            preserve_id = self._setlist.id
+        elif self._setlist_combo.currentData() is not None:
+            preserve_id = self._setlist_combo.currentData()
         self._setlist_combo.blockSignals(True)
         self._setlist_combo.clear()
         self._setlist_combo.addItem("(select)", None)
@@ -453,6 +460,10 @@ class SetPlayView(QWidget):
                 continue
             label = s.name + (" [locked]" if s.locked else "")
             self._setlist_combo.addItem(label, s.id)
+        if preserve_id is not None:
+            idx = self._setlist_combo.findData(preserve_id)
+            if idx >= 0:
+                self._setlist_combo.setCurrentIndex(idx)
         self._setlist_combo.blockSignals(False)
 
     def _on_setlist_combo_changed(self) -> None:
