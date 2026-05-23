@@ -60,8 +60,9 @@ def build_set_play_layout_cards(
     """Cards show **next** row assignments; gutters: current (left), row after next (right).
 
     When ``setlist_rows`` is provided (full set order), part numbers use the same gold
-    highlight as the setlist editor when the instrument differs from the latest earlier
-    assignment for that player in the set.
+    highlight as the setlist editor when the instrument differs from the player's
+    assignment on the currently playing song. When no song is current, compare against
+    the latest earlier assignment for that player in the set.
     """
     if next_row is None or not next_row.item.song_layout_id:
         return []
@@ -138,26 +139,34 @@ def build_set_play_layout_cards(
             inst_warn = False
 
         inst_changed = False
-        if (
+        prior_iid: int | None = None
+        if current_row is not None:
+            cur_eff = (
+                eff_for_row(current_row, s.player_id)
+                if setlist_rows is not None
+                else _eff_for_item(conn, current_row, s.player_id)
+            )
+            if cur_eff is not None:
+                prior_iid = _instrument_id_for_part(current_row.parts_json, cur_eff)
+        elif (
             setlist_rows is not None
             and setlist_idx is not None
             and setlist_idx > 0
         ):
-            prior_iid: int | None = None
             for j in range(setlist_idx - 1, -1, -1):
                 back = setlist_rows[j]
                 bpn = eff_for_row(back, s.player_id)
                 if bpn is not None:
                     prior_iid = _instrument_id_for_part(back.parts_json, bpn)
                     break
-            if (
-                not part_dup
-                and eff is not None
-                and eff in parts_by_num
-                and iid is not None
-                and prior_iid is not None
-            ):
-                inst_changed = not _instruments_equivalent(conn, iid, prior_iid)
+        if (
+            not part_dup
+            and eff is not None
+            and eff in parts_by_num
+            and iid is not None
+            and prior_iid is not None
+        ):
+            inst_changed = not _instruments_equivalent(conn, iid, prior_iid)
 
         cur_pn = _eff_for_item(conn, current_row, s.player_id)
         right_pn = _eff_for_item(conn, right_row, s.player_id)

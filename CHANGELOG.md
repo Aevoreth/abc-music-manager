@@ -2,6 +2,12 @@
 
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
+## Version 0.2.3b
+* Set Play:
+  * FIX: Part Change Highlighting is now based on next selected song vs. currently playing song, not next selected song vs. previous song in the list.
+
+## Version 0.2.2b
+
 * Setlist and Set Play
   * FIX: Setlist Editor was not fully deleting sets if that set had a Set Play playback history, leaving behind an empty set instead
   * FIX: Newly created setlists were not showing up in Set Play until app restart (Due to list only refreshing on startup)
