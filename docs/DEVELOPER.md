@@ -1,6 +1,6 @@
 # ABC Music Manager — Developer Guide
 
-For developers: build instructions, design docs, and contribution info. End users should see [../README.md](../README.md).
+For developers: build instructions, design docs, and contribution info. End users should see [user/index.md](user/index.md) (in-app: **Help → User Guide**).
 
 ---
 

@@ -30,8 +30,24 @@ def _exit_if_windows_dist_exe_locked():
         raise SystemExit(1)
 
 
-docs_datas = [(os.path.join('docs', f), 'docs') for f in os.listdir('docs')
-              if os.path.isfile(os.path.join('docs', f))]
+def _user_guide_datas():
+    """Bundle in-app user guide (docs/user/) only; dev docs stay in the repo."""
+    out = []
+    root = os.path.join('docs', 'user')
+    if not os.path.isdir(root):
+        return out
+    for dirpath, dirnames, filenames in os.walk(root):
+        for fn in filenames:
+            src = os.path.join(dirpath, fn)
+            rel = os.path.relpath(src, 'docs')
+            dest_dir = os.path.join('docs', os.path.dirname(rel))
+            if os.sep != '/':
+                dest_dir = dest_dir.replace(os.sep, '/')
+            out.append((src, dest_dir))
+    return out
+
+
+user_guide_datas = _user_guide_datas()
 
 
 def _set_play_relay_worker_datas():
@@ -68,17 +84,12 @@ a = Analysis(
     binaries=[],
     datas=[
         ('NOTICE.txt', '.'),
-        ('README.md', '.'),  # For Help > User Guide when frozen
+        ('README.md', '.'),
         ('LICENSE.txt', '.'),
         ('CHANGELOG.md', '.'),
-        ('PROJECT_BRIEF.md', '.'),
-        ('REQUIREMENTS.md', '.'),
-        ('DATA_MODEL.md', '.'),
-        ('DECISIONS.md', '.'),
-        ('SCHEMA.md', '.'),
         ('licenses/LGPL-3.0.txt', 'licenses'),
         ('resources/icons', 'resources/icons'),
-    ] + docs_datas + set_play_worker_datas,
+    ] + user_guide_datas + set_play_worker_datas,
     hiddenimports=['tinysoundfont', 'pyaudio'],
     hookspath=[],
     hooksconfig={},

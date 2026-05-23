@@ -1,5 +1,5 @@
 """
-Dialog that displays the README (User Guide) with Markdown rendering.
+Dialog that displays the User Guide (docs/user/) with Markdown rendering.
 """
 
 from __future__ import annotations
@@ -18,28 +18,39 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+USER_GUIDE_REL = Path("docs") / "user" / "index.md"
+
 
 def _get_doc_base_path() -> Path | None:
-    """Return the directory containing README.md and related docs. Works when running from source or PyInstaller frozen."""
+    """Return app/repo root containing docs/user/. Works from source or PyInstaller frozen."""
     if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
         return Path(sys._MEIPASS)
     base = Path(__file__).resolve().parents[3]
     return base
 
 
-def _get_readme_path() -> Path | None:
-    """Return path to README.md."""
+def _get_user_guide_path() -> Path | None:
+    """Return path to docs/user/index.md."""
     base = _get_doc_base_path()
-    return (base / "README.md") if base else None
+    return (base / USER_GUIDE_REL) if base else None
+
+
+def _doc_search_bases(base_path: Path) -> tuple[Path, ...]:
+    return (
+        base_path,
+        base_path / "docs",
+        base_path / "docs" / "user",
+        base_path / "docs" / "user" / "settings",
+    )
 
 
 class _UserGuideBrowser(QTextBrowser):
-    """QTextBrowser that loads local docs (LICENSE.txt, NOTICE.txt, DEVELOPER.md, etc.) and opens external links in the system browser."""
+    """QTextBrowser that loads local user-guide docs and opens external links in the system browser."""
 
-    def __init__(self, base_path: Path, readme_url: QUrl, parent=None):
+    def __init__(self, base_path: Path, home_url: QUrl, parent=None):
         super().__init__(parent)
         self._base_path = Path(base_path).resolve()
-        self._readme_url = readme_url
+        self._home_url = home_url
         self._back_stack: list[dict] = []
         self._forward_stack: list[dict] = []
         self._current: dict | None = None  # {"url": QUrl} or {"html": str}
@@ -57,7 +68,6 @@ class _UserGuideBrowser(QTextBrowser):
         if path and path.is_file() and self._is_path_allowed(path):
             self._load_local_file(path)
         elif url.isLocalFile():
-            # Invalid or missing local file - do not try to open externally
             pass
         else:
             QDesktopServices.openUrl(url)
@@ -74,9 +84,7 @@ class _UserGuideBrowser(QTextBrowser):
             p = Path(url.toLocalFile()).resolve()
             if p.is_file() and self._is_path_allowed(p):
                 return p
-            # Fallback: path may be wrongly resolved (e.g. base one level too high).
-            # Try finding the file by name under base_path.
-            for base in (self._base_path, self._base_path / "docs"):
+            for base in _doc_search_bases(self._base_path):
                 fallback = base / p.name
                 if fallback.is_file() and self._is_path_allowed(fallback):
                     return fallback
@@ -87,18 +95,17 @@ class _UserGuideBrowser(QTextBrowser):
         p = Path(path_str)
         if p.is_absolute():
             return p if p.is_file() and self._is_path_allowed(p) else None
-        for base in (self._base_path, self._base_path / "docs"):
+        for base in _doc_search_bases(self._base_path):
             resolved = (base / p).resolve()
             if resolved.is_file() and self._is_path_allowed(resolved):
                 return resolved
         return None
 
     def set_initial_state(self) -> None:
-        """Call after initial setSource(readme_url) to record the home state."""
-        self._current = {"url": self._readme_url}
+        """Call after initial setSource(home_url) to record the home state."""
+        self._current = {"url": self._home_url}
 
     def _push_back_and_clear_forward(self) -> None:
-        """Push current document to back stack for navigation."""
         self._forward_stack.clear()
         if self._current:
             self._back_stack.append(self._current.copy())
@@ -157,31 +164,32 @@ class _UserGuideBrowser(QTextBrowser):
 
 
 def open_readme_viewer(parent=None) -> None:
-    """Open a modal dialog displaying the README (User Guide)."""
+    """Open a modal dialog displaying the User Guide."""
     from ..version import __version__
 
-    path = _get_readme_path()
-    if not path or not path.is_file():
+    base_path = _get_doc_base_path()
+    path = _get_user_guide_path()
+    if not base_path or not path or not path.is_file():
         from PySide6.QtWidgets import QMessageBox
         QMessageBox.information(
             parent,
             "User Guide",
-            "User Guide not found. See the repository README.",
+            "User Guide not found. See docs/user/ in the repository.",
         )
         return
 
-    base_path = path.parent
     dlg = QDialog(parent)
     dlg.setWindowTitle(f"ABC Music Manager — User Guide (v{__version__})")
     dlg.setMinimumSize(520, 400)
     dlg.resize(640, 520)
 
     layout = QVBoxLayout(dlg)
-    readme_url = QUrl.fromLocalFile(str(path))
-    browser = _UserGuideBrowser(base_path, readme_url)
-    browser.setSearchPaths([str(base_path), str(base_path / "docs")])
+    home_url = QUrl.fromLocalFile(str(path))
+    browser = _UserGuideBrowser(base_path, home_url)
+    search_paths = [str(p) for p in _doc_search_bases(base_path)]
+    browser.setSearchPaths(search_paths)
 
-    browser.setSource(readme_url)
+    browser.setSource(home_url)
     browser.set_initial_state()
 
     back_btn = QPushButton("← Back")
@@ -195,10 +203,14 @@ def open_readme_viewer(parent=None) -> None:
     browser._history_changed = update_nav_buttons
     back_btn.clicked.connect(browser._go_back)
     forward_btn.clicked.connect(browser._go_forward)
+
     def go_home() -> None:
-        while browser.is_backward_available():
-            browser._go_back()
+        browser._push_back_and_clear_forward()
+        browser.setSource(home_url)
+        browser._current = {"url": home_url}
+        browser._forward_stack.clear()
         update_nav_buttons()
+
     home_btn.clicked.connect(go_home)
 
     nav_layout = QHBoxLayout()

@@ -3,6 +3,8 @@
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
 ## Version 0.2.3b
+* Documentation:
+  * ADD: Structured in-app User Guide under `docs/user/` (Help → User Guide); README trimmed to point at the guide.
 * Set Play:
   * FIX: Part Change Highlighting is now based on next selected song vs. currently playing song, not next selected song vs. previous song in the list.
 

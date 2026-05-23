@@ -22,20 +22,14 @@ Your data (library index, preferences) is stored at `~/.abc_music_manager/` (or 
 
 ## Getting started
 
-1. **Add your LOTRO folder** — Go to Settings > "Folder Rules" and set your LOTRO data folder (default "C:\Users\<usernam>\Documents\The Lord of the Rings Online\" on Windows). This may already be detected for you.
-2. **Set Export directory** - Settings > "Folder Rules" This folder is not scanned by the library scanner (to prevent duplicates) but is included when generating Songbook Data. You may also wish to add excluded directories on the same tab.
-3. **Set Account Targets** - Settings > "Account Targets" Here, you can click on "Scan Account Targets". If your LOTRO folder is properly selected, this will scan the PluginData folder within and generate a target for saving Songbook data for each account you have.
-4. **Populate your Library** — Run File > Scan Library to index your files. You will need to do this whenever you add new music to your library.
+Open **Help → User Guide** in the app, or see the full guide at [docs/user/index.md](docs/user/index.md).
 
----
+Quick checklist:
 
-## Features
-
-- **Library** — Filterable table of songs with title, composer, duration, part count, ratings, play history. Edit metadata and optionally edit raw ABC text (Advanced users only!).
-- **Playback** — Listen to songs using Maestro's provided soundfont (automatically located with new versions of Maestro, can be automatically downloaded if not found). Mute or solo individual parts. Stereo playback supported using song layouts or user pan definitions from Maestro.
-- **Bands** — Define players and instruments. Create band layouts with drag-and-drop positioning.
-- **Setlists** — Build setlists for events. Add songs from the library, reorder, set instrument changeover timing. Export to folder or zip. Import/export ABCP playlist files from Maestro/ABCPlayer.
-- **PluginData** — Generate `SongbookData.plugindata` for selected LOTRO account directories (File > Write PluginData).
+1. **LOTRO folder** — Settings → Folder rules
+2. **Account targets** — Settings → Account targets → Scan Account Targets
+3. **Scan library** — File → Scan Library
+4. **Write PluginData** (optional) — File → Write PluginData…
 
 ---
 
