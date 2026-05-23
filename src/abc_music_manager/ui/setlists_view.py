@@ -65,6 +65,7 @@ from ..db.setlist_repo import (
     add_setlist,
     update_setlist,
     delete_setlist,
+    clear_setlist,
     move_setlist_to_folder,
     list_setlist_items,
     list_setlist_items_with_song_meta,
@@ -1747,6 +1748,27 @@ class SetlistsView(QWidget):
         )
         dlg.exec()
 
+    def _clear_setlist_by_id(self, setlist_id: int) -> None:
+        """Remove all songs from a setlist but keep its metadata. Used from context menu."""
+        sets_list = list_setlists(self.app_state.conn)
+        s = next((x for x in sets_list if x.id == setlist_id), None)
+        if not s:
+            return
+        if (
+            QMessageBox.question(
+                self,
+                "Confirm",
+                f"Clear all songs from setlist '{s.name}'?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            == QMessageBox.StandardButton.Yes
+        ):
+            clear_setlist(self.app_state.conn, setlist_id)
+            if self._selected_setlist_id == setlist_id:
+                self._refresh_songs_table()
+            self._refresh_setlist_tree()
+
     def _delete_setlist_by_id(self, setlist_id: int) -> None:
         """Delete a setlist by id. Used from context menu."""
         sets_list = list_setlists(self.app_state.conn)
@@ -1757,7 +1779,7 @@ class SetlistsView(QWidget):
             QMessageBox.question(
                 self,
                 "Confirm",
-                f"Delete setlist '{s.name}'?",
+                f"Permanently delete setlist '{s.name}'?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -1797,6 +1819,9 @@ class SetlistsView(QWidget):
                     )
                     copy_submenu = menu.addMenu("Copy...")
                     self._add_setlist_copy_actions(copy_submenu, setlist_id)
+                    menu.addAction("Clear set").triggered.connect(
+                        lambda: self._clear_setlist_by_id(setlist_id)
+                    )
                     menu.addAction("Delete set").triggered.connect(
                         lambda: self._delete_setlist_by_id(setlist_id)
                     )
@@ -1895,7 +1920,7 @@ class SetlistsView(QWidget):
             QMessageBox.question(
                 self,
                 "Confirm",
-                f"Delete setlist '{s.name}'?",
+                f"Permanently delete setlist '{s.name}'?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )

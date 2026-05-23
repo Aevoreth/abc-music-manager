@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .setlist_folder_repo import SetlistFolderRow, list_folders
-from .song_layout_repo import get_or_create_song_layout_for_band, delete_song_layout
+from .song_layout_repo import get_or_create_song_layout_for_band
 
 
 def _now() -> str:
@@ -245,8 +245,8 @@ def update_setlist(
     conn.commit()
 
 
-def delete_setlist(conn: sqlite3.Connection, setlist_id: int) -> None:
-    # Collect song_layout_ids from this setlist's items (before deletion)
+def _remove_setlist_items_and_orphan_layouts(conn: sqlite3.Connection, setlist_id: int) -> None:
+    """Remove all songs from a setlist and delete layouts used only by it. Does not commit."""
     cur = conn.execute(
         "SELECT song_layout_id FROM SetlistItem WHERE setlist_id = ? AND song_layout_id IS NOT NULL",
         (setlist_id,),
@@ -263,17 +263,36 @@ def delete_setlist(conn: sqlite3.Connection, setlist_id: int) -> None:
         (setlist_id,),
     )
     conn.execute("DELETE FROM SetlistItem WHERE setlist_id = ?", (setlist_id,))
-    conn.execute("DELETE FROM Setlist WHERE id = ?", (setlist_id,))
 
-    # Delete song layouts that were only used by this setlist (now orphaned)
     for song_layout_id in song_layout_ids:
         cur = conn.execute(
             "SELECT 1 FROM SetlistItem WHERE song_layout_id = ? LIMIT 1", (song_layout_id,)
         )
         if cur.fetchone() is None:
-            delete_song_layout(conn, song_layout_id)
+            conn.execute("DELETE FROM SongLayoutAssignment WHERE song_layout_id = ?", (song_layout_id,))
+            conn.execute("DELETE FROM SongLayout WHERE id = ?", (song_layout_id,))
 
+
+def clear_setlist(conn: sqlite3.Connection, setlist_id: int) -> None:
+    """Remove all songs from a setlist but keep its metadata."""
+    _remove_setlist_items_and_orphan_layouts(conn, setlist_id)
     conn.commit()
+
+
+def delete_setlist(conn: sqlite3.Connection, setlist_id: int) -> None:
+    """Delete a setlist and all its items. Play history rows keep the play but lose setlist context."""
+    conn.execute("BEGIN")
+    try:
+        _remove_setlist_items_and_orphan_layouts(conn, setlist_id)
+        conn.execute(
+            "UPDATE PlayLog SET context_setlist_id = NULL WHERE context_setlist_id = ?",
+            (setlist_id,),
+        )
+        conn.execute("DELETE FROM Setlist WHERE id = ?", (setlist_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
 
 
 def move_setlist_to_folder(
