@@ -31,7 +31,7 @@ ABCP stores ordered file paths only — no band layouts, timing, or notes. Paths
 
 ## Set export packages
 
-Folder or zip export with optional renamed ABC files, part sheets, and CSV. See [Set export](set-export.md).
+Folder or zip export with optional renamed ABC files, CSV part sheets, and ABCP playlist. See [Set export](set-export.md).
 
 ---
 
@@ -43,7 +43,7 @@ Lua format for the in-game Songbook plugin. See [PluginData / Songbook](pluginda
 
 ## Relative vs absolute paths
 
-When exporting sets beside ABC files, relative paths help portable folders. Standalone ABCP exports often use absolute paths. Keep playlist and ABC files together when sharing.
+When exporting ABCP playlists ABC files during set export, relative paths help portable folders. Standalone ABCP exports often use absolute paths. Keep playlist and ABC files together when sharing.
 
 ---
 
