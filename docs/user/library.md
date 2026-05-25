@@ -2,6 +2,8 @@
 
 The **Library** page is your main song browser: filter, sort, play, edit metadata, and add songs to setlists.
 
+![Library view with songs](img/library-songs.png)
+
 ---
 
 ## Library table columns
@@ -27,6 +29,8 @@ Click column headers to sort (where supported).
 
 ## Filters {#filters}
 
+![Library Filters](img/library-filters.png)
+	
 ### Main filter row
 
 - **Title / Composer** — text search, searches both fields
@@ -73,6 +77,8 @@ Right-click a row:
 
 ## Empty library state {#empty-library}
 
+![Library view - Empty](img/library-empty.png)
+
 If no songs match your filters, you see an empty-state message with an **Open User Guide** button.
 
 If you truly have no indexed songs, follow [First-time setup](getting-started.md#getting-started-checklist).
@@ -88,6 +94,7 @@ Double-click a row to open **Song detail**.
 ## Play history
 
 From the Library **Playback History** column you can:
+![Playback History buttons](img/playback-history-buttons.png)
 
 - Mark a song as played now
 - Set last played to a specific time

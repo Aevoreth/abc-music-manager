@@ -8,7 +8,7 @@ Defaults for the [playback toolbar](../playback.md).
 
 ## Soundfont path
 
-Path to an SF2 soundfont file. **Empty** uses automatic lookup (MaestroCommon) or prompts to download.
+Path to the lotroinstruments.sf2 soundfont file. **Empty** uses automatic lookup (`%LOCALAPPDATA%\MaestroCommon`) or prompts to download to that location.
 
 - **Browse…** — pick a file
 - **Use default** — clear the path
@@ -17,13 +17,13 @@ Path to an SF2 soundfont file. **Empty** uses automatic lookup (MaestroCommon) o
 
 ## Default volume
 
-0–100, applied when playback starts.
+0–100
 
 ---
 
 ## Default tempo
 
-0.5× to 2×. The toolbar tempo control can override per session.
+0.5× to 2×.
 
 ---
 

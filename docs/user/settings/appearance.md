@@ -21,7 +21,7 @@ Clears saved window position and size. Useful if the window opens off-screen aft
 
 Clears **all** preferences (paths, filters, playback, relays, window state) and **restarts** the app immediately.
 
-Does not delete the library database file, but you will need to reconfigure paths and settings.
+Does not delete the library database file, but you will need to reconfigure paths and settings before you attempt to scan your library again.
 
 ---
 

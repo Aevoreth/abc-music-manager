@@ -9,7 +9,7 @@ This guide walks through the minimum steps to get ABC Music Manager indexing you
 - **Built executable:** Run `ABC Music Manager.exe` from your release folder.
 - **From source:** Install dependencies (`pip install -r requirements.txt`), then run `python main.py` from the repository root.
 
-Your app data (library database, preferences) is stored in the release directory as abc_music_manager.sqlite and preferences.json. Keep these files safe and backed up (especially the sqlite database file).
+Your app data (library database, preferences) is stored in the release directory as abc_music_manager.sqlite and preferences.json. Keep these files safe and backed up.
 
 ---
 

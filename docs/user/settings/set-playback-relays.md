@@ -8,7 +8,7 @@ Named Cloudflare relay URLs for [Set Play](../set-play.md) and [Band Assistant](
 
 ## Why relays?
 
-Broadcasting Set Play state to assistants uses a small **Cloudflare Worker** WebSocket relay. Each bandleader can deploy their own worker (free tier is typically sufficient for band use).
+Broadcasting Set Play state to assistants uses a small **Cloudflare Worker** WebSocket relay. Each bandleader can deploy their own worker (free tier is more than sufficient for even heavy band usage).
 
 ---
 
@@ -28,9 +28,7 @@ Select the active relay from the combo box on Set Play and Band Assistant pages.
 You need:
 
 - A Cloudflare account (free)
-- Node.js / npm for `wrangler deploy` (wizard instructions)
-
-*(Add step-by-step screenshots here later.)*
+- Node.js / npm for `wrangler deploy` (wizard provides instructions and in most cases can handle semi-automatic installation of these items)
 
 ---
 

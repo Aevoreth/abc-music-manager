@@ -6,7 +6,7 @@ ABC Music Manager can write **`SongbookData.plugindata`** files for the LOTRO So
 
 ## What it is
 
-The file is **Lua table source** (UTF-8 text), not JSON. The Songbook plugin loads it from each account's PluginData folder.
+The file is a **Lua table source** (UTF-8 text) text file stored under `<LOTRO>\PluginData\<AccountName>\AllServers\SongbookData.plugindata`. The Songbook plugin loads it when the plugin is loaded in-game. It is the library that is used by the plugin in order to sync and play music in game. All versions of Songbook are supported.
 
 The app builds the file from your indexed library and configured paths.
 
@@ -42,8 +42,7 @@ Re-run after:
 
 Included directories:
 
-- Your LOTRO Music library (and other scanned paths)
-- **Set Export directory** when configured
+- Your LOTRO Music library, including **Set Export directory**
 - Excluded directories only if their **Songbook** column is enabled ([Folder rules](settings/folder-rules.md))
 
 ---
