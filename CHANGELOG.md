@@ -2,6 +2,10 @@
 
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
+## Version 0.2.6b
+* ABC Playback
+  * Fixed error preventing playback in compiled executable
+  
 ## Version 0.2.5b
 * ABC Playback:
   * Corrected ABC to Midi velocities

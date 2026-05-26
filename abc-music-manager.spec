@@ -3,6 +3,9 @@
 
 import os
 import sys
+
+from PyInstaller.utils.hooks import collect_data_files
+
 block_cipher = None
 
 
@@ -89,8 +92,14 @@ a = Analysis(
         ('CHANGELOG.md', '.'),
         ('licenses/LGPL-3.0.txt', 'licenses'),
         ('resources/icons', 'resources/icons'),
-    ] + user_guide_datas + set_play_worker_datas,
-    hiddenimports=['tinysoundfont', 'pyaudio'],
+    ] + user_guide_datas + set_play_worker_datas + collect_data_files(
+        'abc_music_manager.playback.data'
+    ),
+    hiddenimports=[
+        'tinysoundfont',
+        'pyaudio',
+        'abc_music_manager.playback.data',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

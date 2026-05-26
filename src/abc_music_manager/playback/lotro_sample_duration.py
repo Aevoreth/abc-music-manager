@@ -9,6 +9,8 @@ from functools import lru_cache
 from importlib import resources
 from typing import Optional
 
+from abc_music_manager.playback import data as playback_data
+
 from .maestro_abc.abc_constants import COWBELL_NOTE_ID
 
 _COWBELL_NAMES = frozenset({"Basic Cowbell", "Moor Cowbell"})
@@ -18,7 +20,7 @@ _COWBELL_NAMES = frozenset({"Basic Cowbell", "Moor Cowbell"})
 def _load_durations() -> dict[str, dict[int, int]]:
     db: dict[str, dict[int, int]] = {}
     try:
-        text = resources.files("abc_music_manager.playback.data").joinpath(
+        text = resources.files(playback_data).joinpath(
             "noteDurations.txt"
         ).read_text(encoding="utf-8")
     except (FileNotFoundError, OSError, TypeError):
