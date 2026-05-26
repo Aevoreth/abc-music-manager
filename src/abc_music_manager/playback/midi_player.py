@@ -113,29 +113,19 @@ class MidiPlayer:
         self._midi_bytes: Optional[bytes] = None
         self._duration_sec: float = 0.0
         self._lock = threading.Lock()
-        self._volume: float = 0.5  # 0-1, mapped to dB
+        self._volume: float = 1.0  # 0-1, applied via CC7 like Maestro VolumeTransceiver
         self._part_mutes: dict[int, bool] = {}
         self._is_paused: bool = False
         self._paused_at_time: float = 0.0
         self._playing_since: Optional[float] = None
         self._stopped: bool = True
 
-    # Headroom to avoid clipping when many channels play at once (e.g. full arrangements)
-    _HEADROOM_DB = -6.0
-
-    def _volume_to_db(self, vol: float) -> float:
-        """Map 0-1 to attenuation: 1.0 -> 0 dB, 0.5 -> -6 dB, 0.1 -> -20 dB."""
-        if vol <= 0:
-            return -48.0  # effectively silent
-        import math
-        return 20.0 * math.log10(max(0.001, vol))
-
     def _ensure_synth(self):
         import tinysoundfont
         with self._lock:
             if self._synth is None:
-                gain_db = self._volume_to_db(self._volume) + self._HEADROOM_DB
-                self._synth = tinysoundfont.Synth(gain=gain_db, samplerate=44100)
+                # Fixed synth gain; loudness controlled via CC7 (Maestro VolumeTransceiver model).
+                self._synth = tinysoundfont.Synth(gain=0.0, samplerate=44100)
                 sfid = self._synth.sfload(str(self._sf_path))
                 # Pre-assign channels 16-24 for 24-part LOTRO support.
                 # tinysoundfont only pre-assigns 0-15 on sfload; parts 16-24 use virtual ch 16-24.
@@ -295,7 +285,7 @@ class MidiPlayer:
                 pass
 
     def set_volume(self, value: float) -> None:
-        """Set volume 0-1. Applied on next synth creation; use control_change for live adjustment."""
+        """Set volume 0-1 via CC7 (channel volume), matching Maestro VolumeTransceiver."""
         self._volume = max(0.0, min(1.0, value))
         if self._synth:
             try:

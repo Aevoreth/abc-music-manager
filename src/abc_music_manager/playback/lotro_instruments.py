@@ -114,20 +114,76 @@ _NON_SUSTAINED_MIDI_PROGRAMS: frozenset[int] = frozenset({
 })
 
 
-# Per-instrument dB volume adjustment (from Maestro LotroInstrument.dBVolumeAdjust).
-# Positive = louder, negative = quieter relative to baseline.
-# Lute of Ages uses -4 dB (sounds too loud in some arrangements; Maestro baseline is 0).
+# MIDI program -> Maestro LotroInstrument.friendlyName (for noteDurations.txt lookup)
+_MIDI_PROGRAM_TO_FRIENDLY_NAME: dict[int, str] = {
+    9: "Jaunty Hand-knells",
+    24: "Lute of Ages",
+    25: "Basic Lute",
+    27: "Misty Mountain Harp",
+    32: "Basic Theorbo",
+    40: "Bardic Fiddle",
+    41: "Basic Fiddle",
+    45: "Traveller's Trusty Fiddle",
+    46: "Basic Harp",
+    51: "Lonely Mountain Fiddle",
+    63: "Lonely Mountain Bassoon",
+    68: "Brusque Bassoon",
+    69: "Basic Horn",
+    70: "Basic Bassoon",
+    71: "Basic Clarinet",
+    73: "Basic Flute",
+    84: "Basic Pibgorn",
+    109: "Basic Bagpipe",
+    110: "Sprightly Fiddle",
+    114: "Moor Cowbell",
+    115: "Basic Cowbell",
+    118: "Basic Drum",
+    120: "Student's Fiddle",
+}
+
+# Instruments with sustainable=true in Maestro LotroInstrument (note-dependent for student fiddle)
+_SUSTAINABLE_MIDI_PROGRAMS: frozenset[int] = frozenset({
+    40, 41, 51, 120,  # fiddles
+    109,  # bagpipe
+    63, 70,  # bassoons
+    71, 73, 69, 84,  # clarinet, flute, horn, pibgorn
+})
+
+_PLAYABLE_MIN = 36  # C2
+_PLAYABLE_MAX = 72  # C5
+
+# Student fiddle note ranges (Maestro LotroInstrument)
+_STUDENT_CHROMATIC_LOWEST_ID = 43  # G2
+_STUDENT_FX_HIGHEST_ID = 38  # D2
+
+
+def get_instrument_friendly_name(midi_program: int) -> str:
+    """Return Maestro friendly instrument name for sample duration lookup."""
+    return _MIDI_PROGRAM_TO_FRIENDLY_NAME.get(midi_program, "Lute of Ages")
+
+
+def is_sustainable_instrument(midi_program: int, note_id: int) -> bool:
+    """Match Maestro LotroInstrument.isSustainable(noteId)."""
+    if midi_program == 120:
+        student_chromatic = note_id >= _STUDENT_CHROMATIC_LOWEST_ID
+        if student_chromatic:
+            return _PLAYABLE_MIN <= note_id <= _PLAYABLE_MAX
+        return _PLAYABLE_MIN <= note_id <= _STUDENT_FX_HIGHEST_ID
+    if midi_program not in _SUSTAINABLE_MIDI_PROGRAMS:
+        return False
+    return _PLAYABLE_MIN <= note_id <= _PLAYABLE_MAX
+# Reference metadata only — Maestro does not apply these during ABC→MIDI conversion;
+# instrument balance comes from LotroInstruments.sf2 sample levels.
 _MIDI_PROGRAM_TO_DB: dict[int, float] = {
-    9: 2.0,      # Jaunty Hand-knells
-    24: -4.0,     # Lute of Ages (attenuated; Maestro 0)
+    24: 0.0,      # Lute of Ages
     25: -19.0,    # Basic Lute
     27: -12.5,    # Misty Mountain Harp
     32: -12.0,    # Basic Theorbo
     40: 6.0,      # Bardic Fiddle
-    41: 6.25,     # Basic Fiddle
-    45: -3.0,     # Traveller's Trusty Fiddle
+    41: 4.5,      # Basic Fiddle
+    45: 1.5,      # Traveller's Trusty Fiddle
     46: 6.0,      # Basic Harp
-    51: 5.5,      # Lonely Mountain Fiddle
+    51: 1.5,      # Lonely Mountain Fiddle
     63: 5.0,      # Lonely Mountain Bassoon
     68: 5.0,      # Brusque Bassoon
     69: -2.0,     # Basic Horn
@@ -139,23 +195,16 @@ _MIDI_PROGRAM_TO_DB: dict[int, float] = {
     110: -10.0,   # Sprightly Fiddle
     114: 0.0,     # Moor Cowbell
     115: 0.0,     # Basic Cowbell
-    118: 4.5,     # Basic Drum
+    118: 4.5,     # Basic Drum (maestro-java24 LotroInstrument)
     120: 0.0,     # Student's Fiddle
+    # ABC Music Manager extension (not in Maestro LotroInstrument enum):
+    9: 0.0,       # Jaunty Hand-knells / Glockenspiel
 }
 
 
 def get_instrument_db_volume_adjust(midi_program: int) -> float:
-    """Return dB volume adjustment for a MIDI program. 0 = no change."""
+    """Return Maestro dBVolumeAdjust for a MIDI program (reference metadata; not applied at playback)."""
     return _MIDI_PROGRAM_TO_DB.get(midi_program, 0.0)
-
-
-def scale_velocity_by_db(velocity: int, db: float) -> int:
-    """Scale velocity by dB: positive dB = louder, negative = quieter. Clamped to 0-127."""
-    if db == 0:
-        return velocity
-    import math
-    mult = 10.0 ** (db / 20.0)
-    return max(0, min(127, round(velocity * mult)))
 
 
 def is_non_sustained_instrument(midi_program: int) -> bool:

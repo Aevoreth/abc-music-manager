@@ -13,7 +13,7 @@ def _clamp(value: int, low: int, high: int) -> int:
 
 
 class Dynamics(Enum):
-    pppp = (4, 61)
+    pppp = (4, 57)
     ppp = (16, 61)
     pp = (32, 75)
     p = (48, 87)

@@ -1,0 +1,752 @@
+#
+# Durations are in micro seconds
+#
+Basic Bagpipe,36,2919410
+Basic Bagpipe,37,2919410
+Basic Bagpipe,38,2919410
+Basic Bagpipe,39,2919410
+Basic Bagpipe,40,2919410
+Basic Bagpipe,41,2919410
+Basic Bagpipe,42,2919410
+Basic Bagpipe,43,2919410
+Basic Bagpipe,44,2919410
+Basic Bagpipe,45,2919410
+Basic Bagpipe,46,2919410
+Basic Bagpipe,47,2919410
+Basic Bagpipe,48,6871043
+Basic Bagpipe,49,6807234
+Basic Bagpipe,50,6679751
+Basic Bagpipe,51,6760454
+Basic Bagpipe,52,6903764
+Basic Bagpipe,53,6700839
+Basic Bagpipe,54,6879524
+Basic Bagpipe,55,6909932
+Basic Bagpipe,56,6914308
+Basic Bagpipe,57,6886236
+Basic Bagpipe,58,6790454
+Basic Bagpipe,59,6884966
+Basic Bagpipe,60,6959909
+Basic Bagpipe,61,6787143
+Basic Bagpipe,62,6766803
+Basic Bagpipe,63,6818118
+Basic Bagpipe,64,6706463
+Basic Bagpipe,65,6925147
+Basic Bagpipe,66,6942404
+Basic Bagpipe,67,6642834
+Basic Bagpipe,68,6649615
+Basic Bagpipe,69,6886236
+Basic Bagpipe,70,6863696
+Basic Bagpipe,71,6434966
+Basic Bagpipe,72,6839773
+Bardic Fiddle,36,6556848
+Bardic Fiddle,37,6565147
+Bardic Fiddle,38,6558095
+Bardic Fiddle,39,6544966
+Bardic Fiddle,40,6541746
+Bardic Fiddle,41,6540975
+Bardic Fiddle,42,6533107
+Bardic Fiddle,43,6531746
+Bardic Fiddle,44,6456190
+Bardic Fiddle,45,6481111
+Bardic Fiddle,46,6474308
+Bardic Fiddle,47,6509909
+Bardic Fiddle,48,6333288
+Bardic Fiddle,49,6598503
+Bardic Fiddle,50,6859433
+Bardic Fiddle,51,6488073
+Bardic Fiddle,52,6903764
+Bardic Fiddle,53,6349773
+Bardic Fiddle,54,7048753
+Bardic Fiddle,55,7025556
+Bardic Fiddle,56,6616939
+Bardic Fiddle,57,6116689
+Bardic Fiddle,58,6386644
+Bardic Fiddle,59,6725329
+Bardic Fiddle,60,6353265
+Bardic Fiddle,61,6509909
+Bardic Fiddle,62,6421020
+Bardic Fiddle,63,6094853
+Bardic Fiddle,64,6456259
+Bardic Fiddle,65,6796644
+Bardic Fiddle,66,6598118
+Bardic Fiddle,67,6278481
+Bardic Fiddle,68,6640567
+Bardic Fiddle,69,6529841
+Bardic Fiddle,70,6066599
+Bardic Fiddle,71,6064104
+Bardic Fiddle,72,6063900
+Basic Bassoon,36,6082290
+Basic Bassoon,37,5973651
+Basic Bassoon,38,5814218
+Basic Bassoon,39,5949546
+Basic Bassoon,40,5941723
+Basic Bassoon,41,5756961
+Basic Bassoon,42,6144739
+Basic Bassoon,43,6002993
+Basic Bassoon,44,6092698
+Basic Bassoon,45,5833469
+Basic Bassoon,46,5773447
+Basic Bassoon,47,5642426
+Basic Bassoon,48,6269501
+Basic Bassoon,49,5927732
+Basic Bassoon,50,6085079
+Basic Bassoon,51,6093787
+Basic Bassoon,52,5691179
+Basic Bassoon,53,5941995
+Basic Bassoon,54,6077710
+Basic Bassoon,55,6107868
+Basic Bassoon,56,6011088
+Basic Bassoon,57,5793379
+Basic Bassoon,58,5954331
+Basic Bassoon,59,5851497
+Basic Bassoon,60,5955488
+Basic Bassoon,61,5871542
+Basic Bassoon,62,6378957
+Basic Bassoon,63,5866984
+Basic Bassoon,64,5786848
+Basic Bassoon,65,5920317
+Basic Bassoon,66,6062630
+Basic Bassoon,67,5996871
+Basic Bassoon,68,5872200
+Basic Bassoon,69,5912517
+Basic Bassoon,70,5888390
+Basic Bassoon,71,5848549
+Basic Bassoon,72,5848231
+Basic Fiddle,36,7043900
+Basic Fiddle,37,7044172
+Basic Fiddle,38,7033175
+Basic Fiddle,39,7036122
+Basic Fiddle,40,7027370
+Basic Fiddle,41,7024444
+Basic Fiddle,42,7023265
+Basic Fiddle,43,7019365
+Basic Fiddle,44,7657483
+Basic Fiddle,45,7759002
+Basic Fiddle,46,9209297
+Basic Fiddle,47,7991066
+Basic Fiddle,48,8107075
+Basic Fiddle,49,8803220
+Basic Fiddle,50,9484853
+Basic Fiddle,51,8745193
+Basic Fiddle,52,8565125
+Basic Fiddle,53,8513152
+Basic Fiddle,54,8817710
+Basic Fiddle,55,8063560
+Basic Fiddle,56,8730703
+Basic Fiddle,57,8687188
+Basic Fiddle,58,8585669
+Basic Fiddle,59,8774218
+Basic Fiddle,60,8107075
+Basic Fiddle,61,9325306
+Basic Fiddle,62,9296304
+Basic Fiddle,63,9383333
+Basic Fiddle,64,9252789
+Basic Fiddle,65,8571156
+Basic Fiddle,66,9209297
+Basic Fiddle,67,9296304
+Basic Fiddle,68,8764649
+Basic Fiddle,69,9325306
+Basic Fiddle,70,9223787
+Basic Fiddle,71,9397166
+Basic Fiddle,72,9165782
+Basic Lute,36,847574
+Basic Lute,37,925873
+Basic Lute,38,875828
+Basic Lute,39,806440
+Basic Lute,40,1000952
+Basic Lute,41,943401
+Basic Lute,42,943401
+Basic Lute,43,1000952
+Basic Lute,44,898345
+Basic Lute,45,1000952
+Basic Lute,46,1000952
+Basic Lute,47,1000952
+Basic Lute,48,898345
+Basic Lute,49,849546
+Basic Lute,50,1000952
+Basic Lute,51,849546
+Basic Lute,52,849546
+Basic Lute,53,814535
+Basic Lute,54,700658
+Basic Lute,55,649365
+Basic Lute,56,700658
+Basic Lute,57,716939
+Basic Lute,58,738209
+Basic Lute,59,789410
+Basic Lute,60,785737
+Basic Lute,61,898345
+Basic Lute,62,925873
+Basic Lute,63,799501
+Basic Lute,64,898345
+Basic Lute,65,849546
+Basic Lute,66,814535
+Basic Lute,67,814535
+Basic Lute,68,849546
+Basic Lute,69,799501
+Basic Lute,70,778231
+Basic Lute,71,690748
+Basic Lute,72,799501
+Brusque Bassoon,36,372381
+Brusque Bassoon,37,442585
+Brusque Bassoon,38,372381
+Brusque Bassoon,39,507664
+Brusque Bassoon,40,536508
+Brusque Bassoon,41,458617
+Brusque Bassoon,42,421111
+Brusque Bassoon,43,438435
+Brusque Bassoon,44,424014
+Brusque Bassoon,45,449977
+Brusque Bassoon,46,473039
+Brusque Bassoon,47,406689
+Brusque Bassoon,48,383628
+Brusque Bassoon,49,442585
+Brusque Bassoon,50,418231
+Brusque Bassoon,51,424014
+Brusque Bassoon,52,426893
+Brusque Bassoon,53,432653
+Brusque Bassoon,54,406689
+Brusque Bassoon,55,441315
+Brusque Bassoon,56,441315
+Brusque Bassoon,57,455737
+Brusque Bassoon,58,438435
+Brusque Bassoon,59,418231
+Brusque Bassoon,60,429773
+Brusque Bassoon,61,442585
+Brusque Bassoon,62,421111
+Brusque Bassoon,63,438435
+Brusque Bassoon,64,442585
+Brusque Bassoon,65,447075
+Brusque Bassoon,66,455737
+Brusque Bassoon,67,455737
+Brusque Bassoon,68,449977
+Brusque Bassoon,69,452857
+Brusque Bassoon,70,444195
+Brusque Bassoon,71,444195
+Brusque Bassoon,72,429773
+Basic Clarinet,36,5906395
+Basic Clarinet,37,5751655
+Basic Clarinet,38,5535533
+Basic Clarinet,39,5548866
+Basic Clarinet,40,5522200
+Basic Clarinet,41,5676939
+Basic Clarinet,42,5831701
+Basic Clarinet,43,5620907
+Basic Clarinet,44,5786712
+Basic Clarinet,45,5802721
+Basic Clarinet,46,5797007
+Basic Clarinet,47,5744014
+Basic Clarinet,48,5845034
+Basic Clarinet,49,5770317
+Basic Clarinet,50,5716961
+Basic Clarinet,51,5652925
+Basic Clarinet,52,5759660
+Basic Clarinet,53,5652676
+Basic Clarinet,54,5834354
+Basic Clarinet,55,5764989
+Basic Clarinet,56,5848073
+Basic Clarinet,57,5707914
+Basic Clarinet,58,5578231
+Basic Clarinet,59,5909070
+Basic Clarinet,60,5895737
+Basic Clarinet,61,5652925
+Basic Clarinet,62,5711633
+Basic Clarinet,63,5639592
+Basic Clarinet,64,5719637
+Basic Clarinet,65,5826349
+Basic Clarinet,66,5631587
+Basic Clarinet,67,5829025
+Basic Clarinet,68,5690658
+Basic Clarinet,69,5856077
+Basic Clarinet,70,5733016
+Basic Clarinet,71,5562222
+Basic Clarinet,72,5706304
+Basic Cowbell,71,291134
+Basic Drum,36,954694
+Basic Drum,37,314943
+Basic Drum,38,960023
+Basic Drum,39,380023
+Basic Drum,40,485351
+Basic Drum,41,400023
+Basic Drum,42,426689
+Basic Drum,43,586689
+Basic Drum,44,331633
+Basic Drum,45,672018
+Basic Drum,46,387506
+Basic Drum,47,485351
+Basic Drum,48,642698
+Basic Drum,49,571111
+Basic Drum,50,579365
+Basic Drum,51,768005
+Basic Drum,52,416009
+Basic Drum,53,496009
+Basic Drum,54,514694
+Basic Drum,55,460068
+Basic Drum,56,824354
+Basic Drum,57,732925
+Basic Drum,58,792018
+Basic Drum,59,484739
+Basic Drum,60,513764
+Basic Drum,61,567256
+Basic Drum,62,730703
+Basic Drum,63,614082
+Basic Drum,64,679365
+Basic Drum,65,726689
+Basic Drum,66,369365
+Basic Drum,67,695692
+Basic Drum,68,858707
+Basic Drum,69,535351
+Basic Drum,70,253356
+Basic Drum,71,662018
+Basic Drum,72,298821
+Basic Flute,36,5903968
+Basic Flute,37,5827029
+Basic Flute,38,5141497
+Basic Flute,39,5966916
+Basic Flute,40,5141497
+Basic Flute,41,5861995
+Basic Flute,42,5861995
+Basic Flute,43,5708095
+Basic Flute,44,5589184
+Basic Flute,45,5680113
+Basic Flute,46,5792041
+Basic Flute,47,5624150
+Basic Flute,48,6337664
+Basic Flute,49,5806032
+Basic Flute,50,6288707
+Basic Flute,51,6064853
+Basic Flute,52,5903968
+Basic Flute,53,5966916
+Basic Flute,54,5966916
+Basic Flute,55,5694104
+Basic Flute,56,6197755
+Basic Flute,57,6316689
+Basic Flute,58,6386644
+Basic Flute,59,6099841
+Basic Flute,60,5903968
+Basic Flute,61,6154036
+Basic Flute,62,6197755
+Basic Flute,63,5966916
+Basic Flute,64,6671610
+Basic Flute,65,6253719
+Basic Flute,66,6029887
+Basic Flute,67,5624150
+Basic Flute,68,5554195
+Basic Flute,69,6134807
+Basic Flute,70,6386644
+Basic Flute,71,5610159
+Basic Flute,72,5559410
+Basic Harp,36,1096667
+Basic Harp,37,1050930
+Basic Harp,38,1114558
+Basic Harp,39,1207438
+Basic Harp,40,1032336
+Basic Harp,41,1088345
+Basic Harp,42,902063
+Basic Harp,43,1003855
+Basic Harp,44,1005397
+Basic Harp,45,926236
+Basic Harp,46,869524
+Basic Harp,47,978503
+Basic Harp,48,871791
+Basic Harp,49,966735
+Basic Harp,50,838957
+Basic Harp,51,1094943
+Basic Harp,52,851293
+Basic Harp,53,890975
+Basic Harp,54,897982
+Basic Harp,55,856440
+Basic Harp,56,872018
+Basic Harp,57,877596
+Basic Harp,58,801905
+Basic Harp,59,977234
+Basic Harp,60,952109
+Basic Harp,61,937846
+Basic Harp,62,911224
+Basic Harp,63,989841
+Basic Harp,64,980249
+Basic Harp,65,774875
+Basic Harp,66,904308
+Basic Harp,67,948254
+Basic Harp,68,994014
+Basic Harp,69,593855
+Basic Harp,70,1022653
+Basic Harp,71,921020
+Basic Harp,72,1114558
+Basic Horn,36,6927324
+Basic Horn,37,7151610
+Basic Horn,38,6763719
+Basic Horn,39,6928662
+Basic Horn,40,6745261
+Basic Horn,41,6944218
+Basic Horn,42,6905170
+Basic Horn,43,6894717
+Basic Horn,44,6734172
+Basic Horn,45,6828231
+Basic Horn,46,6654830
+Basic Horn,47,7062154
+Basic Horn,48,7445215
+Basic Horn,49,7040930
+Basic Horn,50,7511587
+Basic Horn,51,7238707
+Basic Horn,52,7208209
+Basic Horn,53,7222336
+Basic Horn,54,7066508
+Basic Horn,55,7120658
+Basic Horn,56,7163039
+Basic Horn,57,7265510
+Basic Horn,58,7167007
+Basic Horn,59,7002608
+Basic Horn,60,7145465
+Basic Horn,61,7123968
+Basic Horn,62,6898231
+Basic Horn,63,7324263
+Basic Horn,64,7696349
+Basic Horn,65,7162336
+Basic Horn,66,7471497
+Basic Horn,67,7345420
+Basic Horn,68,6453719
+Basic Horn,69,6431655
+Basic Horn,70,7124603
+Basic Horn,71,6272540
+Basic Horn,72,6881134
+Lonely Mountain Bassoon,36,5367778
+Lonely Mountain Bassoon,37,5541859
+Lonely Mountain Bassoon,38,5398390
+Lonely Mountain Bassoon,39,6204376
+Lonely Mountain Bassoon,40,6178413
+Lonely Mountain Bassoon,41,5822676
+Lonely Mountain Bassoon,42,5638571
+Lonely Mountain Bassoon,43,5479002
+Lonely Mountain Bassoon,44,6059955
+Lonely Mountain Bassoon,45,6300998
+Lonely Mountain Bassoon,46,5773991
+Lonely Mountain Bassoon,47,5747347
+Lonely Mountain Bassoon,48,5788798
+Lonely Mountain Bassoon,49,5423447
+Lonely Mountain Bassoon,50,5290431
+Lonely Mountain Bassoon,51,6154104
+Lonely Mountain Bassoon,52,5724739
+Lonely Mountain Bassoon,53,5822676
+Lonely Mountain Bassoon,54,6078776
+Lonely Mountain Bassoon,55,5992154
+Lonely Mountain Bassoon,56,6020612
+Lonely Mountain Bassoon,57,5469342
+Lonely Mountain Bassoon,58,5894875
+Lonely Mountain Bassoon,59,5039274
+Lonely Mountain Bassoon,60,5928753
+Lonely Mountain Bassoon,61,6270862
+Lonely Mountain Bassoon,62,5479002
+Lonely Mountain Bassoon,63,5405624
+Lonely Mountain Bassoon,64,5189569
+Lonely Mountain Bassoon,65,5464875
+Lonely Mountain Bassoon,66,5038957
+Lonely Mountain Bassoon,67,5049478
+Lonely Mountain Bassoon,68,5385329
+Lonely Mountain Bassoon,69,5467528
+Lonely Mountain Bassoon,70,5385329
+Lonely Mountain Bassoon,71,5314580
+Lonely Mountain Bassoon,72,5854195
+Lonely Mountain Fiddle,36,9711723
+Lonely Mountain Fiddle,37,9736893
+Lonely Mountain Fiddle,38,9727755
+Lonely Mountain Fiddle,39,9720522
+Lonely Mountain Fiddle,40,9709887
+Lonely Mountain Fiddle,41,9717302
+Lonely Mountain Fiddle,42,9714966
+Lonely Mountain Fiddle,43,8907438
+Lonely Mountain Fiddle,44,8929274
+Lonely Mountain Fiddle,45,9702018
+Lonely Mountain Fiddle,46,9262200
+Lonely Mountain Fiddle,47,9664785
+Lonely Mountain Fiddle,48,9560136
+Lonely Mountain Fiddle,49,9683628
+Lonely Mountain Fiddle,50,9669524
+Lonely Mountain Fiddle,51,10030884
+Lonely Mountain Fiddle,52,10232109
+Lonely Mountain Fiddle,53,8738594
+Lonely Mountain Fiddle,54,9027415
+Lonely Mountain Fiddle,55,9095896
+Lonely Mountain Fiddle,56,9127052
+Lonely Mountain Fiddle,57,9284422
+Lonely Mountain Fiddle,58,8844671
+Lonely Mountain Fiddle,59,8940340
+Lonely Mountain Fiddle,60,9306689
+Lonely Mountain Fiddle,61,9217914
+Lonely Mountain Fiddle,62,9380000
+Lonely Mountain Fiddle,63,8850703
+Lonely Mountain Fiddle,64,8132404
+Lonely Mountain Fiddle,65,8904649
+Lonely Mountain Fiddle,66,9536190
+Lonely Mountain Fiddle,67,8711678
+Lonely Mountain Fiddle,68,9089138
+Lonely Mountain Fiddle,69,8147959
+Lonely Mountain Fiddle,70,9503878
+Lonely Mountain Fiddle,71,8743787
+Lonely Mountain Fiddle,72,8782766
+Lute of Ages,36,1048005
+Lute of Ages,37,1073878
+Lute of Ages,38,1033129
+Lute of Ages,39,996553
+Lute of Ages,40,1100385
+Lute of Ages,41,1069388
+Lute of Ages,42,1072381
+Lute of Ages,43,1106054
+Lute of Ages,44,1062154
+Lute of Ages,45,1068844
+Lute of Ages,46,1114558
+Lute of Ages,47,1114558
+Lute of Ages,48,847596
+Lute of Ages,49,687166
+Lute of Ages,50,829093
+Lute of Ages,51,811270
+Lute of Ages,52,711088
+Lute of Ages,53,707460
+Lute of Ages,54,622971
+Lute of Ages,55,656077
+Lute of Ages,56,633946
+Lute of Ages,57,689093
+Lute of Ages,58,714240
+Lute of Ages,59,733265
+Lute of Ages,60,800794
+Lute of Ages,61,1038889
+Lute of Ages,62,1038571
+Lute of Ages,63,1007937
+Lute of Ages,64,1012063
+Lute of Ages,65,946621
+Lute of Ages,66,911905
+Lute of Ages,67,911746
+Lute of Ages,68,871519
+Lute of Ages,69,872472
+Lute of Ages,70,853220
+Lute of Ages,71,857823
+Lute of Ages,72,851361
+Misty Mountain Harp,36,1345760
+Misty Mountain Harp,37,1273878
+Misty Mountain Harp,38,1325374
+Misty Mountain Harp,39,1294762
+Misty Mountain Harp,40,1324512
+Misty Mountain Harp,41,1448707
+Misty Mountain Harp,42,1197007
+Misty Mountain Harp,43,1275828
+Misty Mountain Harp,44,1473379
+Misty Mountain Harp,45,1204807
+Misty Mountain Harp,46,1074082
+Misty Mountain Harp,47,1261088
+Misty Mountain Harp,48,1119728
+Misty Mountain Harp,49,1314376
+Misty Mountain Harp,50,1443764
+Misty Mountain Harp,51,1211542
+Misty Mountain Harp,52,1142971
+Misty Mountain Harp,53,1400091
+Misty Mountain Harp,54,1355102
+Misty Mountain Harp,55,1333651
+Misty Mountain Harp,56,1302290
+Misty Mountain Harp,57,1084694
+Misty Mountain Harp,58,918413
+Misty Mountain Harp,59,1397982
+Misty Mountain Harp,60,1154331
+Misty Mountain Harp,61,1398866
+Misty Mountain Harp,62,1060771
+Misty Mountain Harp,63,1385805
+Misty Mountain Harp,64,1218662
+Misty Mountain Harp,65,1371701
+Misty Mountain Harp,66,1349637
+Misty Mountain Harp,67,1292313
+Misty Mountain Harp,68,1336644
+Misty Mountain Harp,69,952268
+Misty Mountain Harp,70,1033605
+Misty Mountain Harp,71,1264467
+Misty Mountain Harp,72,1124512
+Moor Cowbell,71,247052
+Basic Pibgorn,36,6938776
+Basic Pibgorn,37,7355102
+Basic Pibgorn,38,6902041
+Basic Pibgorn,39,6751020
+Basic Pibgorn,40,6757823
+Basic Pibgorn,41,6465306
+Basic Pibgorn,42,6424490
+Basic Pibgorn,43,6840816
+Basic Pibgorn,44,6628571
+Basic Pibgorn,45,6644898
+Basic Pibgorn,46,6712925
+Basic Pibgorn,47,6628571
+Basic Pibgorn,48,7108753
+Basic Pibgorn,49,6751020
+Basic Pibgorn,50,7275510
+Basic Pibgorn,51,6873469
+Basic Pibgorn,52,6946939
+Basic Pibgorn,53,7269388
+Basic Pibgorn,54,6595918
+Basic Pibgorn,55,6914286
+Basic Pibgorn,56,6694059
+Basic Pibgorn,57,6696395
+Basic Pibgorn,58,6743039
+Basic Pibgorn,59,6725215
+Basic Pibgorn,60,7151020
+Basic Pibgorn,61,6685714
+Basic Pibgorn,62,7036735
+Basic Pibgorn,63,6946939
+Basic Pibgorn,64,7679592
+Basic Pibgorn,65,6938776
+Basic Pibgorn,66,6044943
+Basic Pibgorn,67,6644898
+Basic Pibgorn,68,6408163
+Basic Pibgorn,69,6648889
+Basic Pibgorn,70,6770068
+Basic Pibgorn,71,6710023
+Basic Pibgorn,72,7234921
+Sprightly Fiddle,36,1703175
+Sprightly Fiddle,37,1719070
+Sprightly Fiddle,38,1708390
+Sprightly Fiddle,39,1702812
+Sprightly Fiddle,40,1700068
+Sprightly Fiddle,41,1700998
+Sprightly Fiddle,42,1699116
+Sprightly Fiddle,43,1694331
+Sprightly Fiddle,44,1588639
+Sprightly Fiddle,45,999546
+Sprightly Fiddle,46,901361
+Sprightly Fiddle,47,950454
+Sprightly Fiddle,48,901383
+Sprightly Fiddle,49,699138
+Sprightly Fiddle,50,701315
+Sprightly Fiddle,51,1224694
+Sprightly Fiddle,52,1248844
+Sprightly Fiddle,53,821905
+Sprightly Fiddle,54,630159
+Sprightly Fiddle,55,1198209
+Sprightly Fiddle,56,700068
+Sprightly Fiddle,57,550748
+Sprightly Fiddle,58,588639
+Sprightly Fiddle,59,601315
+Sprightly Fiddle,60,512449
+Sprightly Fiddle,61,550363
+Sprightly Fiddle,62,1050045
+Sprightly Fiddle,63,599116
+Sprightly Fiddle,64,599637
+Sprightly Fiddle,65,700363
+Sprightly Fiddle,66,648639
+Sprightly Fiddle,67,799728
+Sprightly Fiddle,68,551542
+Sprightly Fiddle,69,550227
+Sprightly Fiddle,70,602132
+Sprightly Fiddle,71,600181
+Sprightly Fiddle,72,472245
+Student's Fiddle,36,1996916
+Student's Fiddle,37,557279
+Student's Fiddle,38,1346757
+Student's Fiddle,39,100000
+Student's Fiddle,40,100000
+Student's Fiddle,41,100000
+Student's Fiddle,42,100000
+Basic Theorbo,36,830023
+Basic Theorbo,37,830023
+Basic Theorbo,38,830023
+Basic Theorbo,39,830023
+Basic Theorbo,40,830023
+Basic Theorbo,41,830023
+Basic Theorbo,42,830023
+Basic Theorbo,43,830023
+Basic Theorbo,44,830023
+Basic Theorbo,45,830023
+Basic Theorbo,46,830023
+Basic Theorbo,47,830023
+Basic Theorbo,48,830023
+Basic Theorbo,49,830023
+Basic Theorbo,50,830023
+Basic Theorbo,51,830023
+Basic Theorbo,52,830023
+Basic Theorbo,53,830023
+Basic Theorbo,54,830023
+Basic Theorbo,55,830023
+Basic Theorbo,56,830023
+Basic Theorbo,57,830023
+Basic Theorbo,58,830023
+Basic Theorbo,59,830023
+Basic Theorbo,60,830023
+Basic Theorbo,61,830023
+Basic Theorbo,62,830023
+Basic Theorbo,63,830023
+Basic Theorbo,64,830023
+Basic Theorbo,65,830023
+Basic Theorbo,66,830023
+Basic Theorbo,67,830023
+Basic Theorbo,68,830023
+Basic Theorbo,69,830023
+Basic Theorbo,70,830023
+Basic Theorbo,71,830023
+Basic Theorbo,72,830023
+Traveller's Trusty Fiddle,36,1386712
+Traveller's Trusty Fiddle,37,1378299
+Traveller's Trusty Fiddle,38,1373537
+Traveller's Trusty Fiddle,39,1370884
+Traveller's Trusty Fiddle,40,1368413
+Traveller's Trusty Fiddle,41,1355964
+Traveller's Trusty Fiddle,42,1354853
+Traveller's Trusty Fiddle,43,1349410
+Traveller's Trusty Fiddle,44,1398186
+Traveller's Trusty Fiddle,45,743741
+Traveller's Trusty Fiddle,46,895556
+Traveller's Trusty Fiddle,47,903243
+Traveller's Trusty Fiddle,48,802630
+Traveller's Trusty Fiddle,49,751134
+Traveller's Trusty Fiddle,50,800658
+Traveller's Trusty Fiddle,51,1297438
+Traveller's Trusty Fiddle,52,998549
+Traveller's Trusty Fiddle,53,946190
+Traveller's Trusty Fiddle,54,900816
+Traveller's Trusty Fiddle,55,866984
+Traveller's Trusty Fiddle,56,837438
+Traveller's Trusty Fiddle,57,945057
+Traveller's Trusty Fiddle,58,901270
+Traveller's Trusty Fiddle,59,991406
+Traveller's Trusty Fiddle,60,551043
+Traveller's Trusty Fiddle,61,509977
+Traveller's Trusty Fiddle,62,1001701
+Traveller's Trusty Fiddle,63,496281
+Traveller's Trusty Fiddle,64,614014
+Traveller's Trusty Fiddle,65,559252
+Traveller's Trusty Fiddle,66,546780
+Traveller's Trusty Fiddle,67,698095
+Traveller's Trusty Fiddle,68,699206
+Traveller's Trusty Fiddle,69,907710
+Traveller's Trusty Fiddle,70,848345
+Traveller's Trusty Fiddle,71,500816
+Traveller's Trusty Fiddle,72,401406
+Jaunty Hand-knells,36,1505000
+Jaunty Hand-knells,37,1505000
+Jaunty Hand-knells,38,1505000
+Jaunty Hand-knells,39,1505000
+Jaunty Hand-knells,40,1505000
+Jaunty Hand-knells,41,1505000
+Jaunty Hand-knells,42,1505000
+Jaunty Hand-knells,43,1505000
+Jaunty Hand-knells,44,1505000
+Jaunty Hand-knells,45,1505000
+Jaunty Hand-knells,46,1505000
+Jaunty Hand-knells,47,1505000
+Jaunty Hand-knells,48,1505000
+Jaunty Hand-knells,49,1505000
+Jaunty Hand-knells,50,1505000
+Jaunty Hand-knells,51,1505000
+Jaunty Hand-knells,52,1505000
+Jaunty Hand-knells,53,1505000
+Jaunty Hand-knells,54,1505000
+Jaunty Hand-knells,55,1505000
+Jaunty Hand-knells,56,1505000
+Jaunty Hand-knells,57,1505000
+Jaunty Hand-knells,58,1505000
+Jaunty Hand-knells,59,1505000
+Jaunty Hand-knells,60,1505000
+Jaunty Hand-knells,61,1505000
+Jaunty Hand-knells,62,1505000
+Jaunty Hand-knells,63,1505000
+Jaunty Hand-knells,64,1505000
+Jaunty Hand-knells,65,1505000
+Jaunty Hand-knells,66,1505000
+Jaunty Hand-knells,67,1505000
+Jaunty Hand-knells,68,1505000
+Jaunty Hand-knells,69,1505000
+Jaunty Hand-knells,70,1505000
+Jaunty Hand-knells,71,1505000
+Jaunty Hand-knells,72,1505000

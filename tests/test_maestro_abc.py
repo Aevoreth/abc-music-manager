@@ -218,3 +218,142 @@ C D E F
     mf = mido.MidiFile(file=io.BytesIO(midi_bytes))
     programs = [msg.program for track in mf.tracks for msg in track if msg.type == "program_change"]
     assert 9 in programs, f"Expected program 9 (Glockenspiel) for hand-knells, got {programs}"
+
+
+def _note_on_velocities(midi_bytes: bytes) -> list[int]:
+    """Return note_on velocities (>0) in track order."""
+    import io
+    import mido
+    mf = mido.MidiFile(file=io.BytesIO(midi_bytes))
+    return [
+        msg.velocity
+        for track in mf.tracks
+        for msg in track
+        if msg.type == "note_on" and msg.velocity > 0
+    ]
+
+
+def _first_note_on_velocity(midi_bytes: bytes) -> int:
+    velocities = _note_on_velocities(midi_bytes)
+    assert velocities, "Expected at least one note_on event"
+    return velocities[0]
+
+
+@pytest.mark.parametrize(
+    "part_name",
+    [
+        "Lute of Ages",
+        "Basic Lute",
+        "Basic Harp",
+        "Bardic Fiddle",
+        "Sprightly Fiddle",
+    ],
+)
+def test_instrument_velocity_at_mf_matches_maestro(part_name: str) -> None:
+    """At +mf+, all instruments share the same MIDI velocity (Maestro abc_vol=106)."""
+    abc = f"""
+X:1
+%%part-name {part_name}
+M:4/4
+K:C
+L:1/4
++mf+ C
+"""
+    assert _first_note_on_velocity(abc_to_midi(abc)) == 106
+
+
+@pytest.mark.parametrize(
+    ("dynamic", "expected_velocity"),
+    [
+        ("pppp", 57),
+        ("ppp", 61),
+        ("mf", 106),
+        ("fff", 127),
+    ],
+)
+def test_dynamics_velocity_ladder(dynamic: str, expected_velocity: int) -> None:
+    abc = f"""
+X:1
+M:4/4
+K:C
+L:1/4
++{dynamic}+ C
+"""
+    assert _first_note_on_velocity(abc_to_midi(abc)) == expected_velocity
+
+
+def test_multi_part_same_dynamic_equal_velocities() -> None:
+    """Different instruments at +mf+ should produce equal note velocities."""
+    abc = """
+X:1
+%%part-name Lute of Ages
+M:4/4
+K:C
+L:1/4
++mf+ C |
+
+X:2
+%%part-name Basic Harp
++mf+ E |
+"""
+    velocities = _note_on_velocities(abc_to_midi(abc))
+    assert len(velocities) >= 2
+    assert velocities[0] == 106
+    assert velocities[1] == 106
+
+
+def _first_note_on_off_ticks(midi_bytes: bytes) -> tuple[int, int, int]:
+    """Return (note_on_tick, note_off_tick, note_number) for the first played note."""
+    import io
+    import mido
+    mf = mido.MidiFile(file=io.BytesIO(midi_bytes))
+    on_tick: int | None = None
+    note_num: int | None = None
+    for track in mf.tracks:
+        abs_tick = 0
+        for msg in track:
+            abs_tick += msg.time
+            if msg.type == "note_on" and msg.velocity > 0 and on_tick is None:
+                on_tick = abs_tick
+                note_num = msg.note
+            elif on_tick is not None and (
+                (msg.type == "note_off")
+                or (msg.type == "note_on" and msg.velocity == 0)
+            ):
+                if msg.note == note_num:
+                    return on_tick, abs_tick, note_num
+    raise AssertionError("Expected a note_on/note_off pair")
+
+
+def test_drum_note_off_uses_sample_duration_not_extra_hold() -> None:
+    """
+    Basic Drum uses noteDurations.txt sample length (Maestro handleNoteTie),
+    not written note length + 1.5s hold.
+    """
+    from abc_music_manager.playback.lotro_sample_duration import get_sample_duration_micros
+
+    abc = """
+X:1
+%%part-name Basic Drum
+M:4/4
+Q:120
+K:C
+L:1/4
+C,
+"""
+    midi_bytes = abc_to_midi(abc)
+    on_tick, off_tick, note_num = _first_note_on_off_ticks(midi_bytes)
+    assert note_num == 36
+
+    length_micros = get_sample_duration_micros("Basic Drum", 36)
+    assert length_micros == 954694
+
+    mf = __import__("mido").MidiFile(file=__import__("io").BytesIO(midi_bytes))
+    ppqn = mf.ticks_per_beat
+    mpqn = 500_000  # 120 BPM
+    expected_duration_ticks = int(length_micros * ppqn / mpqn)
+    actual_duration_ticks = off_tick - on_tick
+
+    assert actual_duration_ticks == expected_duration_ticks
+    # Old behavior added 1.5s hold on top of quarter-note length (~46080 ticks at this PPQN).
+    assert actual_duration_ticks < 30_000

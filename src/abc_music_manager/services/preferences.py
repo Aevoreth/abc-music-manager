@@ -671,15 +671,15 @@ def set_playback_soundfont_path(path: str) -> None:
 
 
 def get_playback_volume() -> float:
-    """Volume 0-100. Default 70."""
+    """Volume 0-100. Default 100 (Maestro volumizer default)."""
     prefs = load_preferences()
     v = prefs.get("playback_volume")
     if v is None:
-        return 70.0
+        return 100.0
     try:
         return max(0.0, min(100.0, float(v)))
     except (TypeError, ValueError):
-        return 70.0
+        return 100.0
 
 
 def set_playback_volume(value: float) -> None:

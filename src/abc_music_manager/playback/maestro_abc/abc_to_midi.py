@@ -16,10 +16,10 @@ from mido import MetaMessage
 
 from .. import lotro_instruments
 from ..lotro_instruments import (
-    get_instrument_db_volume_adjust,
-    is_non_sustained_instrument,
-    scale_velocity_by_db,
+    get_instrument_friendly_name,
+    is_sustainable_instrument,
 )
+from ..lotro_sample_duration import get_sample_duration_micros
 from ..pan_generator import get_pan as get_maestro_pan
 from .abc_constants import (
     DEFAULT_NOTE_TICKS,
@@ -27,6 +27,7 @@ from .abc_constants import (
     MIDI_CHORUS,
     MIDI_REVERB,
     NON_SUSTAINED_NOTE_HOLD_SECONDS,
+    SUSTAINED_NOTE_HOLD_SECONDS,
 )
 from .abc_field import AbcField
 from .abc_info import AbcInfo
@@ -87,6 +88,44 @@ def _get_track_channel(track_number: int) -> int:
     """Legacy: return channel only (port 0). For port 1 tracks, channel is 0-8."""
     _, ch = _get_track_port_and_channel(track_number)
     return ch
+
+
+def _compute_note_off_tick(
+    *,
+    use_lotro_instruments: bool,
+    chord_start_tick: float,
+    note_end_tick: float,
+    lotro_note_id: int,
+    midi_program: int,
+    cur_tempo_bpm: int,
+    ppqn: int,
+) -> int:
+    """
+    Compute MIDI note-off tick. Matches Maestro AbcToMidi.handleNoteTie note-off logic:
+    non-sustainable instruments use per-sample durations from noteDurations.txt when available.
+    """
+    tick_off = note_end_tick
+    if not use_lotro_instruments:
+        return int(tick_off)
+
+    sustainable = is_sustainable_instrument(midi_program, lotro_note_id)
+    skip_extra = False
+    if not sustainable:
+        friendly = get_instrument_friendly_name(midi_program)
+        length_micros = get_sample_duration_micros(friendly, lotro_note_id)
+        if length_micros is not None:
+            mpqn = 60_000_000 / cur_tempo_bpm
+            tick_off = chord_start_tick + length_micros * ppqn / mpqn
+            skip_extra = True
+
+    if not skip_extra:
+        extra_seconds = (
+            SUSTAINED_NOTE_HOLD_SECONDS if sustainable else NON_SUSTAINED_NOTE_HOLD_SECONDS
+        )
+        mpqn = 60_000_000 / cur_tempo_bpm
+        tick_off += extra_seconds * 1_000_000 * ppqn / mpqn
+
+    return int(tick_off)
 
 
 def _read_lines(path: str | Path) -> list[str]:
@@ -506,10 +545,6 @@ def _convert(
                 ]
 
                 velocity = info.get_dynamics().get_vol(use_lotro_instruments)
-                if use_lotro_instruments:
-                    prog = info.get_instrument_midi_program()
-                    db = get_instrument_db_volume_adjust(prog)
-                    velocity = scale_velocity_by_db(velocity, db)
                 if note_id not in tied_notes:
                     if info.get_ppqn() != ppqn:
                         raise AbcParseError(
@@ -524,14 +559,16 @@ def _convert(
                 if m.group(7):
                     tied_notes[note_id] = (line_number << 16) | m.start()
                 else:
-                    tick_off = int(note_end_tick)
-                    # Extend note hold for non-sustained instruments (plucked, percussive) so they ring out
                     prog = info.get_instrument_midi_program()
-                    if use_lotro_instruments and is_non_sustained_instrument(prog):
-                        hold_ticks = int(
-                            NON_SUSTAINED_NOTE_HOLD_SECONDS * cur_tempo * ppqn / 60
-                        )
-                        tick_off += hold_ticks
+                    tick_off = _compute_note_off_tick(
+                        use_lotro_instruments=use_lotro_instruments,
+                        chord_start_tick=chord_start_tick,
+                        note_end_tick=note_end_tick,
+                        lotro_note_id=lotro_note_id,
+                        midi_program=prog,
+                        cur_tempo_bpm=cur_tempo,
+                        ppqn=ppqn,
+                    )
                     _, msg_off = create_note_off_event(note_id, channel, velocity, tick_off)
                     track_events[track_index].append((tick_off, msg_off))
                     note_off_events.append((tick_off, note_id, channel, velocity))
