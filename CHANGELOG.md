@@ -5,7 +5,8 @@ All notable changes to ABC Music Manager are documented here. Most recent at the
 ## Version 0.2.5b
 * ABC Playback:
   * Corrected ABC to Midi velocities
-  * Added limited limiter/compresser support to reduce clipping during playback
+  * Added limiter/compresser support to reduce clipping during playback
+  
 ## Version 0.2.4b
 * Documentation:
   * ADD: Structured in-app User Guide (Help → User Guide); README trimmed to point at the guide.
