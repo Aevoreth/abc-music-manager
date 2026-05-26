@@ -13,6 +13,7 @@ from typing import Optional
 import mido
 
 from .midi_utils import extract_pan_per_channel, prepare_midi_for_playback
+from .output_limiter import OutputLimiter
 
 MAX_PARTS = 24  # LOTRO supports up to 24 parts
 
@@ -119,6 +120,8 @@ class MidiPlayer:
         self._paused_at_time: float = 0.0
         self._playing_since: Optional[float] = None
         self._stopped: bool = True
+        self._output_limiter = OutputLimiter()
+        self._generate_wrapped: bool = False
 
     def _ensure_synth(self):
         import tinysoundfont
@@ -132,6 +135,17 @@ class MidiPlayer:
                 # Use direct dict assignment to avoid C-level validation that may reject ch>15.
                 for ch in range(16, 25):
                     self._synth.channel[ch] = sfid
+                if not self._generate_wrapped:
+                    original_generate = self._synth.generate
+                    limiter = self._output_limiter
+
+                    def generate_with_limiter(samples, buffer=None):
+                        buf = original_generate(samples, buffer)
+                        limiter.process(buf)
+                        return buf
+
+                    self._synth.generate = generate_with_limiter
+                    self._generate_wrapped = True
             return self._synth
 
     def _get_duration_sec(self, midi_bytes: bytes) -> float:
@@ -211,6 +225,7 @@ class MidiPlayer:
             for ch, pan in pan_map.items():
                 synth.control_change(ch, 10, pan)
 
+            self._output_limiter.reset()
             synth.start(buffer_size=4096)
             self._stopped = False
             self._is_paused = False
@@ -251,6 +266,7 @@ class MidiPlayer:
                     self._synth.stop()
                 except Exception:
                     pass
+            self._output_limiter.reset()
 
     def panic(self) -> None:
         """MIDI panic: all notes off on all channels."""

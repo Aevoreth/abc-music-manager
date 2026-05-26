@@ -35,4 +35,4 @@ LotroInstruments.sf2
 
 Other runtime dependencies (permissive licenses):
   superqt (BSD-3-Clause), Send2Trash (BSD-3-Clause), tinysoundfont (MIT),
-  PyAudio (MIT), mido (MIT)
+  PyAudio (MIT), mido (MIT), numpy (BSD-3-Clause)
