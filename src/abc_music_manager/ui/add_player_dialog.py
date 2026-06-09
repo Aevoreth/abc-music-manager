@@ -23,12 +23,14 @@ def open_add_player_dialog(
     app_state: AppState,
     exclude_player_ids: set[int],
     parent=None,
+    *,
+    title: str = "Add Player",
 ) -> tuple[int, str] | None:
     """
     Open Add Player dialog. Returns (player_id, player_name) if confirmed, else None.
     exclude_player_ids: players already in the layout to filter out.
     """
-    dlg = AddPlayerDialog(app_state, exclude_player_ids, parent=parent)
+    dlg = AddPlayerDialog(app_state, exclude_player_ids, parent=parent, title=title)
     if dlg.exec() == QDialog.DialogCode.Accepted:
         return dlg.get_selected()
     return None
@@ -42,12 +44,14 @@ class AddPlayerDialog(QDialog):
         app_state: AppState,
         exclude_player_ids: set[int],
         parent=None,
+        *,
+        title: str = "Add Player",
     ) -> None:
         super().__init__(parent)
         self.app_state = app_state
         self._exclude = exclude_player_ids
         self._players: list[tuple[int, str]] = []
-        self.setWindowTitle("Add Player")
+        self.setWindowTitle(title)
         self.setMinimumWidth(320)
 
         layout = QVBoxLayout(self)

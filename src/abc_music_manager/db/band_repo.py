@@ -299,6 +299,119 @@ def set_export_column_order(conn: sqlite3.Connection, band_layout_id: int, playe
     conn.commit()
 
 
+def replace_player_in_band_layout(
+    conn: sqlite3.Connection,
+    band_layout_id: int,
+    band_id: int,
+    old_player_id: int,
+    new_player_id: int,
+) -> None:
+    """
+    Replace old_player with new_player on this band layout and transfer song/setlist
+    part assignments scoped to this layout. Does not modify PlayerInstrument rows.
+    """
+    if old_player_id == new_player_id:
+        raise ValueError("old and new player must differ")
+
+    slots = list_layout_slots(conn, band_layout_id)
+    old_slot = next((s for s in slots if s.player_id == old_player_id), None)
+    if old_slot is None:
+        raise ValueError(f"Player {old_player_id} not on layout {band_layout_id}")
+    if any(s.player_id == new_player_id for s in slots):
+        raise ValueError(f"Player {new_player_id} already on layout {band_layout_id}")
+
+    now = _now()
+
+    cur = conn.execute(
+        """SELECT sla.song_layout_id, sla.part_number
+           FROM SongLayoutAssignment sla
+           JOIN SongLayout sl ON sl.id = sla.song_layout_id
+           WHERE sl.band_layout_id = ? AND sla.player_id = ?""",
+        (band_layout_id, old_player_id),
+    )
+    for song_layout_id, part_number in cur.fetchall():
+        existing = conn.execute(
+            "SELECT id FROM SongLayoutAssignment WHERE song_layout_id = ? AND player_id = ?",
+            (song_layout_id, new_player_id),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE SongLayoutAssignment SET part_number = ?, updated_at = ? WHERE id = ?",
+                (part_number, now, existing[0]),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO SongLayoutAssignment (song_layout_id, player_id, part_number, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (song_layout_id, new_player_id, part_number, now, now),
+            )
+        conn.execute(
+            "DELETE FROM SongLayoutAssignment WHERE song_layout_id = ? AND player_id = ?",
+            (song_layout_id, old_player_id),
+        )
+
+    cur = conn.execute(
+        """SELECT sba.setlist_item_id, sba.part_number
+           FROM SetlistBandAssignment sba
+           JOIN SetlistItem si ON si.id = sba.setlist_item_id
+           JOIN SongLayout sl ON sl.id = si.song_layout_id
+           WHERE sl.band_layout_id = ? AND sba.player_id = ?""",
+        (band_layout_id, old_player_id),
+    )
+    for setlist_item_id, part_number in cur.fetchall():
+        existing = conn.execute(
+            "SELECT id FROM SetlistBandAssignment WHERE setlist_item_id = ? AND player_id = ?",
+            (setlist_item_id, new_player_id),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE SetlistBandAssignment SET part_number = ?, updated_at = ? WHERE id = ?",
+                (part_number, now, existing[0]),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO SetlistBandAssignment (setlist_item_id, player_id, part_number, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (setlist_item_id, new_player_id, part_number, now, now),
+            )
+        conn.execute(
+            "DELETE FROM SetlistBandAssignment WHERE setlist_item_id = ? AND player_id = ?",
+            (setlist_item_id, old_player_id),
+        )
+
+    export_order = get_export_column_order(conn, band_layout_id)
+    if export_order and old_player_id in export_order:
+        new_order = [new_player_id if pid == old_player_id else pid for pid in export_order]
+        conn.execute(
+            "UPDATE BandLayout SET export_column_order = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(new_order), now, band_layout_id),
+        )
+
+    conn.execute(
+        "DELETE FROM BandLayoutSlot WHERE band_layout_id = ? AND player_id = ?",
+        (band_layout_id, old_player_id),
+    )
+    conn.execute(
+        """INSERT INTO BandLayoutSlot (band_layout_id, player_id, x, y, width_units, height_units, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            band_layout_id,
+            new_player_id,
+            old_slot.x,
+            old_slot.y,
+            old_slot.width_units,
+            old_slot.height_units,
+            now,
+            now,
+        ),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO BandMember (band_id, player_id) VALUES (?, ?)",
+        (band_id, new_player_id),
+    )
+    conn.commit()
+
+
 def list_layout_slots_for_export(conn: sqlite3.Connection, band_layout_id: int) -> list[BandLayoutSlotRow]:
     """
     Return layout slots ordered for CSV export: by export_column_order if set,

@@ -36,6 +36,8 @@ See [Song detail and layouts](song-detail-and-layouts.md) for song layouts.
 
 Drag player cards onto a snapped grid. Cards are **7×5 grid units** internally.
 
+Right-click a card and choose **Change Player** to swap the character on that slot while keeping part assignments for songs that use this layout.
+
 Layouts are reused across songs and setlists. A setlist can reference one band layout for part assignment and Set Play display.
 
 ---

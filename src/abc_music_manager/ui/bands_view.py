@@ -47,6 +47,7 @@ from ..db.band_repo import (
     list_layout_slots,
     set_layout_slot,
     remove_layout_slot,
+    replace_player_in_band_layout,
 )
 from ..db.player_repo import (
     list_players,
@@ -182,6 +183,7 @@ class BandsView(QWidget):
         self.layout_grid.cardMoved.connect(self._on_card_moved)
         self.layout_grid.cardDeleted.connect(self._on_card_deleted)
         self.layout_grid.cardEditRequested.connect(self._on_card_edit_requested)
+        self.layout_grid.cardChangePlayerRequested.connect(self._on_card_change_player_requested)
 
         self.bands_splitter.addWidget(self.band_editor)
         self.bands_splitter.setStretchFactor(1, 1)
@@ -504,6 +506,31 @@ class BandsView(QWidget):
         player = next((p for p in players if p.id == player_id), None)
         if player and open_edit_character_dialog(self.app_state, player, self):
             self._load_grid_from_layout()
+
+    def _on_card_change_player_requested(self, old_player_id: int) -> None:
+        if self._selected_band_id is None or self._selected_layout_id is None:
+            return
+        cards = self.layout_grid.get_cards()
+        exclude = {c.player_id for c in cards if c.player_id != old_player_id}
+        result = open_add_player_dialog(
+            self.app_state, exclude, self, title="Change Player"
+        )
+        if not result:
+            return
+        new_player_id, _new_name = result
+        try:
+            replace_player_in_band_layout(
+                self.app_state.conn,
+                self._selected_layout_id,
+                self._selected_band_id,
+                old_player_id,
+                new_player_id,
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Change Player", str(exc))
+            return
+        self._load_grid_from_layout()
+        self.band_layout_updated.emit(self._selected_layout_id)
 
     def _add_player(self) -> None:
         if open_new_character_dialog(self.app_state, self):

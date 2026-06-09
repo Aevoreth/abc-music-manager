@@ -95,6 +95,7 @@ class BandLayoutGridWidget(QWidget):
     cardMoved = Signal(int, int, int)  # player_id, new_x, new_y
     cardDeleted = Signal(int)  # player_id
     cardEditRequested = Signal(int)  # player_id
+    cardChangePlayerRequested = Signal(int)  # old player_id
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -369,10 +370,13 @@ class BandLayoutGridWidget(QWidget):
         if card:
             menu = QMenu(self)
             edit_action = menu.addAction("Edit")
+            change_action = menu.addAction("Change Player")
             delete_action = menu.addAction("Delete")
             action = menu.exec(event.globalPos())
             if action == edit_action:
                 self.cardEditRequested.emit(card.player_id)
+            elif action == change_action:
+                self.cardChangePlayerRequested.emit(card.player_id)
             elif action == delete_action:
                 self.cardDeleted.emit(card.player_id)
         else:

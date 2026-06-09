@@ -104,6 +104,15 @@ def get_song_layout_assignments(conn: sqlite3.Connection, song_layout_id: int) -
     return [SongLayoutAssignmentRow(song_layout_id=r[0], player_id=r[1], part_number=r[2]) for r in cur.fetchall()]
 
 
+def delete_song_layout_assignment(
+    conn: sqlite3.Connection, song_layout_id: int, player_id: int
+) -> None:
+    conn.execute(
+        "DELETE FROM SongLayoutAssignment WHERE song_layout_id = ? AND player_id = ?",
+        (song_layout_id, player_id),
+    )
+
+
 def delete_song_layout(conn: sqlite3.Connection, song_layout_id: int) -> None:
     conn.execute("DELETE FROM SongLayoutAssignment WHERE song_layout_id = ?", (song_layout_id,))
     conn.execute("DELETE FROM SongLayout WHERE id = ?", (song_layout_id,))
