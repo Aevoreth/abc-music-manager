@@ -1113,12 +1113,17 @@ class SetlistsView(QWidget):
         self._refresh_songs_table()
         self._refresh_assignment_panel()
 
+    def _clear_songs_table_rows(self) -> None:
+        """Remove all rows, destroying cell widgets (setRowCount(0) alone can leave ghost widgets)."""
+        while self.songs_table.rowCount() > 0:
+            self.songs_table.removeRow(0)
+
     def _refresh_songs_table(self, select_item_id: int | None = None) -> None:
         if self._filling_songs:
             QTimer.singleShot(0, lambda s=select_item_id: self._refresh_songs_table(select_item_id=s))
             return
         if not self._selected_setlist_id:
-            self.songs_table.setRowCount(0)
+            self._clear_songs_table_rows()
             self.songs_table.repaint()
             self.export_btn.setEnabled(False)
             return
@@ -1130,6 +1135,7 @@ class SetlistsView(QWidget):
         pids = [s.player_id for s in slots]
         bulk = list_player_instruments_bulk(self.app_state.conn, pids) if pids else {}
 
+        self._clear_songs_table_rows()
         self.songs_table.setRowCount(len(rows))
         for i, r in enumerate(rows):
             play_item = QTableWidgetItem("▶")
@@ -1786,9 +1792,11 @@ class SetlistsView(QWidget):
             == QMessageBox.StandardButton.Yes
         ):
             clear_setlist(self.app_state.conn, setlist_id)
-            if self._selected_setlist_id == setlist_id:
-                self._refresh_songs_table()
+            was_viewing = self._selected_setlist_id == setlist_id
             self._refresh_setlist_tree()
+            if was_viewing:
+                self._refresh_songs_table()
+            self.setlistsChanged.emit()
 
     def _delete_setlist_by_id(self, setlist_id: int) -> None:
         """Delete a setlist by id. Used from context menu."""
@@ -1829,6 +1837,7 @@ class SetlistsView(QWidget):
                         lambda: self._delete_folder(folder_id)
                     )
             elif item.data(0, _TYPE_ROLE) == "setlist":
+                self.setlist_tree.setCurrentItem(item)
                 setlist_id = item.data(0, Qt.ItemDataRole.UserRole)
                 if setlist_id is not None:
                     parent = item.parent()
