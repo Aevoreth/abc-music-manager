@@ -3,9 +3,11 @@
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
 ## Version 0.2.7b
+* Setlist Editor
+  * FIX: Adding new setlist puts new set at the top of current folder instead of bottom.
 * Band Editor
-  * FIX: changing a player assignment no longer requires delete and add new, removing the need to reassign parts to the updated player
-  
+  * FIX: Changing a player assignment no longer requires delete and add new, removing the need to reassign parts to the updated player
+
 ## Version 0.2.6b
 * ABC Playback
   * Fixed error preventing playback in compiled executable

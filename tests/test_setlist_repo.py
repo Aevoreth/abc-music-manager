@@ -37,6 +37,19 @@ def _add_test_song(conn: sqlite3.Connection) -> int:
     return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
 
+def test_add_setlist_inserts_at_top_of_folder() -> None:
+    conn = _open_test_conn()
+    first_id = add_setlist(conn, "First")
+    second_id = add_setlist(conn, "Second")
+    third_id = add_setlist(conn, "Third")
+
+    setlists = list_setlists(conn)
+    uncategorized = [s for s in setlists if s.folder_id is None]
+    assert [s.id for s in uncategorized] == [third_id, second_id, first_id]
+    assert [s.sort_order for s in uncategorized] == [0, 1, 2]
+    conn.close()
+
+
 def test_clear_setlist_removes_items_but_keeps_setlist() -> None:
     conn = _open_test_conn()
     song_id = _add_test_song(conn)

@@ -174,16 +174,15 @@ def add_setlist(conn: sqlite3.Connection, name: str, folder_id: int | None = Non
     now = _now()
     today = date.today().isoformat()
     default_time = "19:00"
-    cur = conn.execute(
-        """SELECT COALESCE(MAX(sort_order), -1) + 1 FROM Setlist WHERE folder_id IS ?""",
-        (folder_id,),
+    conn.execute(
+        "UPDATE Setlist SET sort_order = sort_order + 1, updated_at = ? WHERE folder_id IS ?",
+        (now, folder_id),
     )
-    next_order = cur.fetchone()[0]
     cur = conn.execute(
         """INSERT INTO Setlist (name, band_layout_id, folder_id, sort_order, locked, default_change_duration_seconds, notes,
                   set_date, set_time, target_duration_seconds, created_at, updated_at)
-           VALUES (?, NULL, ?, ?, 0, NULL, NULL, ?, ?, NULL, ?, ?)""",
-        (name.strip(), folder_id, next_order, today, default_time, now, now),
+           VALUES (?, NULL, ?, 0, 0, NULL, NULL, ?, ?, NULL, ?, ?)""",
+        (name.strip(), folder_id, today, default_time, now, now),
     )
     conn.commit()
     return cur.lastrowid
