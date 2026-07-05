@@ -185,6 +185,33 @@ def get_file_paths_for_song(conn: sqlite3.Connection, song_id: int) -> list[str]
     return [r[0] for r in cur.fetchall()]
 
 
+def find_rename_candidate(
+    conn: sqlite3.Connection, new_path: str
+) -> tuple[int, str] | None:
+    """
+    If exactly one indexed file in the same directory as new_path is missing on disk,
+    return (song_id, old_path) so the scan can treat new_path as a rename/move.
+    """
+    try:
+        parent = Path(new_path).resolve().parent
+    except (OSError, RuntimeError, ValueError):
+        return None
+    missing: list[tuple[int, str]] = []
+    cur = conn.execute("SELECT song_id, file_path FROM SongFile")
+    for song_id, file_path in cur.fetchall():
+        try:
+            resolved = Path(file_path).resolve()
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if resolved.parent != parent:
+            continue
+        if not resolved.is_file():
+            missing.append((song_id, file_path))
+    if len(missing) == 1:
+        return missing[0]
+    return None
+
+
 def relocate_song_file(
     conn: sqlite3.Connection,
     song_id: int,

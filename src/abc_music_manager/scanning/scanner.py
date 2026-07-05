@@ -29,6 +29,7 @@ from ..parsing.abc_parser import parse_abc_file, ParsedSong
 from ..db.folder_rule import get_enabled_roots
 from ..db.song_repo import (
     ensure_song_from_parsed,
+    find_rename_candidate,
     get_file_paths_for_song,
     logical_identity,
     find_song_by_logical_identity,
@@ -269,6 +270,24 @@ def run_scan(
                 conn,
                 parsed,
                 path_str,
+                file_mtime=mtime,
+                file_hash=file_hash_val,
+                is_primary_library=is_primary,
+                is_set_copy=is_set_copy,
+                scan_excluded=scan_excluded,
+            )
+            scanned += 1
+            continue
+
+        rename = find_rename_candidate(conn, path_str)
+        if rename:
+            song_id, old_path = rename
+            relocate_song_file(
+                conn,
+                song_id,
+                old_path,
+                path_str,
+                parsed,
                 file_mtime=mtime,
                 file_hash=file_hash_val,
                 is_primary_library=is_primary,

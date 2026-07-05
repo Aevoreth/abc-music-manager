@@ -22,12 +22,20 @@ def cleanup_orphaned_songs_after_songfile_deletion(conn: sqlite3.Connection) -> 
     conn.execute(
         """DELETE FROM SetlistItem WHERE song_id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL)"""
     )
-    conn.execute(
-        """DELETE FROM SongLayoutAssignment WHERE song_layout_id IN
-           (SELECT id FROM SongLayout WHERE song_id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL))"""
+    orphan_layout_ids = (
+        "SELECT id FROM SongLayout WHERE song_id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL)"
     )
     conn.execute(
-        """DELETE FROM SongLayout WHERE song_id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL)"""
+        f"UPDATE Song SET last_song_layout_id = NULL WHERE last_song_layout_id IN ({orphan_layout_ids})"
+    )
+    conn.execute(
+        f"UPDATE SetlistItem SET song_layout_id = NULL WHERE song_layout_id IN ({orphan_layout_ids})"
+    )
+    conn.execute(
+        f"""DELETE FROM SongLayoutAssignment WHERE song_layout_id IN ({orphan_layout_ids})"""
+    )
+    conn.execute(
+        f"""DELETE FROM SongLayout WHERE id IN ({orphan_layout_ids})"""
     )
     conn.execute(
         """DELETE FROM PlayLog WHERE song_id NOT IN (SELECT song_id FROM SongFile WHERE song_id IS NOT NULL)"""
