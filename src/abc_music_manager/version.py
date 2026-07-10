@@ -1,3 +1,3 @@
 """ABC Music Manager version."""
 
-__version__ = "0.2.8b"
+__version__ = "0.2.9b"
