@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Band Assistant — Set Play</title>
+    <link rel="stylesheet" href="/playback/playback.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="top-bar">
+        <div class="brand">
+          <h1>Band Assistant</h1>
+          <p class="subtitle">Follow along with the bandleader’s set</p>
+        </div>
+        <p id="status-pill" class="status-pill">Not connected</p>
+      </header>
+
+      <nav class="tabs" role="tablist" aria-label="Band Assistant views">
+        <button type="button" class="tab active" role="tab" aria-selected="true" data-tab="connection">
+          Connection
+        </button>
+        <button type="button" class="tab" role="tab" aria-selected="false" data-tab="setlist" disabled>
+          Set &amp; players
+        </button>
+        <button type="button" class="tab" role="tab" aria-selected="false" data-tab="playback" disabled>
+          Playback
+        </button>
+      </nav>
+
+      <section id="panel-connection" class="tab-panel active" role="tabpanel">
+        <div class="panel-card connect-card">
+          <h2>Connection</h2>
+          <p class="panel-lead">
+            Paste the bandleader’s share link or enter a set code, then connect. Use Reconnect if the
+            link drops during a set.
+          </p>
+          <label class="field">
+            <span>Set code or share link</span>
+            <input
+              id="set-input"
+              type="text"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder="Paste link or enter code"
+            />
+          </label>
+          <div class="connect-actions">
+            <button type="button" id="connect-btn" class="btn primary">Connect</button>
+            <button type="button" id="disconnect-btn" class="btn" disabled>Disconnect</button>
+            <button type="button" id="reconnect-btn" class="btn" disabled>Reconnect</button>
+          </div>
+          <p id="status" class="status">Enter a set code or open a share link.</p>
+          <dl class="conn-meta">
+            <div>
+              <dt>Set code</dt>
+              <dd id="conn-code">—</dd>
+            </div>
+            <div>
+              <dt>Relay</dt>
+              <dd id="conn-host">—</dd>
+            </div>
+            <div>
+              <dt>Revision</dt>
+              <dd id="conn-rev">—</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section id="panel-setlist" class="tab-panel" role="tabpanel" hidden>
+        <div class="setlist-split">
+          <aside class="left-col">
+            <div class="panel-card">
+              <h2>Set info</h2>
+              <div id="set-info" class="set-info">—</div>
+            </div>
+            <div class="panel-card">
+              <h2>Your players</h2>
+              <p class="hint">Highlight players on the band layout (local only).</p>
+              <div id="players-list" class="players-list"></div>
+            </div>
+          </aside>
+          <div class="panel-card table-card">
+            <h2>Setlist</h2>
+            <div class="table-wrap">
+              <table id="song-table" class="song-table">
+                <thead>
+                  <tr>
+                    <th>Played</th>
+                    <th>Cur</th>
+                    <th>Next</th>
+                    <th>Skip</th>
+                    <th>Title</th>
+                    <th>Parts</th>
+                    <th>Duration</th>
+                    <th>Artist</th>
+                  </tr>
+                </thead>
+                <tbody id="song-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="panel-playback" class="tab-panel" role="tabpanel" hidden>
+        <div class="playback-stack">
+          <div class="song-banner current" id="current-song">
+            <span class="song-label">Current</span>
+            <span class="song-title" id="current-title">—</span>
+            <span class="song-meta" id="current-meta"></span>
+          </div>
+          <div class="song-banner next" id="next-song">
+            <span class="song-label">Next</span>
+            <span class="song-title" id="next-title">—</span>
+            <span class="song-meta" id="next-meta"></span>
+          </div>
+          <div class="panel-card grid-card">
+            <h2>Band layout <span class="hint-inline">(up next)</span></h2>
+            <div id="layout-viewport" class="layout-viewport">
+              <button type="button" id="recenter-btn" class="btn recenter-btn" hidden>
+                Re-center
+              </button>
+              <canvas id="layout-canvas" aria-label="Band layout"></canvas>
+              <p id="layout-empty" class="empty-hint">Waiting for band layout…</p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+    <script src="/playback/playback.js"></script>
+  </body>
+</html>

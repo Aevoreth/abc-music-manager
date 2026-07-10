@@ -18,14 +18,30 @@ _MAX_VISIBLE_ROWS = 15
 class SetlistPickerTreeView(QTreeView):
     """Tree view where clicking anywhere on a folder row toggles expand/collapse."""
 
+    def __init__(self, combo: "SetlistPickerCombo") -> None:
+        super().__init__(combo)
+        self._combo = combo
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             index = self.indexAt(event.position().toPoint())
             if index.isValid() and index.data(_TYPE_ROLE) == "folder":
+                # QComboBox closes its popup on mouse release whenever currentIndex is
+                # valid (common on Windows styles / frozen builds). Suppress that so
+                # expanding a folder does not dismiss the list.
+                self._combo._suppress_hide_popup()
                 self.setExpanded(index, not self.isExpanded(index))
                 event.accept()
                 return
         super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            index = self.indexAt(event.position().toPoint())
+            if index.isValid() and index.data(_TYPE_ROLE) == "folder":
+                event.accept()
+                return
+        super().mouseReleaseEvent(event)
 
 
 class SetlistPickerCombo(QComboBox):
@@ -35,6 +51,7 @@ class SetlistPickerCombo(QComboBox):
         super().__init__(parent)
         self._selected_id: int | None = None
         self._selected_text = "(select)"
+        self._allow_hide_popup = True
         self._model = QStandardItemModel(self)
         self.setModel(self._model)
         tree = SetlistPickerTreeView(self)
@@ -48,6 +65,19 @@ class SetlistPickerCombo(QComboBox):
         tree.collapsed.connect(self._on_tree_structure_changed)
         self.setView(tree)
         self.view().pressed.connect(self._on_view_pressed)
+
+    def hidePopup(self) -> None:
+        if not self._allow_hide_popup:
+            return
+        super().hidePopup()
+
+    def _suppress_hide_popup(self) -> None:
+        """Ignore hidePopup for the rest of this click (folder expand/collapse)."""
+        self._allow_hide_popup = False
+        QTimer.singleShot(0, self._restore_hide_popup)
+
+    def _restore_hide_popup(self) -> None:
+        self._allow_hide_popup = True
 
     def currentData(self, role: int = Qt.ItemDataRole.UserRole) -> object:
         if role == Qt.ItemDataRole.UserRole:
@@ -164,6 +194,7 @@ class SetlistPickerCombo(QComboBox):
             self._select_placeholder()
         else:
             self._apply_setlist_item(item)
+        self._allow_hide_popup = True
         self.hidePopup()
         if prev_id != self._selected_id:
             self.currentIndexChanged.emit(self.currentIndex())

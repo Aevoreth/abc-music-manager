@@ -141,7 +141,7 @@ class SetlistBandAssignmentGrid(BandLayoutGridWidget):
             card = self._card_at(pos.x(), pos.y())
             if card:
                 try:
-                    current = None if card.part_number == "###" else int(card.part_number)
+                    current = None if card.part_number in ("###", "---", "") else int(card.part_number)
                 except (ValueError, TypeError):
                     current = None
                 self._show_part_menu(card.player_id, event.globalPos(), current_part=current)
@@ -152,7 +152,7 @@ class SetlistBandAssignmentGrid(BandLayoutGridWidget):
         card = self._card_at(event.pos().x(), event.pos().y())
         if card:
             try:
-                current = None if card.part_number == "###" else int(card.part_number)
+                current = None if card.part_number in ("###", "---", "") else int(card.part_number)
             except (ValueError, TypeError):
                 current = None
             self._show_part_menu(card.player_id, event.globalPos(), current_part=current)
@@ -351,7 +351,7 @@ class SetlistBandAssignmentPanel(QWidget):
                 has_inst = bool(equiv_ids and (inst_bulk.get(s.player_id, set()) & equiv_ids))
                 inst_warn = bool(iid and not has_inst)
             else:
-                pn = "###"
+                pn = "---"
                 pname = "(Part Name)"
                 iname = "(Made for Instrument)"
                 inst_warn = False

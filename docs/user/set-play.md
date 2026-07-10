@@ -58,16 +58,20 @@ The player name list below highlights selected members on the grid (local only �
 
 ## Broadcast (Cloudflare relay) {#broadcast}
 
-Optional live sync for [Band Assistant](band-assistant.md):
+Optional live sync for [Band Assistant](band-assistant.md) (app or browser):
 
-1. Configure (or create) relays in [Set Playback settings](settings/set-playback-relays.md)
-2. Select a **Relay** on Set Play
+1. Configure (or create) a relay in [Set Playback settings](settings/set-playback-relays.md) — **only the bandleader** needs this
+2. Select that **Relay** on Set Play
 3. Enable **Broadcast (Cloudflare relay)**
-4. Share the **room code** with assistants (**Copy code**)
+4. Share the **playback link** with assistants (**Copy link**). Example shape: `https://your-worker.workers.dev/playback?set=12AB3CD`
+
+Assistants can open the link in a browser or paste it into Band Assistant — they do not need to configure the relay themselves.
 
 Use **Reconnect** if the connection drops.
 
 Set Play works locally without broadcast; relay is only needed for assistants.
+
+**Note:** Existing relays must be **redeployed** once (Settings → Set Playback) so the worker serves the `/playback` page. WebSocket sync still works on older deploys; only the browser page requires the new assets.
 
 ---
 

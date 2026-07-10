@@ -39,7 +39,7 @@ class LayoutCard:
     player_name: str
     x: int
     y: int
-    part_number: str = "###"
+    part_number: str = "---"
     part_name: str = "(Part Name)"
     instrument_name: str = "(Made for Instrument)"
     instrument_warning: bool = False

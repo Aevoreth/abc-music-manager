@@ -133,7 +133,7 @@ def build_set_play_layout_cards(
             has_inst = bool(equiv_ids and (inst_bulk.get(s.player_id, set()) & equiv_ids))
             inst_warn = bool(iid and not has_inst)
         else:
-            pn = "###"
+            pn = "---"
             pname = "(Part Name)"
             iname = "(Made for Instrument)"
             inst_warn = False
@@ -223,7 +223,7 @@ def layout_cards_from_payload(data: list[dict]) -> list[LayoutCard]:
                 player_name=str(d["player_name"]),
                 x=int(d["x"]),
                 y=int(d["y"]),
-                part_number=str(d.get("part_number", "###")),
+                part_number=str(d.get("part_number", "---")),
                 part_name=str(d.get("part_name", "")),
                 instrument_name=str(d.get("instrument_name", "")),
                 instrument_warning=bool(d.get("instrument_warning", False)),

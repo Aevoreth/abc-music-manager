@@ -48,17 +48,20 @@ The database path may be stale if files moved. Re-scan the library. If duplicate
 
 ## Set Play relay won't connect {#relay-issues}
 
-- Leader must enable **Broadcast** and share a valid relay and room code
-- Assistant must use the **same relay URL** as the leader
-- URL format: `wss://…` or `https://…` with **no trailing slash**
+- Leader must enable **Broadcast** and share the **playback link** (**Copy link**)
+- Assistants: paste that link into Band Assistant or open it in a browser (no Settings relay required)
+- Bare room codes still need the **same relay URL** as the leader under Settings → Set Playback
+- URL format for relays: `wss://…` or `https://…` with **no trailing slash**
 - Deploy or verify your Cloudflare worker ([Set Playback relays](settings/set-playback-relays.md))
+- Browser **404** on `/playback`: redeploy the worker so it includes the playback page assets
 
 ---
 
 ## Band Assistant can't join
 
-- Confirm the correct Relay is set up and in use
-- Confirm room code spelling
+- Prefer pasting the full share link from the bandleader
+- If using a bare code, confirm the correct Relay is selected
+- Confirm set/room code spelling
 - Leader session must be active and broadcasting
 - Try **Reconnect** on both sides
 

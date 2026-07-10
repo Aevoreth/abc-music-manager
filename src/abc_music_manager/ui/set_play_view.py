@@ -50,6 +50,7 @@ from ..services.set_play_state import (
 from ..services.set_play_sync import STATE_TYPE, apply_snapshot_to_session, snapshot_from_leader
 from ..services.set_play_relay_client import SetPlayRelayClient
 from ..services.set_play_relay_http import create_relay_room
+from ..services.set_play_share_url import build_playback_share_url, parse_share_or_code
 from ..db.setlist_repo import (
     SetlistItemRow,
     SetlistItemSongMetaRow,
@@ -161,8 +162,10 @@ class SetPlayView(QWidget):
         self._relay = SetPlayRelayClient(self)
         self._relay_code: str | None = None
         self._relay_leader_token: str | None = None
+        self._relay_share_url: str | None = None
         self._last_pushed_revision: int = -1
         self._leader_reconnect_btn: QPushButton | None = None
+        self._assistant_relay_url: str | None = None
 
         self._relay.connected_ok.connect(self._on_relay_connected)
         self._relay.disconnected.connect(self._on_relay_disconnected)
@@ -213,7 +216,7 @@ class SetPlayView(QWidget):
             left_lay = QVBoxLayout(left_panel)
             left_lay.setSpacing(8)
 
-            # Top-left upper: name + setlist picker + broadcast + copy code
+            # Top-left upper: name + setlist picker + broadcast + copy link
             self._setlist_name_lbl = QLabel("—")
             self._setlist_name_lbl.setWordWrap(True)
             nf = self._setlist_name_lbl.font()
@@ -245,7 +248,10 @@ class SetPlayView(QWidget):
             self._broadcast_cb = QCheckBox("Broadcast (Cloudflare relay)")
             self._broadcast_cb.toggled.connect(self._on_broadcast_toggled)
             relay_row.addWidget(self._broadcast_cb)
-            self._copy_code_btn = QPushButton("Copy code")
+            self._copy_code_btn = QPushButton("Copy link")
+            self._copy_code_btn.setToolTip(
+                "Copy the /playback share link for band assistants (browser or app)."
+            )
             self._copy_code_btn.setEnabled(False)
             self._copy_code_btn.clicked.connect(self._copy_room_code)
             relay_row.addWidget(self._copy_code_btn)
@@ -258,6 +264,9 @@ class SetPlayView(QWidget):
             relay_row.addWidget(self._leader_reconnect_btn)
             self._room_lbl = QLabel("")
             self._room_lbl.setWordWrap(True)
+            self._room_lbl.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
             relay_row.addWidget(self._room_lbl, 1)
             left_lay.addLayout(relay_row)
 
@@ -329,19 +338,17 @@ class SetPlayView(QWidget):
             left_panel = QWidget()
             lv = QVBoxLayout(left_panel)
             lv.setSpacing(6)
-            relay_pick = QHBoxLayout()
-            relay_pick.addWidget(QLabel("Relay:"))
-            self._relay_combo = QComboBox()
-            self._relay_combo.setMinimumWidth(160)
-            self._relay_combo.currentIndexChanged.connect(self._on_relay_combo_changed)
-            relay_pick.addWidget(self._relay_combo, 1)
-            lv.addLayout(relay_pick)
-            room_row = QHBoxLayout()
-            room_row.addWidget(QLabel("Room:"))
+            link_lbl = QLabel("Share link or code:")
+            lv.addWidget(link_lbl)
             self._room_edit = QComboBox()
             self._room_edit.setEditable(True)
-            self._room_edit.setMinimumWidth(120)
-            room_row.addWidget(self._room_edit)
+            self._room_edit.setMinimumWidth(180)
+            self._room_edit.setToolTip(
+                "Paste the bandleader’s /playback?set=… link, or a bare room code "
+                "(bare code needs a relay selected below)."
+            )
+            lv.addWidget(self._room_edit)
+            room_row = QHBoxLayout()
             self._connect_btn = QPushButton("Connect")
             self._connect_btn.clicked.connect(self._assistant_connect)
             room_row.addWidget(self._connect_btn)
@@ -351,12 +358,19 @@ class SetPlayView(QWidget):
             room_row.addWidget(self._disconnect_btn)
             self._assistant_reconnect_btn = QPushButton("Reconnect")
             self._assistant_reconnect_btn.setToolTip(
-                "Connect again with the same room code after a drop."
+                "Connect again with the same link or code after a drop."
             )
             self._assistant_reconnect_btn.clicked.connect(self._assistant_reconnect)
             self._assistant_reconnect_btn.setEnabled(False)
             room_row.addWidget(self._assistant_reconnect_btn)
             lv.addLayout(room_row)
+            relay_pick = QHBoxLayout()
+            relay_pick.addWidget(QLabel("Relay (for bare code):"))
+            self._relay_combo = QComboBox()
+            self._relay_combo.setMinimumWidth(140)
+            self._relay_combo.currentIndexChanged.connect(self._on_relay_combo_changed)
+            relay_pick.addWidget(self._relay_combo, 1)
+            lv.addLayout(relay_pick)
             self._info_lbl = QLabel("—")
             self._info_lbl.setWordWrap(True)
             self._info_lbl.setMinimumWidth(180)
@@ -969,6 +983,7 @@ class SetPlayView(QWidget):
             self._relay.close()
             self._relay_code = None
             self._relay_leader_token = None
+            self._relay_share_url = None
             if self._room_lbl:
                 self._room_lbl.setText("")
             if self._copy_code_btn:
@@ -998,8 +1013,13 @@ class SetPlayView(QWidget):
             return
         self._relay_code = code
         self._relay_leader_token = token
+        share = build_playback_share_url(base, code)
+        self._relay_share_url = share
         if self._room_lbl:
-            self._room_lbl.setText(f"Code: <b>{code}</b> (share with assistants)")
+            self._room_lbl.setText(
+                f"Share: <a href=\"{share}\">{share}</a><br/>Code: <b>{code}</b>"
+            )
+            self._room_lbl.setOpenExternalLinks(True)
         if self._copy_code_btn:
             self._copy_code_btn.setEnabled(True)
         self._relay.open_leader(base, code, token)
@@ -1020,8 +1040,8 @@ class SetPlayView(QWidget):
         else:
             self._disconnect_btn.setEnabled(False)
             if hasattr(self, "_assistant_reconnect_btn"):
-                code = (self._room_edit.currentText() or "").strip()
-                self._assistant_reconnect_btn.setEnabled(len(code) >= 5)
+                raw = (self._room_edit.currentText() or "").strip()
+                self._assistant_reconnect_btn.setEnabled(len(raw) >= 5)
 
     def _on_relay_error(self, msg: str) -> None:
         self._status_lbl.setText(f"Relay: {msg}")
@@ -1035,22 +1055,38 @@ class SetPlayView(QWidget):
         self._apply_remote_snapshot(data)
 
     def _copy_room_code(self) -> None:
-        if self._relay_code:
+        text = self._relay_share_url or self._relay_code
+        if text:
             from PySide6.QtWidgets import QApplication
 
-            QApplication.clipboard().setText(self._relay_code)
+            QApplication.clipboard().setText(text)
 
     def _assistant_connect(self) -> None:
-        base = get_active_set_play_relay_url()
-        if not base:
-            QMessageBox.warning(self, "Relay", "Add a relay in Settings → Set Playback.")
+        raw = (self._room_edit.currentText() or "").strip()
+        parsed = parse_share_or_code(
+            raw,
+            fallback_relay_url=get_active_set_play_relay_url(),
+        )
+        if parsed is None:
+            QMessageBox.warning(
+                self,
+                "Relay",
+                "Paste the bandleader’s share link (…/playback?set=CODE), "
+                "or enter a room code and select a relay under Settings → Set Playback.",
+            )
             return
-        code = (self._room_edit.currentText() or "").strip().upper()
-        if len(code) < 5:
-            QMessageBox.warning(self, "Relay", "Enter the room code.")
-            return
+        self._assistant_relay_url = parsed.relay_ws_url
+        self._relay_code = parsed.room_code
+        # Normalize the field to the share link when we have a full URL paste,
+        # or keep the code for bare-code joins.
+        if "://" in raw.lower():
+            self._room_edit.setEditText(
+                build_playback_share_url(parsed.relay_ws_url, parsed.room_code)
+            )
+        else:
+            self._room_edit.setEditText(parsed.room_code)
         self._relay.close()
-        self._relay.open_assistant(base, code)
+        self._relay.open_assistant(parsed.relay_ws_url, parsed.room_code)
         self._disconnect_btn.setEnabled(True)
         if hasattr(self, "_assistant_reconnect_btn"):
             self._assistant_reconnect_btn.setEnabled(True)
@@ -1060,8 +1096,8 @@ class SetPlayView(QWidget):
         self._relay.close()
         self._disconnect_btn.setEnabled(False)
         if hasattr(self, "_assistant_reconnect_btn"):
-            code = (self._room_edit.currentText() or "").strip()
-            self._assistant_reconnect_btn.setEnabled(len(code) >= 5)
+            raw = (self._room_edit.currentText() or "").strip()
+            self._assistant_reconnect_btn.setEnabled(len(raw) >= 5)
         self._status_lbl.setText("Disconnected.")
 
     def _apply_remote_snapshot(self, data: dict[str, Any]) -> None:

@@ -114,7 +114,7 @@ class SongLayoutAssignmentPanel(QWidget):
                 has_inst = bool(equiv_ids and (inst_bulk.get(s.player_id, set()) & equiv_ids))
                 inst_warn = bool(iid and not has_inst)
             else:
-                pn = "###"
+                pn = "---"
                 pname = "(Part Name)"
                 iname = "(Made for Instrument)"
                 inst_warn = False

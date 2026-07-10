@@ -2,6 +2,12 @@
 
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
+## Version 0.2.9b
+
+- Changed relay + code model for set playback/band assistant sharing to a single link model
+- Set playback links provided by band leaders can either be pasted into the app (Band Assistant page) or be opened directly in the browser. NOTE: existing relays created before v0.2.9b will need to be redeployed.
+- Fix in Windows .exe: Set selection in playback mode should no longer close the dropdown popup when opening a folder
+
 ## Version 0.2.8b
 
 - Fixed a Foreign key error that was caused by re-exporting a file that was named incorrectly, causing file name, song name, and export timestamp to all change.
