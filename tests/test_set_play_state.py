@@ -3,9 +3,10 @@
 from abc_music_manager.services.set_play_state import (
     SetPlaySessionState,
     advance_song,
+    apply_exclusive_current,
     apply_exclusive_next,
-    recompute_next_if_invalid,
     scan_next_item_id,
+    toggle_played,
     toggle_skip,
 )
 
@@ -72,6 +73,19 @@ def test_advance_skips_skipped_rows_for_next() -> None:
     assert st.next_item_id == 3
 
 
+def test_advance_clears_played_on_new_current() -> None:
+    st = SetPlaySessionState(
+        order_item_ids=_ids(1, 2, 3),
+        current_item_id=1,
+        next_item_id=2,
+        played_item_ids={2},
+    )
+    assert advance_song(st) is True
+    assert st.current_item_id == 2
+    assert 2 not in st.played_item_ids
+    assert 1 in st.played_item_ids
+
+
 def test_skip_next_triggers_recompute() -> None:
     st = SetPlaySessionState(
         order_item_ids=_ids(1, 2, 3),
@@ -80,6 +94,7 @@ def test_skip_next_triggers_recompute() -> None:
     )
     toggle_skip(st, 2)
     assert st.next_item_id == 3
+    assert 2 in st.skipped_item_ids
 
 
 def test_toggle_skip_on_non_next_does_not_clear_next() -> None:
@@ -89,6 +104,18 @@ def test_toggle_skip_on_non_next_does_not_clear_next() -> None:
         next_item_id=2,
     )
     toggle_skip(st, 3)
+    assert st.next_item_id == 2
+
+
+def test_skip_current_clears_current() -> None:
+    st = SetPlaySessionState(
+        order_item_ids=_ids(1, 2, 3),
+        current_item_id=1,
+        next_item_id=2,
+    )
+    toggle_skip(st, 1)
+    assert st.current_item_id is None
+    assert 1 in st.skipped_item_ids
     assert st.next_item_id == 2
 
 
@@ -106,4 +133,66 @@ def test_apply_exclusive_next_clears_conflicting_current() -> None:
     st = SetPlaySessionState(order_item_ids=_ids(1, 2, 3), current_item_id=2, next_item_id=None)
     apply_exclusive_next(st, 2)
     assert st.current_item_id is None
+    assert st.next_item_id == 2
+
+
+def test_apply_exclusive_next_clears_skip_and_played() -> None:
+    st = SetPlaySessionState(
+        order_item_ids=_ids(1, 2, 3),
+        played_item_ids={2},
+        skipped_item_ids={2},
+    )
+    apply_exclusive_next(st, 2)
+    assert st.next_item_id == 2
+    assert 2 not in st.played_item_ids
+    assert 2 not in st.skipped_item_ids
+
+
+def test_apply_exclusive_current_clears_skip_and_played() -> None:
+    st = SetPlaySessionState(
+        order_item_ids=_ids(1, 2, 3),
+        next_item_id=2,
+        played_item_ids={2},
+        skipped_item_ids={2},
+    )
+    apply_exclusive_current(st, 2)
+    assert st.current_item_id == 2
+    assert st.next_item_id is None
+    assert 2 not in st.played_item_ids
+    assert 2 not in st.skipped_item_ids
+
+
+def test_toggle_played_clears_current() -> None:
+    st = SetPlaySessionState(
+        order_item_ids=_ids(1, 2, 3),
+        current_item_id=2,
+        next_item_id=3,
+    )
+    toggle_played(st, 2)
+    assert 2 in st.played_item_ids
+    assert st.current_item_id is None
+    assert st.next_item_id == 3
+
+
+def test_toggle_played_on_next_rescans() -> None:
+    st = SetPlaySessionState(
+        order_item_ids=_ids(1, 2, 3),
+        current_item_id=1,
+        next_item_id=2,
+    )
+    toggle_played(st, 2)
+    assert 2 in st.played_item_ids
+    assert st.next_item_id == 3
+
+
+def test_toggle_played_off_leaves_pointers() -> None:
+    st = SetPlaySessionState(
+        order_item_ids=_ids(1, 2, 3),
+        current_item_id=1,
+        next_item_id=2,
+        played_item_ids={3},
+    )
+    toggle_played(st, 3)
+    assert 3 not in st.played_item_ids
+    assert st.current_item_id == 1
     assert st.next_item_id == 2

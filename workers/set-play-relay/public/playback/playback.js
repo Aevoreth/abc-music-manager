@@ -285,16 +285,17 @@
     for (const r of ordered) {
       const id = Number(r.item_id);
       const tr = document.createElement("tr");
-      if (skipped.has(id)) tr.className = "row-skipped";
-      else if (currentId === id) tr.className = "row-current";
-      else if (nextId === id) tr.className = "row-next";
-      else if (played.has(id)) tr.className = "row-played";
+      const isSkipped = skipped.has(id);
+      const isCurrent = currentId === id;
+      const isNext = nextId === id;
+      const isPlayed = played.has(id);
+      if (isSkipped) tr.className = "row-skipped";
+      else if (isCurrent) tr.className = "row-current";
+      else if (isNext) tr.className = "row-next";
+      else if (isPlayed) tr.className = "row-played";
 
       tr.innerHTML = [
-        flagCell(played.has(id)),
-        flagCell(currentId === id),
-        flagCell(nextId === id),
-        flagCell(skipped.has(id)),
+        statusBadgeCell(isSkipped, isCurrent, isNext, isPlayed),
         `<td>${escapeHtml(r.title || "")}</td>`,
         `<td>${escapeHtml(String(r.part_count ?? ""))}</td>`,
         `<td>${fmtDuration(r.duration_seconds)}</td>`,
@@ -339,8 +340,13 @@
     }
   }
 
-  function flagCell(on) {
-    return `<td class="flag">${on ? "✓" : ""}</td>`;
+  function statusBadgeCell(skipped, current, next, played) {
+    let label = "";
+    if (skipped) label = "SKIP";
+    else if (current) label = "NOW";
+    else if (next) label = "NEXT";
+    else if (played) label = "✓";
+    return `<td class="status-badge">${label}</td>`;
   }
 
   function escapeHtml(s) {

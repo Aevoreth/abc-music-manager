@@ -30,11 +30,14 @@ If the browser shows **404** on `/playback`, the leader’s worker was deployed 
 
 ## What syncs {#what-syncs}
 
-Assistants receive the leader's Set Play state:
+Assistants receive the leader's Set Play state (read-only):
 
-- Current / next / skip / played flags
+- Current / Next summary banners
+- Song list with a **status badge** (`NOW` / `NEXT` / `✓` / `SKIP`) and row coloring
 - Loaded setlist identity
 - Band layout grid and part-change highlighting
+
+Assistants cannot edit status; only the bandleader changes Current, Next, Skip, and Played.
 
 ---
 

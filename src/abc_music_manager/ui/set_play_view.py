@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -45,6 +46,7 @@ from ..services.set_play_state import (
     apply_exclusive_current,
     apply_exclusive_next,
     scan_next_item_id,
+    toggle_played,
     toggle_skip,
 )
 from ..services.set_play_sync import STATE_TYPE, apply_snapshot_to_session, snapshot_from_leader
@@ -95,6 +97,25 @@ def _fmt_hhmmss(sec: int) -> str:
     return f"{h}:{m:02d}:{s:02d}"
 
 
+def _status_badge_text(
+    *,
+    skipped: bool,
+    current: bool,
+    next_: bool,
+    played: bool,
+) -> str:
+    """Display badge; priority Skip > Current > Next > Played."""
+    if skipped:
+        return "SKIP"
+    if current:
+        return "NOW"
+    if next_:
+        return "NEXT"
+    if played:
+        return "✓"
+    return ""
+
+
 class SetPlayReadOnlyBandGrid(BandLayoutGridWidget):
     """Pan only; no card drag or context menu."""
 
@@ -132,15 +153,14 @@ class SetPlayView(QWidget):
     Bandleader (`assistant_mode=False`) or Band Assistant (`assistant_mode=True`).
     """
 
-    COL_PLAYED = 0
-    COL_CURRENT = 1
-    COL_NEXT = 2
-    COL_SKIP = 3
-    COL_TITLE = 4
-    COL_PARTS = 5
-    COL_DUR = 6
-    COL_ARTIST = 7
-    COL_ACTIONS = 8
+    COL_STATUS = 0
+    COL_SKIP = 1
+    COL_TITLE = 2
+    COL_PARTS = 3
+    COL_DUR = 4
+    COL_ARTIST = 5
+    COL_ACTIONS = 6
+    _COL_COUNT = 7
 
     def __init__(
         self,
@@ -166,6 +186,8 @@ class SetPlayView(QWidget):
         self._last_pushed_revision: int = -1
         self._leader_reconnect_btn: QPushButton | None = None
         self._assistant_relay_url: str | None = None
+        self._banner_current: QLabel | None = None
+        self._banner_next: QLabel | None = None
 
         self._relay.connected_ok.connect(self._on_relay_connected)
         self._relay.disconnected.connect(self._on_relay_disconnected)
@@ -178,16 +200,45 @@ class SetPlayView(QWidget):
         root.setSpacing(6)
 
         self._table = QTableWidget()
-        self._table.setColumnCount(9)
+        self._table.setColumnCount(self._COL_COUNT)
         self._table.setHorizontalHeaderLabels(
-            ["Played", "Cur", "Next", "Skip", "Title", "Parts", "Duration", "Artist", "Actions"]
+            ["Status", "Skip", "Title", "Parts", "Duration", "Artist", "Actions"]
         )
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         hh = self._table.horizontalHeader()
-        for c in range(9):
+        for c in range(self._COL_COUNT):
             hh.setSectionResizeMode(c, hh.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(self.COL_TITLE, hh.ResizeMode.Stretch)
+        if assistant_mode:
+            self._table.setColumnHidden(self.COL_SKIP, True)
+            self._table.setColumnHidden(self.COL_ACTIONS, True)
+        else:
+            self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            self._table.customContextMenuRequested.connect(self._on_table_context_menu)
+            self._table.cellDoubleClicked.connect(self._on_table_cell_double_clicked)
+            self._table.setToolTip("Double-click a row to set it as Next. Right-click for more actions.")
+
+        table_panel = QWidget()
+        table_panel_lay = QVBoxLayout(table_panel)
+        table_panel_lay.setContentsMargins(0, 0, 0, 0)
+        table_panel_lay.setSpacing(6)
+        if assistant_mode:
+            self._banner_current = QLabel("Current: —")
+            self._banner_current.setWordWrap(True)
+            self._banner_current.setStyleSheet(
+                "QLabel { border-left: 3px solid #4caf50; padding: 6px 8px; "
+                f"color: #4caf50; background-color: {COLOR_SURFACE_VARIANT}; }}"
+            )
+            self._banner_next = QLabel("Next: —")
+            self._banner_next.setWordWrap(True)
+            self._banner_next.setStyleSheet(
+                "QLabel { border-left: 3px solid #5c9fd6; padding: 6px 8px; "
+                f"color: #5c9fd6; background-color: {COLOR_SURFACE_VARIANT}; }}"
+            )
+            table_panel_lay.addWidget(self._banner_current)
+            table_panel_lay.addWidget(self._banner_next)
+        table_panel_lay.addWidget(self._table, 1)
 
         self._players_inner = QWidget()
         self._players_inner_layout = QVBoxLayout(self._players_inner)
@@ -320,7 +371,7 @@ class SetPlayView(QWidget):
 
             left_panel.setMinimumWidth(300)
             top_row.addWidget(left_panel)
-            top_row.addWidget(self._table)
+            top_row.addWidget(table_panel)
             top_row.setStretchFactor(0, 1)
             top_row.setStretchFactor(1, 3)
         else:
@@ -378,7 +429,7 @@ class SetPlayView(QWidget):
             lv.addStretch()
             left_panel.setMinimumWidth(240)
             top_row.addWidget(left_panel)
-            top_row.addWidget(self._table)
+            top_row.addWidget(table_panel)
             top_row.setStretchFactor(0, 1)
             top_row.setStretchFactor(1, 3)
 
@@ -560,90 +611,70 @@ class SetPlayView(QWidget):
                 return r
         return None
 
+    def _refresh_song_banners(self) -> None:
+        if self._banner_current is None or self._banner_next is None:
+            return
+
+        def line_for(item_id: int | None, label: str) -> str:
+            if item_id is None:
+                return f"{label}: —"
+            row = self._row_for_item(item_id)
+            if not row:
+                return f"{label}: —"
+            meta = _fmt_duration(row.duration_seconds)
+            artist = (row.composers or "").strip()
+            extra = f" · {artist}" if artist and artist != "—" else ""
+            return f"{label}: <b>{row.title}</b> ({meta}{extra})"
+
+        self._banner_current.setText(line_for(self._session.current_item_id, "Current"))
+        self._banner_next.setText(line_for(self._session.next_item_id, "Next"))
+
     def _refresh_table(self) -> None:
         rows = self._song_rows
         self._table.setRowCount(len(rows))
         skip_font = QFont(self._table.font())
         skip_font.setStrikeOut(True)
+        normal_font = QFont(self._table.font())
+        normal_font.setStrikeOut(False)
 
         for i, r in enumerate(rows):
             iid = r.item.id
-
-            def mk_cb(
-                col: int,
-                checked: bool,
-                on_change,
-                ro: bool = False,
-            ) -> QWidget:
-                w = QWidget()
-                h = QHBoxLayout(w)
-                h.setContentsMargins(2, 0, 2, 0)
-                cb = QCheckBox()
-                cb.setChecked(checked)
-                if ro:
-                    cb.setEnabled(False)
-                else:
-                    cb.toggled.connect(lambda _=False, c=col, row=i: on_change(row, c))
-                h.addWidget(cb, alignment=Qt.AlignmentFlag.AlignCenter)
-                return w
-
             played = iid in self._session.played_item_ids
             cur = self._session.current_item_id == iid
             nx = self._session.next_item_id == iid
             sk = iid in self._session.skipped_item_ids
 
-            if self._assistant_mode:
-                self._table.setCellWidget(
-                    i,
-                    self.COL_PLAYED,
-                    mk_cb(self.COL_PLAYED, played, lambda *_: None, ro=True),
-                )
-                self._table.setCellWidget(
-                    i,
-                    self.COL_CURRENT,
-                    mk_cb(self.COL_CURRENT, cur, lambda *_: None, ro=True),
-                )
-                self._table.setCellWidget(
-                    i,
-                    self.COL_NEXT,
-                    mk_cb(self.COL_NEXT, nx, lambda *_: None, ro=True),
-                )
-                self._table.setCellWidget(
-                    i,
-                    self.COL_SKIP,
-                    mk_cb(self.COL_SKIP, sk, lambda *_: None, ro=True),
-                )
+            badge = _status_badge_text(
+                skipped=sk, current=cur, next_=nx, played=played
+            )
+            status_item = QTableWidgetItem(badge)
+            status_item.setFlags(status_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            if sk:
+                status_item.setForeground(QColor(COLOR_ERROR))
+            elif cur:
+                status_item.setForeground(QColor("#4caf50"))
+            elif nx:
+                status_item.setForeground(QColor("#5c9fd6"))
+            elif played:
+                status_item.setForeground(QColor(COLOR_TEXT_SECONDARY))
             else:
-                self._table.setCellWidget(
-                    i,
-                    self.COL_PLAYED,
-                    mk_cb(
-                        self.COL_PLAYED,
-                        played,
-                        self._on_checkbox_played,
-                        ro=False,
-                    ),
+                status_item.setForeground(QColor(COLOR_ON_SURFACE))
+            self._table.setItem(i, self.COL_STATUS, status_item)
+
+            if self._assistant_mode:
+                self._table.setCellWidget(i, self.COL_SKIP, QWidget())
+            else:
+                w = QWidget()
+                h = QHBoxLayout(w)
+                h.setContentsMargins(2, 0, 2, 0)
+                cb = QCheckBox()
+                cb.setChecked(sk)
+                cb.toggled.connect(
+                    lambda _=False, row=i: self._on_checkbox_skip(row)
                 )
-                self._table.setCellWidget(
-                    i,
-                    self.COL_CURRENT,
-                    mk_cb(
-                        self.COL_CURRENT,
-                        cur,
-                        self._on_checkbox_current,
-                        ro=False,
-                    ),
-                )
-                self._table.setCellWidget(
-                    i,
-                    self.COL_NEXT,
-                    mk_cb(self.COL_NEXT, nx, self._on_checkbox_next, ro=False),
-                )
-                self._table.setCellWidget(
-                    i,
-                    self.COL_SKIP,
-                    mk_cb(self.COL_SKIP, sk, self._on_checkbox_skip, ro=False),
-                )
+                h.addWidget(cb, alignment=Qt.AlignmentFlag.AlignCenter)
+                self._table.setCellWidget(i, self.COL_SKIP, w)
 
             t = QTableWidgetItem(r.title)
             t.setFlags(t.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -656,6 +687,7 @@ class SetPlayView(QWidget):
 
             for it in (t, pc, d, art):
                 it.setForeground(QColor(COLOR_ON_SURFACE))
+                it.setFont(normal_font)
 
             if sk:
                 c = QColor(COLOR_ERROR)
@@ -674,11 +706,6 @@ class SetPlayView(QWidget):
                 c = QColor(COLOR_TEXT_SECONDARY)
                 for it in (t, pc, d, art):
                     it.setForeground(c)
-            else:
-                nf = QFont(self._table.font())
-                nf.setStrikeOut(False)
-                for it in (t, pc, d, art):
-                    it.setFont(nf)
 
             self._table.setItem(i, self.COL_TITLE, t)
             self._table.setItem(i, self.COL_PARTS, pc)
@@ -688,65 +715,62 @@ class SetPlayView(QWidget):
             if self._assistant_mode:
                 self._table.setCellWidget(i, self.COL_ACTIONS, QWidget())
             else:
-                w = QWidget()
-                h = QHBoxLayout(w)
-                h.setContentsMargins(2, 0, 2, 0)
-                mp = QPushButton("Mark played")
-                mp.clicked.connect(lambda _=False, ii=iid: self._action_mark_played(ii))
-                lt = QPushButton("Log at time…")
-                lt.clicked.connect(lambda _=False, ii=iid: self._action_log_at(ii))
-                h.addWidget(mp)
-                h.addWidget(lt)
-                self._table.setCellWidget(i, self.COL_ACTIONS, w)
+                aw = QWidget()
+                ah = QHBoxLayout(aw)
+                ah.setContentsMargins(2, 0, 2, 0)
+                actions_btn = QPushButton("Actions")
+                actions_btn.setToolTip("Song actions (also available via right-click)")
+                actions_btn.clicked.connect(
+                    lambda _=False, ii=iid, btn=actions_btn: self._show_song_actions_menu(
+                        ii, btn.mapToGlobal(btn.rect().bottomLeft())
+                    )
+                )
+                ah.addWidget(actions_btn)
+                self._table.setCellWidget(i, self.COL_ACTIONS, aw)
 
-    def _on_checkbox_played(self, row: int, _col: int) -> None:
-        if self._checkbox_guard or row >= len(self._song_rows):
-            return
-        w = self._table.cellWidget(row, self.COL_PLAYED)
-        cb = w.findChild(QCheckBox, options=Qt.FindChildOption.FindChildrenRecursively) if w else None
-        if not cb:
-            return
-        iid = self._song_rows[row].item.id
-        if cb.isChecked():
-            self._session.played_item_ids.add(iid)
-        else:
-            self._session.played_item_ids.discard(iid)
-        self._session.revision += 1
-        self._after_state_change()
+    def _song_actions_menu(self, item_id: int) -> QMenu:
+        played = item_id in self._session.played_item_ids
+        menu = QMenu(self)
+        menu.addAction("Set current", lambda: self._action_set_current(item_id))
+        menu.addAction("Set next", lambda: self._action_set_next(item_id))
+        menu.addAction(
+            "Clear played" if played else "Mark played",
+            lambda: self._action_mark_played(item_id),
+        )
+        menu.addAction("Log at time…", lambda: self._action_log_at(item_id))
+        return menu
 
-    def _on_checkbox_current(self, row: int, _col: int) -> None:
-        if self._checkbox_guard or row >= len(self._song_rows):
-            return
-        w = self._table.cellWidget(row, self.COL_CURRENT)
-        cb = w.findChild(QCheckBox, options=Qt.FindChildOption.FindChildrenRecursively) if w else None
-        if not cb or not cb.isChecked():
-            if cb and not cb.isChecked():
-                if self._session.current_item_id == self._song_rows[row].item.id:
-                    apply_exclusive_current(self._session, None)
-                    self._after_state_change()
-            return
-        apply_exclusive_current(self._session, self._song_rows[row].item.id)
-        self._after_state_change()
+    def _show_song_actions_menu(self, item_id: int, global_pos) -> None:
+        self._song_actions_menu(item_id).exec(global_pos)
 
-    def _on_checkbox_next(self, row: int, _col: int) -> None:
-        if self._checkbox_guard or row >= len(self._song_rows):
+    def _on_table_context_menu(self, pos) -> None:
+        if self._assistant_mode:
             return
-        w = self._table.cellWidget(row, self.COL_NEXT)
-        cb = w.findChild(QCheckBox, options=Qt.FindChildOption.FindChildrenRecursively) if w else None
-        if not cb or not cb.isChecked():
-            if cb and not cb.isChecked():
-                if self._session.next_item_id == self._song_rows[row].item.id:
-                    apply_exclusive_next(self._session, None)
-                    self._after_state_change()
+        idx = self._table.indexAt(pos)
+        row = idx.row()
+        if row < 0 or row >= len(self._song_rows):
             return
-        apply_exclusive_next(self._session, self._song_rows[row].item.id)
-        self._after_state_change()
+        item_id = self._song_rows[row].item.id
+        self._show_song_actions_menu(item_id, self._table.viewport().mapToGlobal(pos))
 
-    def _on_checkbox_skip(self, row: int, _col: int) -> None:
+    def _on_table_cell_double_clicked(self, row: int, _col: int) -> None:
+        if self._assistant_mode or row < 0 or row >= len(self._song_rows):
+            return
+        self._action_set_next(self._song_rows[row].item.id)
+
+    def _on_checkbox_skip(self, row: int) -> None:
         if self._checkbox_guard or row >= len(self._song_rows):
             return
         iid = self._song_rows[row].item.id
         toggle_skip(self._session, iid)
+        self._after_state_change()
+
+    def _action_set_current(self, item_id: int) -> None:
+        apply_exclusive_current(self._session, item_id)
+        self._after_state_change()
+
+    def _action_set_next(self, item_id: int) -> None:
+        apply_exclusive_next(self._session, item_id)
         self._after_state_change()
 
     def _mark_set_as_played(self) -> None:
@@ -793,6 +817,16 @@ class SetPlayView(QWidget):
             )
         for r in to_mark:
             self._session.played_item_ids.add(r.item.id)
+        if (
+            self._session.current_item_id is not None
+            and self._session.current_item_id in self._session.played_item_ids
+        ):
+            self._session.current_item_id = None
+        if (
+            self._session.next_item_id is not None
+            and self._session.next_item_id in self._session.played_item_ids
+        ):
+            self._session.next_item_id = None
         self._session.revision += 1
         self._after_state_change()
         QMessageBox.information(
@@ -825,16 +859,25 @@ class SetPlayView(QWidget):
         self._after_state_change()
 
     def _action_mark_played(self, item_id: int) -> None:
-        if not self.app_state or not self._setlist:
-            return
-        row = self._row_for_item(item_id)
-        if row:
-            log_play(
-                self.app_state.conn,
-                row.item.song_id,
-                context_setlist_id=self._setlist.id,
-            )
-        QMessageBox.information(self, "Set Play", "Marked as played in library.")
+        was_played = item_id in self._session.played_item_ids
+        toggle_played(self._session, item_id)
+        if (
+            not was_played
+            and self.app_state
+            and self._setlist
+        ):
+            row = self._row_for_item(item_id)
+            if row:
+                log_play(
+                    self.app_state.conn,
+                    row.item.song_id,
+                    context_setlist_id=self._setlist.id,
+                )
+        self._after_state_change()
+        if was_played:
+            self._status_lbl.setText("Cleared session played flag (library history kept).")
+        else:
+            self._status_lbl.setText("Marked as played in session and library.")
 
     def _action_log_at(self, item_id: int) -> None:
         if not self.app_state or not self._setlist:
@@ -951,6 +994,7 @@ class SetPlayView(QWidget):
         self._checkbox_guard = True
         self._refresh_info()
         self._refresh_table()
+        self._refresh_song_banners()
         self._checkbox_guard = False
         self._refresh_players()
         self._refresh_grid()
@@ -958,6 +1002,7 @@ class SetPlayView(QWidget):
     def _after_state_change(self) -> None:
         self._checkbox_guard = True
         self._refresh_table()
+        self._refresh_song_banners()
         self._checkbox_guard = False
         self._refresh_grid()
         self._push_relay_if_leader()

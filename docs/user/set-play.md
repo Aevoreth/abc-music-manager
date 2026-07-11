@@ -15,22 +15,35 @@ Sets can load **without** a band layout; part-assignment UI is not used in that 
 
 ---
 
-## Song list checkboxes {#checkboxes}
+## Song status {#status}
 
-Each song row has checkboxes:
+Each song has one primary **status** (shown as a badge) plus an optional **Skip** flag:
 
-| Flag | Meaning |
-|------|---------|
-| **Played** | Already performed this session |
-| **Current** | The song being performed now |
-| **Next** | Marked as up next |
-| **Skip** | Excluded from automatic next-song selection |
+| Badge | Meaning |
+|-------|---------|
+| **NOW** | The song being performed now (at most one) |
+| **NEXT** | Marked as up next (at most one) |
+| **✓** | Already performed this session |
+| **SKIP** | Excluded from automatic next-song selection |
+| *(blank)* | Pending — not yet current, next, played, or skipped |
+
+**Skip** is the only per-row checkbox. Change Current / Next / Played via the row **Actions** menu (button or right-click), or **double-click** a row to set it as Next:
+
+| Action | Effect |
+|--------|--------|
+| **Double-click row** | Set as NEXT |
+| **Set current** | Make this song NOW (clears Next/Skip/Played on that row) |
+| **Set next** | Make this song NEXT (clears Current/Skip/Played on that row) |
+| **Mark played** / **Clear played** | Toggle session played; Mark also logs to library play history. Clear only removes the session flag (library history is kept). |
+| **Log at time…** | Log a library play at a chosen time |
+
+Skipping a song that is Current or Next clears that pointer and rescans Next when needed.
 
 ---
 
 ## Advance song {#advance-song}
 
-**Advance song** (large button):
+**Advance song** (large button) is the primary live control:
 
 1. Current → Played
 2. Next → Current

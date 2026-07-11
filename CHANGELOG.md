@@ -2,6 +2,10 @@
 
 All notable changes to ABC Music Manager are documented here. Most recent at the top.
 
+## Unreleased
+
+- Set Play status UX: replaced four independent Played/Current/Next/Skip checkboxes with a status badge, a Skip checkbox, and an Actions menu (button or right-click: Set current / Set next / Mark played / Log at time). Double-click a row to set it as Next. Assistants (app + browser) show badges and Current/Next banners instead of checkbox columns.
+
 ## Version 0.2.9b
 
 - Changed relay + code model for set playback/band assistant sharing to a single link model

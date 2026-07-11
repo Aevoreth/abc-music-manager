@@ -321,9 +321,11 @@ body {
   font-weight: 600;
 }
 
-.song-table td.flag {
+.song-table td.status-badge {
   text-align: center;
-  width: 3.2rem;
+  width: 3.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 
 .song-table tr.row-skipped td {

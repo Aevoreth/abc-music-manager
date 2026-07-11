@@ -201,10 +201,16 @@
 ## 027 — Setlist part overrides in Set Playback
 - **SetlistBandAssignment** rows override **SongLayoutAssignment** per setlist item and player: if a row exists for `(setlist_item_id, player_id)`, use its `part_number` (NULL means no part for that player on this set); otherwise use the song layout’s assignment for that player. Set Playback and the setlist editor use this merge.
 
+## 028 — Set Play session status model (pointers + sets)
+
+- **Data:** `current_item_id` and `next_item_id` are singletons (at most one each). `played_item_ids` and `skipped_item_ids` are multi-select sets. Wire protocol `set_play_state_v1` is unchanged.
+- **UI:** Leader edits via **Advance**, a **Skip** checkbox, an **Actions** menu (button or right-click: **Set current** / **Set next** / **Mark played** / **Log at time**), and **double-click** a row to set Next. Status is displayed as a badge (`NOW` / `NEXT` / `✓` / `SKIP`), not four checkboxes. Assistants are read-only (badge + Current/Next banners).
+- **Exclusivity:** Setting current/next clears skip and played on that row. Skipping a song clears current/next on that row and rescans next when needed. Marking played clears current/next on that row.
+
 ---
 
 ## Resolved open decisions
-Previously open items have been resolved in ADRs 015–027 above, including **License** (024): MIT.
+Previously open items have been resolved in ADRs 015–028 above, including **License** (024): MIT.
 
 ---
 

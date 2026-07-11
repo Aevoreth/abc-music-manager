@@ -34,29 +34,30 @@ def scan_next_item_id(
     return None
 
 
+def _find_next_after_current(state: SetPlaySessionState) -> int | None:
+    order = state.order_item_ids
+    skipped = state.skipped_item_ids
+    cur = state.current_item_id
+    if cur is None:
+        return scan_next_item_id(order, skipped, after_index=-1)
+    try:
+        idx = order.index(cur)
+    except ValueError:
+        return scan_next_item_id(order, skipped, after_index=-1)
+    return scan_next_item_id(order, skipped, after_index=idx)
+
+
 def recompute_next_if_invalid(state: SetPlaySessionState) -> bool:
     """
     If next is missing, skipped, or not in order, set next by scanning after current.
     Returns True if state.next_item_id changed.
     """
-    order = state.order_item_ids
-    skipped = state.skipped_item_ids
-    cur = state.current_item_id
     nxt = state.next_item_id
-
-    def find_next() -> int | None:
-        if cur is None:
-            return scan_next_item_id(order, skipped, after_index=-1)
-        try:
-            idx = order.index(cur)
-        except ValueError:
-            return scan_next_item_id(order, skipped, after_index=-1)
-        return scan_next_item_id(order, skipped, after_index=idx)
 
     if nxt is None:
         return False
-    if nxt not in order or nxt in skipped:
-        new_n = find_next()
+    if nxt not in state.order_item_ids or nxt in state.skipped_item_ids:
+        new_n = _find_next_after_current(state)
         if new_n != nxt:
             state.next_item_id = new_n
             return True
@@ -87,43 +88,78 @@ def advance_song(state: SetPlaySessionState) -> bool:
         return False
 
     state.current_item_id = nxt
+    state.played_item_ids.discard(nxt)
+    state.skipped_item_ids.discard(nxt)
     state.next_item_id = scan_next_item_id(order, state.skipped_item_ids, after_index=cur_idx)
     state.revision += 1
     return True
 
 
 def apply_exclusive_current(state: SetPlaySessionState, item_id: int | None) -> None:
-    """Set current row (checkbox); None clears. Mutually exclusive with next on same row."""
+    """Set current row; None clears. Mutually exclusive with next/skip/played on same row."""
     if state.current_item_id == item_id:
         return
     state.current_item_id = item_id
-    if item_id is not None and state.next_item_id == item_id:
-        state.next_item_id = None
+    if item_id is not None:
+        if state.next_item_id == item_id:
+            state.next_item_id = None
+        state.skipped_item_ids.discard(item_id)
+        state.played_item_ids.discard(item_id)
     state.revision += 1
 
 
 def apply_exclusive_next(state: SetPlaySessionState, item_id: int | None) -> None:
-    """Set next row; None clears. Mutually exclusive with current on same row."""
+    """Set next row; None clears. Mutually exclusive with current/skip/played on same row."""
     if state.next_item_id == item_id:
         return
     state.next_item_id = item_id
-    if item_id is not None and state.current_item_id == item_id:
-        state.current_item_id = None
+    if item_id is not None:
+        if state.current_item_id == item_id:
+            state.current_item_id = None
+        state.skipped_item_ids.discard(item_id)
+        state.played_item_ids.discard(item_id)
     state.revision += 1
 
 
 def toggle_played(state: SetPlaySessionState, item_id: int) -> None:
+    """Toggle session played. When marking played, clear current/next on that row."""
     if item_id in state.played_item_ids:
         state.played_item_ids.discard(item_id)
     else:
         state.played_item_ids.add(item_id)
+        if state.current_item_id == item_id:
+            state.current_item_id = None
+        if state.next_item_id == item_id:
+            # Rescan excluding skipped and played so we do not re-select this row.
+            order = state.order_item_ids
+            exclude = state.skipped_item_ids | state.played_item_ids
+            cur = state.current_item_id
+            if cur is None:
+                state.next_item_id = scan_next_item_id(order, exclude, after_index=-1)
+            else:
+                try:
+                    idx = order.index(cur)
+                except ValueError:
+                    state.next_item_id = scan_next_item_id(order, exclude, after_index=-1)
+                else:
+                    state.next_item_id = scan_next_item_id(order, exclude, after_index=idx)
     state.revision += 1
 
 
 def toggle_skip(state: SetPlaySessionState, item_id: int) -> None:
+    """Toggle skip. When skipping, clear current/next pointers on that row and rescan next."""
     if item_id in state.skipped_item_ids:
         state.skipped_item_ids.discard(item_id)
     else:
         state.skipped_item_ids.add(item_id)
-    recompute_next_if_invalid(state)
+        cleared_next = False
+        if state.current_item_id == item_id:
+            state.current_item_id = None
+        if state.next_item_id == item_id:
+            state.next_item_id = None
+            cleared_next = True
+        if cleared_next:
+            state.next_item_id = _find_next_after_current(state)
+        else:
+            recompute_next_if_invalid(state)
     state.revision += 1

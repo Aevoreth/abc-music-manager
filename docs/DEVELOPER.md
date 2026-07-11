@@ -57,7 +57,7 @@ ABC Music Manager is a local-first desktop application designed specifically for
 
 ### Set Play (Live) (DECISIONS 015)
 - **Set Play** (bandleader) and **Band Assistant** pages in the app; standalone assistant: `python main.py --assistant`.
-- Bandleader: load a setlist (band layout required), checkboxes for played / current / next / skip, **Advance song**, optional PlayLog actions, up-next band grid with current-song part in the card header gutter (same visual language as the setlist editor).
+- Bandleader: load a setlist (band layout required), status badge + Skip checkbox, **Set current** / **Set next** / **Mark played** actions, **Advance song**, optional PlayLog actions, up-next band grid with current-song part in the card header gutter (same visual language as the setlist editor).
 - **Relay (Phase 2):** Deploy `workers/set-play-relay` with Wrangler (`npm install` in that folder, `npx wrangler login`, `npx wrangler deploy`). Set the relay URL in Settings → Set Playback (`wss://…` or `https://…`, no trailing slash). Leader enables **Broadcast** and shares a `/playback?set=CODE` link; assistants open it in a browser or paste it into Band Assistant (no assistant-side relay config). The worker also serves the static Band Assistant page under `/playback` via Workers Assets.
 - Message format: JSON `set_play_state_v1` (full snapshot); see [`src/abc_music_manager/services/set_play_sync.py`](../src/abc_music_manager/services/set_play_sync.py).
 
