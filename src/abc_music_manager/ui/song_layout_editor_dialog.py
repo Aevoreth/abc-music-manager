@@ -17,15 +17,23 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt
 
 from ..services.app_state import AppState
-from ..db.band_repo import list_all_band_layouts
+from ..services.preferences import (
+    SONG_LAYOUT_EDITOR_DIALOG_MIN_HEIGHT,
+    SONG_LAYOUT_EDITOR_DIALOG_MIN_WIDTH,
+    get_song_layout_editor_dialog_size,
+    set_song_layout_editor_dialog_size,
+)
+from ..db.band_repo import list_all_band_layouts, list_layout_slots
 from ..db.song_layout_repo import (
     list_song_layouts_for_song,
     get_or_create_song_layout_for_band,
 )
+from .band_layout_grid import CARD_HEIGHT, CARD_WIDTH, PIXELS_PER_UNIT
+from .dialog_size import RememberDialogSize, layout_editor_size_for_slots, restore_dialog_size
 from .song_layout_assignment_panel import SongLayoutAssignmentPanel
 
 
-class SongLayoutEditorDialog(QDialog):
+class SongLayoutEditorDialog(RememberDialogSize, QDialog):
     """Create or edit a song layout for a band."""
 
     song_layout_updated = Signal(int)  # song_layout_id
@@ -48,9 +56,8 @@ class SongLayoutEditorDialog(QDialog):
         self.setWindowTitle("Edit song layout" if song_layout_id else "New song layout")
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.setWindowModality(Qt.WindowModality.NonModal)
-        # Size to fit 6 cards wide × 3 cards deep (CARD 9×7 units @ 15px/unit + padding)
-        self.setMinimumSize(950, 520)
-        self.resize(950, 520)
+        # Floor fits 6 cards wide × 3 cards deep. Larger layouts grow on first open.
+        self.setMinimumSize(SONG_LAYOUT_EDITOR_DIALOG_MIN_WIDTH, SONG_LAYOUT_EDITOR_DIALOG_MIN_HEIGHT)
 
         layout = QVBoxLayout(self)
 
@@ -91,6 +98,29 @@ class SongLayoutEditorDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self._on_band_layout_changed()
+        saved = get_song_layout_editor_dialog_size()
+        default_w, default_h = self._default_size()
+        self._begin_size_memory(
+            saved,
+            default_w,
+            default_h,
+            set_song_layout_editor_dialog_size,
+        )
+
+    def _default_size(self) -> tuple[int, int]:
+        """Fit the selected band's cards, and never start smaller than the 6×3 floor."""
+        band_layout_id = self.band_layout_combo.currentData()
+        positions: list[tuple[int, int]] = []
+        if band_layout_id:
+            positions = [(s.x, s.y) for s in list_layout_slots(self.app_state.conn, band_layout_id)]
+        return layout_editor_size_for_slots(
+            positions,
+            card_width=CARD_WIDTH,
+            card_height=CARD_HEIGHT,
+            pixels_per_unit=PIXELS_PER_UNIT,
+            floor_width=SONG_LAYOUT_EDITOR_DIALOG_MIN_WIDTH,
+            floor_height=SONG_LAYOUT_EDITOR_DIALOG_MIN_HEIGHT,
+        )
 
     def _on_assignment_changed(self) -> None:
         if self._song_layout_id:
@@ -117,3 +147,17 @@ class SongLayoutEditorDialog(QDialog):
                 song_layout_id=song_layout_id,
                 parts_json=self.parts_json,
             )
+        self._refit_until_user_resizes()
+
+    def _refit_until_user_resizes(self) -> None:
+        """Grow to the current band until a saved size, or a manual resize, takes over."""
+        if get_song_layout_editor_dialog_size() is not None:
+            return
+        if getattr(self, "_dialog_size_user_resized", False):
+            return
+        if not getattr(self, "_dialog_size_ready", False):
+            return
+        width, height = self._default_size()
+        self._dialog_size_ready = False
+        restore_dialog_size(self, None, width, height)
+        self._dialog_size_ready = True

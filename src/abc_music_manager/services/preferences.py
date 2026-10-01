@@ -287,6 +287,81 @@ def set_parts_playlist_popup_geometry(width: int, height: int) -> None:
     save_preferences(prefs)
 
 
+# Song detail opens at the default until the user resizes it. The layouts tab
+# needs more room than the old minimum (620×520).
+SONG_DETAIL_DIALOG_MIN_WIDTH = 620
+SONG_DETAIL_DIALOG_MIN_HEIGHT = 520
+SONG_DETAIL_DIALOG_DEFAULT_WIDTH = 1040
+SONG_DETAIL_DIALOG_DEFAULT_HEIGHT = 740
+
+# Floor matches a 6×3 card grid. Larger band layouts expand past this on first open.
+SONG_LAYOUT_EDITOR_DIALOG_MIN_WIDTH = 950
+SONG_LAYOUT_EDITOR_DIALOG_MIN_HEIGHT = 520
+
+
+def _get_dialog_size(key: str, min_width: int, min_height: int) -> dict[str, int] | None:
+    """Saved dialog size {width, height}, or None if missing or below the minimum."""
+    prefs = load_preferences()
+    v = prefs.get(key)
+    if isinstance(v, dict) and "width" in v and "height" in v:
+        try:
+            w, h = int(v["width"]), int(v["height"])
+            if w >= min_width and h >= min_height:
+                return {"width": w, "height": h}
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _set_dialog_size(key: str, width: int, height: int, min_width: int, min_height: int) -> None:
+    """Persist a dialog size. Ignores sizes below the dialog minimum."""
+    if width < min_width or height < min_height:
+        return
+    prefs = load_preferences()
+    prefs[key] = {"width": int(width), "height": int(height)}
+    save_preferences(prefs)
+
+
+def get_song_detail_dialog_size() -> dict[str, int] | None:
+    """Saved Song detail dialog size. None if the user has not resized it."""
+    return _get_dialog_size(
+        "song_detail_dialog_size",
+        SONG_DETAIL_DIALOG_MIN_WIDTH,
+        SONG_DETAIL_DIALOG_MIN_HEIGHT,
+    )
+
+
+def set_song_detail_dialog_size(width: int, height: int) -> None:
+    """Save Song detail dialog size."""
+    _set_dialog_size(
+        "song_detail_dialog_size",
+        width,
+        height,
+        SONG_DETAIL_DIALOG_MIN_WIDTH,
+        SONG_DETAIL_DIALOG_MIN_HEIGHT,
+    )
+
+
+def get_song_layout_editor_dialog_size() -> dict[str, int] | None:
+    """Saved song layout editor size. None if the user has not resized it."""
+    return _get_dialog_size(
+        "song_layout_editor_dialog_size",
+        SONG_LAYOUT_EDITOR_DIALOG_MIN_WIDTH,
+        SONG_LAYOUT_EDITOR_DIALOG_MIN_HEIGHT,
+    )
+
+
+def set_song_layout_editor_dialog_size(width: int, height: int) -> None:
+    """Save song layout editor size."""
+    _set_dialog_size(
+        "song_layout_editor_dialog_size",
+        width,
+        height,
+        SONG_LAYOUT_EDITOR_DIALOG_MIN_WIDTH,
+        SONG_LAYOUT_EDITOR_DIALOG_MIN_HEIGHT,
+    )
+
+
 def get_parts_playlist_splitter_state() -> list[int] | None:
     """Saved Parts/Playlist splitter sizes. None if not set."""
     prefs = load_preferences()

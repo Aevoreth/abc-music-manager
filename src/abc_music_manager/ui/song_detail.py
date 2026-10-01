@@ -30,6 +30,14 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen, QBrush
 
 from ..services.app_state import AppState
+from ..services.preferences import (
+    SONG_DETAIL_DIALOG_DEFAULT_HEIGHT,
+    SONG_DETAIL_DIALOG_DEFAULT_WIDTH,
+    SONG_DETAIL_DIALOG_MIN_HEIGHT,
+    SONG_DETAIL_DIALOG_MIN_WIDTH,
+    get_song_detail_dialog_size,
+    set_song_detail_dialog_size,
+)
 from ..db import get_song_for_detail
 from ..db.library_query import get_primary_file_path_for_song
 from ..db.band_repo import get_band_layout_display_name, list_all_band_layouts
@@ -40,6 +48,7 @@ from ..db.song_layout_repo import (
 )
 from ..db.song_repo import update_song_app_metadata, ensure_song_from_parsed
 from ..db.play_log import log_play
+from .dialog_size import RememberDialogSize
 from .play_history_dialog import open_play_history_dialog
 from .song_layout_editor_dialog import SongLayoutEditorDialog
 from .library_view import RatingComboBox, RatingComboDelegate, _rating_label
@@ -122,7 +131,7 @@ class StatusComboDelegate(QStyledItemDelegate):
         painter.drawText(rect.adjusted(STATUS_CIRCLE_DIAMETER + 4, 0, 0, 0), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, text)
 
 
-class SongDetailDialog(QDialog):
+class SongDetailDialog(RememberDialogSize, QDialog):
     """View and edit song metadata; optional raw ABC tab with conflict handling."""
 
     song_layout_updated = Signal(int)  # song_layout_id
@@ -136,7 +145,7 @@ class SongDetailDialog(QDialog):
         self.setWindowTitle("Song detail")
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.setWindowModality(Qt.WindowModality.NonModal)
-        self.setMinimumSize(620, 520)
+        self.setMinimumSize(SONG_DETAIL_DIALOG_MIN_WIDTH, SONG_DETAIL_DIALOG_MIN_HEIGHT)
         layout = QVBoxLayout(self)
 
         self.tabs = QTabWidget()
@@ -161,6 +170,12 @@ class SongDetailDialog(QDialog):
         layout.addLayout(btn_layout)
 
         self._load_song()
+        self._begin_size_memory(
+            get_song_detail_dialog_size(),
+            SONG_DETAIL_DIALOG_DEFAULT_WIDTH,
+            SONG_DETAIL_DIALOG_DEFAULT_HEIGHT,
+            set_song_detail_dialog_size,
+        )
 
     def _build_basic_info_tab(self) -> QWidget:
         w = QWidget()
